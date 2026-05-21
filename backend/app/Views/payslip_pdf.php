@@ -4,18 +4,22 @@
 <meta charset="utf-8">
 <title>Slip Gaji <?= esc($ps['slip_number']) ?></title>
 <style>
-  body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1f2937; }
-  h1 { font-size: 16px; margin: 0; }
-  h2 { font-size: 13px; margin: 0; }
-  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-  th, td { border: 1px solid #e5e7eb; padding: 6px 8px; }
-  th { background: #f3f4f6; text-align: left; }
+  /* Slip gaji dirancang untuk A5 portrait (148×210mm). Margin & font
+     diperkecil supaya semua section muat di 1 halaman. */
+  @page { margin: 12mm 10mm; }
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 9px; color: #1f2937; line-height: 1.35; }
+  h1 { font-size: 13px; margin: 0; }
+  h2 { font-size: 11px; margin: 0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th, td { border: 1px solid #e5e7eb; padding: 3px 5px; }
+  th { background: #f3f4f6; text-align: left; font-size: 9px; }
   td.amount, th.amount { text-align: right; }
   .header { display: table; width: 100%; }
   .header > div { display: table-cell; vertical-align: top; }
-  .meta td { border: none; padding: 2px 6px; }
+  .meta td { border: none; padding: 1px 4px; font-size: 9px; }
   .total { font-weight: bold; background: #f9fafb; }
-  .footer { margin-top: 30px; font-size: 10px; color: #6b7280; }
+  .footer { margin-top: 14px; font-size: 8px; color: #6b7280; }
+  hr { border: 0; border-top: 1px solid #e5e7eb; margin: 6px 0; }
 </style>
 </head>
 <body>

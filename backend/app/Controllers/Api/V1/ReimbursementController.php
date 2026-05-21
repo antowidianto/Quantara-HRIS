@@ -12,13 +12,22 @@ class ReimbursementController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $status = trim((string) $this->request->getGet('status'));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
 
         $builder = $db->table('reimbursements r')
             ->select('r.*, e.full_name AS employee_name, e.employee_number')
             ->join('employees e', 'e.id = r.employee_id');
-        $this->tenant()->applyScope($builder, 'r.company_id');
-        if ($employeeId) $builder->where('r.employee_id', $employeeId);
+
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa `reimbursement.approve`
+        // / `reimbursement.view_all`, paksa filter ke employee_id user.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'reimbursement',
+            companyColumn: 'r.company_id',
+            employeeColumn: 'r.employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($status) $builder->where('r.status', $status);
 
         $total = $builder->countAllResults(false);
@@ -32,6 +41,10 @@ class ReimbursementController extends ApiController
         $db = \Config\Database::connect();
         $row = $db->table('reimbursements')->where('id', (int) $id)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
+        // Sebelumnya tanpa authorization sama sekali — bisa akses ID lintas-tenant.
+        if (! $this->privacy()->canAccessRow($row, 'reimbursement')) {
+            return $this->fail('Forbidden', 403);
+        }
         return $this->ok($row);
     }
 

@@ -16,6 +16,35 @@ use Config\Services;
  */
 class EmployeeTaskController extends ApiController
 {
+    
+    /**
+     * Resolve employee_id untuk caller saat ini.
+     *
+     * Sumber utama: TenantContext (di-set saat JWT decode → join ke
+     * tabel employees). Fallback: lookup manual via users.id → employees.user_id
+     * untuk user lama yang token-nya belum membawa employee_id atau super admin
+     * yang baru saja jadi karyawan.
+     */
+    private function getMyEmployeeId(): ?int
+    {
+        $eid = (int) $this->tenant()->getEmployeeId();
+        if ($eid > 0) return $eid;
+
+        $userId = (int) $this->tenant()->getUserId();
+        if (! $userId) return null;
+
+        // ApiController/BaseController tidak punya `db()`. Pakai connection
+        // pattern yang konsisten dengan method lain di controller ini.
+        $emp = \Config\Database::connect()
+            ->table('employees')
+            ->where('user_id', $userId)
+            ->where('deleted_at IS NULL')
+            ->limit(1)
+            ->get()
+            ->getRowArray();
+        return $emp ? (int) $emp['id'] : null;
+    }
+    
     public function index()
     {
         $db = \Config\Database::connect();
@@ -23,7 +52,7 @@ class EmployeeTaskController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(200, max(1, (int) ($this->request->getGet('per_page') ?? 50)));
 
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $type = strtoupper((string) ($this->request->getGet('type') ?? ''));
         $status = strtoupper((string) ($this->request->getGet('status') ?? ''));
         $assignedToMe = (int) ($this->request->getGet('assigned_to_me') ?? 0) === 1;
@@ -37,14 +66,23 @@ class EmployeeTaskController extends ApiController
             ->where('et.deleted_at IS NULL');
         $tenant->applyScope($builder, 'et.company_id');
 
-        $canViewAll = $tenant->isSuperAdmin()
-            || $tenant->hasPermission('onboarding.view')
-            || $tenant->hasPermission('onboarding.manage');
-        if (! $canViewAll || $assignedToMe) {
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa permission HR
+        // (`onboarding.view`/`manage`/`task.view_all`), karyawan hanya boleh
+        // lihat task tentang dirinya ATAU task yang ditugaskan kepadanya.
+        $canViewAll = $this->privacy()->canViewAll('employee_task');
+        if (! $canViewAll) {
+            $myEmpId  = $tenant->getEmployeeId();
+            $myUserId = $tenant->getUserId();
+            $builder->groupStart()
+                ->where('et.employee_id', $myEmpId ?: 0)
+                ->orWhere('et.assignee_user_id', $myUserId)
+                ->groupEnd();
+        } elseif ($assignedToMe) {
+            // HR yang opt-in filter ke task yang dia handle
             $builder->where('et.assignee_user_id', $tenant->getUserId());
         }
 
-        if ($employeeId && $canViewAll) $builder->where('et.employee_id', $employeeId);
+        if ($requestedEmpId && $canViewAll) $builder->where('et.employee_id', $requestedEmpId);
         if (in_array($type, ['ONBOARD','OFFBOARD'], true)) $builder->where('et.type', $type);
         if (in_array($status, ['PENDING','IN_PROGRESS','COMPLETED','SKIPPED','CANCELLED'], true)) {
             $builder->where('et.status', $status);
@@ -283,6 +321,17 @@ class EmployeeTaskController extends ApiController
     /**
      * GET /employee-tasks/board?type=ONBOARD
      * Kanban view: list karyawan dengan progress task masing-masing.
+     *
+     * Scope:
+     *   - HR (perm onboarding.view / onboarding.manage / super admin)
+     *     → semua karyawan di company yang punya task type ini.
+     *     Ini yang membuat HR bisa lihat hasil generate offboarding
+     *     setelah resignation di-approve, atau onboarding karyawan baru
+     *     yang dia trigger lewat menu lain.
+     *   - Karyawan biasa
+     *     → hanya record di mana dia sendiri pemilik (employee_id-nya)
+     *     ATAU dia adalah assignee task tersebut. Membuat board berfungsi
+     *     juga sebagai "to-do list saya" untuk karyawan & supervisor.
      */
     public function board()
     {
@@ -294,23 +343,48 @@ class EmployeeTaskController extends ApiController
         $db = \Config\Database::connect();
         $tenant = $this->tenant();
 
-        // Ambil karyawan yang punya task type tersebut
+        // Aggregation pakai SUM(CASE..) supaya kompatibel SQLite & MySQL.
+        // Catatan SQLite: literal string harus pakai single-quote (SQL standar).
+        // Versi sebelumnya pakai double-quote yang di SQLite ditafsirkan
+        // sebagai identifier kolom kalau tidak ada kolom dengan nama itu —
+        // bisa kembali 0 untuk semuanya. Kita pakai parameter kayak
+        // STR_NULL aman cross-DB.
         $builder = $db->table('employee_tasks et')
-            ->select('et.employee_id, e.full_name, e.employee_number, e.join_date, e.resign_date,'
-                . ' p.name AS position_name, d.name AS department_name,'
-                . ' COUNT(*) AS total_tasks,'
-                . ' SUM(CASE WHEN et.status = "COMPLETED" THEN 1 ELSE 0 END) AS completed_tasks,'
-                . ' SUM(CASE WHEN et.status = "PENDING" AND et.due_date < CURRENT_DATE THEN 1 ELSE 0 END) AS overdue_tasks')
-            ->join('employees e', 'e.id = et.employee_id')
-            ->join('positions p', 'p.id = e.position_id', 'left')
+            ->select("et.employee_id, e.full_name, e.employee_number, e.join_date, e.resign_date,"
+                . " p.name AS position_name, d.name AS department_name,"
+                . " COUNT(*) AS total_tasks,"
+                . " SUM(CASE WHEN et.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_tasks,"
+                . " SUM(CASE WHEN et.status = 'PENDING' AND et.due_date IS NOT NULL"
+                . "          AND et.due_date < " . $db->escape(date('Y-m-d')) . " THEN 1 ELSE 0 END) AS overdue_tasks")
+            ->join('employees e',   'e.id = et.employee_id')
+            ->join('positions p',   'p.id = e.position_id', 'left')
             ->join('departments d', 'd.id = e.department_id', 'left')
             ->where('et.type', $type)
-            ->where('et.deleted_at IS NULL')
-            ->groupBy('et.employee_id, e.full_name, e.employee_number, e.join_date, e.resign_date, p.name, d.name')
-            ->orderBy($type === 'ONBOARD' ? 'e.join_date' : 'e.resign_date', 'DESC');
-        $tenant->applyScope($builder, 'et.company_id');
-        $rows = $builder->limit(100)->get()->getResultArray();
+            ->where('et.deleted_at IS NULL');
 
+        // Multi-tenant scope (company_id) — selalu dipasang
+        $tenant->applyScope($builder, 'et.company_id');
+
+        // Permission scope
+        $canViewAll = $tenant->isSuperAdmin()
+            || $tenant->hasPermission('onboarding.view')
+            || $tenant->hasPermission('onboarding.manage');
+
+        if (! $canViewAll) {
+            $myEmpId  = $this->getMyEmployeeId();
+            $myUserId = $tenant->getUserId();
+            // Karyawan biasa hanya boleh lihat: record dirinya sendiri,
+            // atau task yang ditugaskan kepadanya.
+            $builder->groupStart()
+                ->where('et.employee_id', $myEmpId ?: 0)
+                ->orWhere('et.assignee_user_id', $myUserId ?: 0)
+                ->groupEnd();
+        }
+
+        $builder->groupBy('et.employee_id, e.full_name, e.employee_number, e.join_date, e.resign_date, p.name, d.name')
+            ->orderBy($type === 'ONBOARD' ? 'e.join_date' : 'e.resign_date', 'DESC');
+
+        $rows = $builder->limit(100)->get()->getResultArray();
         return $this->ok($rows);
     }
 

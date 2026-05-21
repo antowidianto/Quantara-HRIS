@@ -39,11 +39,27 @@ class AttendanceChangeRequestController extends ApiController
         $page    = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $status  = trim((string) $this->request->getGet('status'));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $branchId   = (int) ($this->request->getGet('branch_id') ?? 0);
         $startDate  = (string) ($this->request->getGet('start_date') ?? '');
         $endDate    = (string) ($this->request->getGet('end_date') ?? '');
         $mine       = (bool) $this->request->getGet('mine');
+
+        // Privacy scope: tanpa `attendance.approve_change`/view_all, paksa
+        // ke milik sendiri walau user pass `?employee_id=X`. Lihat
+        // docs/DATA_PRIVACY.md.
+        $employeeId = $this->privacy()->sanitizeEmployeeFilter(
+            $requestedEmpId ?: null, 'attendance_change'
+        );
+        // Kalau user tidak punya canViewAll attendance_change, dan tidak
+        // punya akses self pun (mis. tidak ada employee link), tolak.
+        if (! $this->privacy()->canViewOwn('attendance_change')) {
+            return $this->fail('Forbidden', 403);
+        }
+        // Force `mine` mode kalau user cuma punya view.own
+        if (! $this->privacy()->canViewAll('attendance_change')) {
+            $mine = true;
+        }
 
         // Cross-branch: sama dengan AttendanceController.
         if (! $tenant->isSuperAdmin()
@@ -493,9 +509,12 @@ class AttendanceChangeRequestController extends ApiController
      */
     private function notifyApprovers(int $companyId, ?int $branchId, int $crId, string $employeeName, string $workDate, string $type): void
     {
+        // CI4 Query Builder akan escape `DISTINCT` sebagai nama kolom kalau
+        // dipakai di select() — pakai distinct() builder method.
         $db = \Config\Database::connect();
         $approverRoles = $db->table('role_permissions rp')
-            ->select('DISTINCT rp.role_id')
+            ->select('rp.role_id')
+            ->distinct()
             ->join('permissions p', 'p.id = rp.permission_id')
             ->where('p.slug', 'attendance.approve_change')
             ->get()->getResultArray();
@@ -512,7 +531,8 @@ class AttendanceChangeRequestController extends ApiController
 
         // Permission lintas branch per role
         $crossBranchRoles = $db->table('role_permissions rp')
-            ->select('DISTINCT rp.role_id')
+            ->select('rp.role_id')
+            ->distinct()
             ->join('permissions p', 'p.id = rp.permission_id')
             ->where('p.slug', 'attendance.view_all_branches')
             ->get()->getResultArray();

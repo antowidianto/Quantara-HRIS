@@ -101,6 +101,28 @@ class Exceptions extends BaseConfig
      */
     public function handler(int $statusCode, Throwable $exception): ExceptionHandlerInterface
     {
+        // Sprint 5-6 monitoring (item MON.2): forward exception ke
+        // ExceptionLogger sebelum dikembalikan ke handler default. Ini
+        // ensure setiap unhandled exception masuk ke audit_logs (severity
+        // CRITICAL) + Sentry (kalau aktif), tanpa mengubah behavior
+        // rendering error standar CodeIgniter.
+        //
+        // 404 di-skip (ignoreCodes) supaya tidak nge-spam audit dengan
+        // request bot/scanner ke path yang tidak ada.
+        if (! in_array($statusCode, $this->ignoreCodes, true)) {
+            try {
+                \App\Libraries\ExceptionLogger::capture($exception, [
+                    'status_code' => $statusCode,
+                    'http_method' => $_SERVER['REQUEST_METHOD'] ?? 'CLI',
+                    'http_path'   => $_SERVER['REQUEST_URI'] ?? null,
+                    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? null,
+                ]);
+            } catch (\Throwable $e) {
+                // Logger sendiri tidak boleh gagalkan rendering error.
+                error_log('ExceptionLogger gagal capture: ' . $e->getMessage());
+            }
+        }
+
         return new ExceptionHandler($this);
     }
 }

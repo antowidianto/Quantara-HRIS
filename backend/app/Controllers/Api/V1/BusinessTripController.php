@@ -52,27 +52,27 @@ class BusinessTripController extends ApiController
 
         $q = trim((string) ($this->request->getGet('q') ?? ''));
         $status = strtoupper((string) ($this->request->getGet('status') ?? ''));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $mineOnly = (int) ($this->request->getGet('mine') ?? 0) === 1;
-
-        $tenant = $this->tenant();
-        $canViewAll = $tenant->isSuperAdmin() || $tenant->hasPermission('business_trip.manage')
-            || $tenant->hasPermission('business_trip.approve')
-            || $tenant->hasPermission('business_trip.settle');
 
         $builder = $db->table('business_trips bt')
             ->select('bt.*, e.full_name AS employee_name, e.employee_number, e.department_id, d.name AS department_name')
             ->join('employees e', 'e.id = bt.employee_id')
             ->join('departments d', 'd.id = e.department_id', 'left')
             ->where('bt.deleted_at IS NULL');
-        $tenant->applyScope($builder, 'bt.company_id');
 
-        // Pegawai biasa hanya lihat miliknya sendiri (kecuali $mineOnly explicit)
-        if (! $canViewAll || $mineOnly) {
-            $myEmpId = $tenant->getEmployeeId();
-            if (! $myEmpId) return $this->ok([], 'No employee linked', 200, ['total' => 0]);
-            $builder->where('bt.employee_id', $myEmpId);
-        }
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa
+        // `business_trip.approve`/`view_all`/`manage`, paksa filter ke
+        // perjalanan dinas miliknya. mine=1 shortcut untuk explicit self filter.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'business_trip',
+            companyColumn: 'bt.company_id',
+            employeeColumn: 'bt.employee_id',
+            requestedEmployeeId: $mineOnly
+                ? $this->tenant()->getEmployeeId()
+                : ($requestedEmpId ?: null),
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
 
         if ($q !== '') {
             $builder->groupStart()
@@ -83,7 +83,6 @@ class BusinessTripController extends ApiController
                 ->groupEnd();
         }
         if ($status !== '') $builder->where('bt.status', $status);
-        if ($employeeId && $canViewAll) $builder->where('bt.employee_id', $employeeId);
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('bt.created_at', 'DESC')

@@ -244,8 +244,23 @@ class AuthController extends ApiController
                 ->getRowArray();
         }
 
+        // Generate signed URL untuk avatar supaya frontend bisa langsung
+        // pakai di <img>. Kalau employee punya avatar, prioritaskan itu
+        // (foto resmi HR); fallback ke avatar di users (yang user upload
+        // sendiri lewat /auth/me/avatar).
+        $avatarPath = $employee['avatar_path'] ?? $user['avatar_path'] ?? null;
+        $avatarUrl = null;
+        if ($avatarPath) {
+            try {
+                $avatarUrl = Services::fileStorage()->signedUrl($avatarPath, 3600);
+            } catch (\Throwable $e) { /* file mungkin sudah hilang, abaikan */ }
+        }
+
+        $userOut = $this->shapeUser($user, $companyId);
+        $userOut['avatar_url'] = $avatarUrl;
+
         return $this->ok([
-            'user'        => $this->shapeUser($user, $companyId),
+            'user'        => $userOut,
             'employee'    => $employee ? [
                 'id' => $employee['id'],
                 'employee_number' => $employee['employee_number'],
@@ -253,12 +268,148 @@ class AuthController extends ApiController
                 'position_id' => $employee['position_id'],
                 'department_id' => $employee['department_id'],
                 'branch_id' => $employee['branch_id'] ?? null,
+                'avatar_path' => $employee['avatar_path'] ?? null,
+                'avatar_url'  => $avatarUrl,
             ] : null,
             'company'     => $company ? ['id' => $company['id'], 'code' => $company['code'], 'name' => $company['name'], 'logo_path' => $company['logo_path']] : null,
             'branch'      => $branch,
             'role'        => $role ? ['id' => $role['id'], 'slug' => $role['slug'], 'name' => $role['name']] : null,
             'permissions' => $perms,
         ]);
+    }
+
+    /**
+     * Upload foto profil user.
+     *
+     * Endpoint: POST /api/v1/auth/me/avatar
+     * Body:     multipart/form-data dengan field `file` (image/jpeg|png|webp ≤ 2 MB)
+     *
+     * Self-service: tidak butuh permission khusus, user hanya mengubah
+     * avatar-nya sendiri. Jika user terhubung ke record `employees`, kolom
+     * `employees.avatar_path` juga diupdate sehingga foto konsisten muncul
+     * di profil HR & list karyawan.
+     */
+    public function uploadAvatar()
+    {
+        $userId = $this->userId();
+        if (! $userId) return $this->fail('Unauthenticated', 401);
+
+        $file = $this->request->getFile('file');
+        if (! $file || ! $file->isValid()) {
+            return $this->fail('File tidak valid: '
+                . ($file?->getErrorString() ?? 'tidak ada file'), 400);
+        }
+        $maxBytes = 2 * 1024 * 1024;  // 2 MB cukup untuk avatar JPEG quality 85
+        if ($file->getSize() > $maxBytes) {
+            return $this->fail('Ukuran foto melebihi 2 MB', 413);
+        }
+        $mime = $file->getMimeType();
+        $allowedMime = ['image/jpeg', 'image/png', 'image/webp'];
+        if (! in_array($mime, $allowedMime, true)) {
+            return $this->fail('Hanya JPEG/PNG/WebP yang diperbolehkan', 415);
+        }
+
+        // Simpan ke avatars/{user_id}/<timestamp>.<ext> — segmen random
+        // mencegah cache lama browser tampil setelah ganti foto.
+        $ext = pathinfo($file->getClientName(), PATHINFO_EXTENSION) ?: 'jpg';
+        $ext = preg_replace('/[^A-Za-z0-9]+/', '', strtolower($ext));
+        $relativePath = sprintf(
+            'avatars/%d/%s_%s.%s',
+            $userId,
+            date('Ymd_His'),
+            bin2hex(random_bytes(4)),
+            $ext,
+        );
+
+        $storage = Services::fileStorage();
+        $bytes = file_get_contents($file->getTempName());
+        if ($bytes === false || ! $storage->put($relativePath, $bytes)) {
+            return $this->fail('Gagal menyimpan file', 500);
+        }
+
+        $db = \Config\Database::connect();
+        $now = date('Y-m-d H:i:s');
+
+        // Hapus avatar lama (kalau ada) supaya tidak orphan menumpuk.
+        $existing = $db->table('users')->select('avatar_path')->where('id', $userId)->get()->getRowArray();
+        $oldPath = $existing['avatar_path'] ?? null;
+
+        $db->table('users')->where('id', $userId)->update([
+            'avatar_path' => $relativePath,
+            'updated_at'  => $now,
+        ]);
+
+        // Sinkronisasi ke employees.avatar_path supaya foto karyawan di
+        // halaman HR juga ikut terbarui.
+        $emp = $db->table('employees')->where('user_id', $userId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
+        if ($emp) {
+            $oldPath = $oldPath ?: ($emp['avatar_path'] ?? null);
+            $db->table('employees')->where('id', $emp['id'])->update([
+                'avatar_path' => $relativePath,
+                'updated_at'  => $now,
+            ]);
+        }
+
+        // Best-effort delete file lama; jangan fail kalau gagal (file bisa
+        // jadi sudah dihapus manual atau path-nya tidak valid lagi).
+        if ($oldPath && $oldPath !== $relativePath) {
+            try { $storage->delete($oldPath); } catch (\Throwable $e) {}
+        }
+
+        Services::audit()->forModule('AUTH')->log(
+            action: 'profile.avatar.upload',
+            entity: 'user',
+            entityId: (int) $userId,
+            description: 'Mengubah foto profil',
+            severity: 'NOTICE',
+        );
+
+        return $this->ok([
+            'avatar_path' => $relativePath,
+            'avatar_url'  => $storage->signedUrl($relativePath, 3600),
+        ], 'Foto profil tersimpan');
+    }
+
+    /**
+     * Hapus foto profil. Endpoint: DELETE /api/v1/auth/me/avatar
+     */
+    public function deleteAvatar()
+    {
+        $userId = $this->userId();
+        if (! $userId) return $this->fail('Unauthenticated', 401);
+
+        $db = \Config\Database::connect();
+        $user = $db->table('users')->select('avatar_path')->where('id', $userId)->get()->getRowArray();
+        $oldPath = $user['avatar_path'] ?? null;
+
+        $db->table('users')->where('id', $userId)->update([
+            'avatar_path' => null,
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ]);
+
+        $emp = $db->table('employees')->where('user_id', $userId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
+        if ($emp) {
+            $oldPath = $oldPath ?: ($emp['avatar_path'] ?? null);
+            $db->table('employees')->where('id', $emp['id'])->update([
+                'avatar_path' => null,
+                'updated_at'  => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        if ($oldPath) {
+            try { Services::fileStorage()->delete($oldPath); } catch (\Throwable $e) {}
+        }
+
+        Services::audit()->forModule('AUTH')->log(
+            action: 'profile.avatar.delete',
+            entity: 'user',
+            entityId: (int) $userId,
+            description: 'Menghapus foto profil',
+        );
+
+        return $this->ok(null, 'Foto profil dihapus');
     }
 
     public function changePassword()

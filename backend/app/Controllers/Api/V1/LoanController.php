@@ -11,14 +11,23 @@ class LoanController extends ApiController
         $db = \Config\Database::connect();
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $status = trim((string) $this->request->getGet('status'));
 
         $builder = $db->table('loans l')
             ->select('l.*, e.full_name AS employee_name, e.employee_number')
             ->join('employees e', 'e.id = l.employee_id');
-        $this->tenant()->applyScope($builder, 'l.company_id');
-        if ($employeeId) $builder->where('l.employee_id', $employeeId);
+
+        // Privacy scope: tanpa `loan.approve`/`loan.view_all`, paksa filter ke
+        // employee_id user. Detail pinjaman = sensitive financial data.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'loan',
+            companyColumn: 'l.company_id',
+            employeeColumn: 'l.employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($status) $builder->where('l.status', $status);
 
         $total = $builder->countAllResults(false);
@@ -31,6 +40,9 @@ class LoanController extends ApiController
         $db = \Config\Database::connect();
         $row = $db->table('loans')->where('id', (int) $id)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
+        if (! $this->privacy()->canAccessRow($row, 'loan')) {
+            return $this->fail('Forbidden', 403);
+        }
         return $this->ok($row);
     }
 
@@ -85,6 +97,25 @@ class LoanController extends ApiController
         $loan = $db->table('loans')->where('id', $id)->get()->getRowArray();
         if (! $loan) return $this->fail('Not found', 404);
 
+        // Pastikan loan masuk scope tenant user (cegah cross-company write).
+        if (! $this->privacy()->canAccessRow($loan, 'loan')) {
+            return $this->fail('Forbidden', 403);
+        }
+
+        // Approve/reject sangat sensitif: harus punya permission `loan.approve`,
+        // dan tidak boleh approve loan milik diri sendiri (separation of duty).
+        if ($action === 'approve' || $action === 'reject') {
+            $tenant = $this->tenant();
+            if (! $tenant->isSuperAdmin() && ! $tenant->hasPermission('loan.approve')) {
+                return $this->fail('Forbidden — butuh izin loan.approve', 403);
+            }
+            $myEmpId = (int) $tenant->getEmployeeId();
+            if ($myEmpId > 0 && (int) $loan['employee_id'] === $myEmpId) {
+                return $this->fail('Tidak bisa approve/reject pinjaman sendiri', 422,
+                    'CANNOT_APPROVE_OWN_LOAN');
+            }
+        }
+
         if ($action === 'approve') {
             if ($loan['status'] !== 'PENDING') return $this->fail('Not pending', 422);
             $db->table('loans')->where('id', $id)->update([
@@ -93,14 +124,23 @@ class LoanController extends ApiController
                 'approved_at' => date('Y-m-d H:i:s'),
                 'updated_at'  => date('Y-m-d H:i:s'),
             ]);
-            Services::audit()->log('loan.approve', 'loan', $id);
+            Services::audit()->forModule('FINANCE')->log(
+                action: 'loan.approve', entity: 'loans', entityId: $id,
+                description: "Loan #{$loan['loan_number']} disetujui (akan dipotong otomatis di payroll)",
+                severity: 'NOTICE',
+            );
             return $this->ok(null, 'Loan approved & running');
         }
         if ($action === 'reject') {
+            if ($loan['status'] !== 'PENDING') return $this->fail('Not pending', 422);
             $db->table('loans')->where('id', $id)->update([
                 'status' => 'REJECTED', 'approved_by' => $this->userId(), 'approved_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
+            Services::audit()->forModule('FINANCE')->log(
+                action: 'loan.reject', entity: 'loans', entityId: $id,
+                description: "Loan #{$loan['loan_number']} ditolak",
+            );
             return $this->ok(null, 'Rejected');
         }
         return $this->fail('Unknown action', 400);
@@ -111,8 +151,24 @@ class LoanController extends ApiController
         $db = \Config\Database::connect();
         $loan = $db->table('loans')->where('id', (int) $id)->get()->getRowArray();
         if (! $loan) return $this->fail('Not found', 404);
-        if ($loan['status'] !== 'PENDING') return $this->fail('Cannot cancel', 422);
-        $db->table('loans')->where('id', (int) $id)->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
+
+        // Hanya owner atau yang punya `loan.approve` boleh cancel.
+        $tenant = $this->tenant();
+        $myEmpId = (int) $tenant->getEmployeeId();
+        $isOwner = $myEmpId > 0 && (int) $loan['employee_id'] === $myEmpId;
+        if (! $isOwner && ! $tenant->isSuperAdmin() && ! $tenant->hasPermission('loan.approve')) {
+            return $this->fail('Forbidden', 403);
+        }
+        if ($loan['status'] !== 'PENDING') return $this->fail('Cannot cancel — only PENDING loans can be cancelled', 422);
+
+        $db->table('loans')->where('id', (int) $id)->update([
+            'status' => 'CANCELLED',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        Services::audit()->forModule('FINANCE')->log(
+            action: 'loan.cancel', entity: 'loans', entityId: (int) $id,
+            description: "Loan #{$loan['loan_number']} dibatalkan",
+        );
         return $this->ok(null, 'Cancelled');
     }
 }

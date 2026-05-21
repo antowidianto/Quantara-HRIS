@@ -22,12 +22,33 @@ class PayrollService
             throw new \InvalidArgumentException('Payroll period not found');
         }
 
-        // Clear existing payslips if recalculating
+        // Clear existing payslips for THIS period (re-calculation flow).
         $existing = $db->table('payslips')->where('payroll_period_id', $payrollPeriodId)->get()->getResultArray();
         foreach ($existing as $p) {
             $db->table('payslip_details')->where('payslip_id', $p['id'])->delete();
         }
         $db->table('payslips')->where('payroll_period_id', $payrollPeriodId)->delete();
+
+        // Defensive: also clear orphan payslips with the same slip_number
+        // prefix (`PS-{period_code}-...`) yang dimiliki perusahaan ini.
+        // Skenario yang menyebabkan UNIQUE constraint error sebelumnya:
+        //   1. User bikin period dengan code "2024-01", calculate, lalu
+        //      delete period itu (soft / hard).
+        //   2. Bikin period baru dengan code yang sama lagi → calculate
+        //      → insert nubrak payslip lama yang masih ada di DB karena
+        //      delete cascade tidak terkonfigurasi di SQLite.
+        //   3. INSERT gagal: "UNIQUE constraint failed: payslips.slip_number".
+        // Cleanup berbasis slip_number prefix mencegah ini tanpa
+        // mengubah format nomor slip.
+        $slipPrefix = 'PS-' . $period['code'] . '-';
+        $orphan = $db->table('payslips')
+            ->where('company_id', (int) $period['company_id'])
+            ->like('slip_number', $slipPrefix, 'after')
+            ->get()->getResultArray();
+        foreach ($orphan as $p) {
+            $db->table('payslip_details')->where('payslip_id', $p['id'])->delete();
+            $db->table('payslips')->where('id', $p['id'])->delete();
+        }
 
         $employees = $db->table('employees')
             ->where('company_id', $period['company_id'])
@@ -272,6 +293,17 @@ class PayrollService
 
         // ─── Persist payslip ────────────────────────────────────────
         $slipNumber = 'PS-' . $period['code'] . '-' . str_pad((string) $emp['id'], 5, '0', STR_PAD_LEFT);
+
+        // Defensive guard: jika masih ada baris lain yang nyantol pakai
+        // slip_number ini (mis. seed data lama), hapus dulu supaya
+        // INSERT tidak gagal karena UNIQUE constraint. Aman karena
+        // payslip difinalisasi tidak akan ke titik ini (period harus
+        // CALCULATED untuk re-calculate).
+        $stale = $db->table('payslips')->where('slip_number', $slipNumber)->get()->getRowArray();
+        if ($stale) {
+            $db->table('payslip_details')->where('payslip_id', $stale['id'])->delete();
+            $db->table('payslips')->where('id', $stale['id'])->delete();
+        }
         $payslipData = [
             'company_id'         => $companyId,
             'payroll_period_id'  => $period['id'],

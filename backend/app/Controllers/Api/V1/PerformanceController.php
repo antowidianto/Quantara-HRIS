@@ -184,11 +184,10 @@ class PerformanceController extends ApiController
 
     public function listGoals()
     {
-        if (! $this->can('goal.view')) return $this->fail('Forbidden', 403);
         $perPage = max(1, min(200, (int) ($this->request->getGet('per_page') ?? 50)));
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $cycle = (int) ($this->request->getGet('cycle_id') ?? 0);
-        $emp   = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $status = trim((string) $this->request->getGet('status'));
         $mine = (int) ($this->request->getGet('mine') ?? 0);
 
@@ -197,14 +196,20 @@ class PerformanceController extends ApiController
             ->join('employees e', 'e.id = g.employee_id')
             ->join('performance_cycles c', 'c.id = g.cycle_id')
             ->where('g.deleted_at IS NULL');
-        $this->tenant()->applyScope($b, 'g.company_id');
 
-        if ($mine) {
-            $myEmpId = $this->getMyEmployeeId();
-            if ($myEmpId) $b->where('g.employee_id', $myEmpId);
-        } elseif ($emp) {
-            $b->where('g.employee_id', $emp);
-        }
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa
+        // `performance.view`/`manage`/`review`, karyawan hanya boleh lihat
+        // goal miliknya sendiri. Sebelumnya `?employee_id=X` mentah → bocor.
+        $effective = $this->privacy()->applyListScope(
+            $b, module: 'performance',
+            companyColumn: 'g.company_id',
+            employeeColumn: 'g.employee_id',
+            requestedEmployeeId: $mine
+                ? $this->getMyEmployeeId()
+                : ($requestedEmpId ?: null),
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($cycle) $b->where('g.cycle_id', $cycle);
         if ($status) $b->where('g.status', $status);
 
@@ -372,11 +377,10 @@ class PerformanceController extends ApiController
 
     public function listReviews()
     {
-        if (! $this->can('performance.view')) return $this->fail('Forbidden', 403);
         $perPage = max(1, min(100, (int) ($this->request->getGet('per_page') ?? 30)));
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $cycle = (int) ($this->request->getGet('cycle_id') ?? 0);
-        $emp   = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $status = trim((string) $this->request->getGet('status'));
         $mine = (int) ($this->request->getGet('mine') ?? 0);
         $myTeam = (int) ($this->request->getGet('my_team') ?? 0);
@@ -387,16 +391,27 @@ class PerformanceController extends ApiController
             ->join('performance_cycles c', 'c.id = r.cycle_id')
             ->join('users ru', 'ru.id = r.reviewer_id', 'left')
             ->where('r.deleted_at IS NULL');
-        $this->tenant()->applyScope($b, 'r.company_id');
 
-        if ($mine) {
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): performance review =
+        // sangat sensitif (skor, feedback). Karyawan tanpa `performance.view`
+        // hanya boleh lihat reviewnya sendiri ATAU yang dia jadi reviewer.
+        $tenant = $this->tenant();
+        $tenant->applyScope($b, 'r.company_id');
+        $canViewAll = $this->privacy()->canViewAll('performance');
+        if (! $canViewAll) {
+            $myEmpId = $this->getMyEmployeeId();
+            $myUserId = (int) $tenant->getUserId();
+            $b->groupStart()
+                ->where('r.employee_id', $myEmpId ?: 0)
+                ->orWhere('r.reviewer_id', $myUserId)
+                ->groupEnd();
+        } elseif ($mine) {
             $myEmpId = $this->getMyEmployeeId();
             if ($myEmpId) $b->where('r.employee_id', $myEmpId);
         } elseif ($myTeam) {
-            $myUserId = (int) $this->tenant()->getUserId();
-            $b->where('r.reviewer_id', $myUserId);
-        } elseif ($emp) {
-            $b->where('r.employee_id', $emp);
+            $b->where('r.reviewer_id', (int) $tenant->getUserId());
+        } elseif ($requestedEmpId) {
+            $b->where('r.employee_id', $requestedEmpId);
         }
         if ($cycle) $b->where('r.cycle_id', $cycle);
         if ($status) $b->where('r.status', $status);

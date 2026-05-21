@@ -24,7 +24,7 @@ class AttendanceController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 30)));
 
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $branchId   = (int) ($this->request->getGet('branch_id') ?? 0);
         $deptId     = (int) ($this->request->getGet('department_id') ?? 0);
         $status     = trim((string) $this->request->getGet('status'));
@@ -51,7 +51,18 @@ class AttendanceController extends ApiController
 
         $tenant->applyAttendanceScope($builder, 'a.company_id', 'e.branch_id');
 
-        if ($employeeId) $builder->where('a.employee_id', $employeeId);
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa
+        // `attendance.view_all`/`attendance.approve`, paksa filter
+        // employee_id ke milik user. Sebelumnya `?employee_id=X` mentah
+        // bisa pakai siapa saja → bocor.
+        $effectiveEmpId = $this->privacy()->sanitizeEmployeeFilter(
+            $requestedEmpId ?: null, 'attendance'
+        );
+        if (! $this->privacy()->canViewAll('attendance')) {
+            $builder->where('a.employee_id', $effectiveEmpId);
+        } elseif ($effectiveEmpId > 0) {
+            $builder->where('a.employee_id', $effectiveEmpId);
+        }
         if ($branchId)   $builder->where('e.branch_id', $branchId);
         if ($deptId)     $builder->where('e.department_id', $deptId);
         if ($status)     $builder->where('a.status', $status);

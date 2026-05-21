@@ -2,15 +2,38 @@
 
 namespace App\Libraries;
 
+use App\Notifications\NotificationChannel;
+use App\Notifications\Channels\EmailChannel;
+use App\Notifications\Channels\InAppChannel;
+use App\Notifications\Channels\WebPushChannel;
+use App\Notifications\Channels\WhatsAppChannel;
 use Config\Services;
 
 /**
- * NotificationService - sends in-app + (optionally) email notifications.
+ * NotificationService - dispatch notifikasi ke multiple channel berdasar user prefs.
+ *
+ * Architecture (Sprint 4 item K):
+ *   1. send() insert ke tabel `notifications` (in-app, ground truth)
+ *   2. Resolve channels yang aktif untuk user + notif type, intersect dengan
+ *      channel yang available untuk user itu
+ *   3. Dispatch ke setiap channel via NotificationChannel::send()
+ *   4. Channel gagal di-log saja, tidak gagalkan keseluruhan operasi
+ *
+ * Default channel set per type ada di method `defaultChannelsFor()`. User bisa
+ * override via tabel `user_notification_preferences`.
  */
 class NotificationService
 {
+    /** @var NotificationChannel[]|null Cache channels (sekali instantiate per request) */
+    private ?array $channels = null;
+
     /**
-     * Send a notification to a user. Optionally also enqueue an email.
+     * Send a notification to a user. Channel dispatch (email/WA/push) ditentukan
+     * oleh preference user di tabel user_notification_preferences. Kalau user
+     * belum punya pref, fallback ke default per notif type.
+     *
+     * Param `$sendEmail` (legacy, deprecated): kalau true, paksa email channel
+     * walaupun user disable. Untuk backward-compat dengan caller existing.
      */
     public function send(
         int $userId,
@@ -39,18 +62,177 @@ class NotificationService
         ]);
         $notifId = (int) $db->insertID();
 
-        if ($sendEmail) {
-            $user = $db->table('users')->where('id', $userId)->get()->getRowArray();
-            if ($user && ! empty($user['email'])) {
-                $this->queueEmail($companyId, $user['email'], $user['name'], $title, $this->renderEmailHtml($title, $message, $linkUrl));
-                $db->table('notifications')->where('id', $notifId)->update([
-                    'sent_email'    => 1,
-                    'email_sent_at' => $now,
-                ]);
+        $user = $db->table('users')->where('id', $userId)->get()->getRowArray();
+        if (! $user) {
+            return $notifId;
+        }
+
+        $payload = [
+            'notification_id' => $notifId,
+            'notif_type'      => $type,
+            'title'           => $title,
+            'message'         => $message,
+            'data'            => $data,
+            'link_url'        => $linkUrl,
+            'company_id'      => $companyId,
+        ];
+
+        $channels = $this->resolveChannelsFor($userId, $type, $sendEmail);
+        $sentChannels = [];
+        foreach ($channels as $channel) {
+            if (! $channel->isAvailable($user)) continue;
+            try {
+                if ($channel->send($user, $payload)) {
+                    $sentChannels[] = $channel->slug();
+                }
+            } catch (\Throwable $e) {
+                log_message('warning', 'Notif dispatch via ' . $channel->slug() . ' gagal: ' . $e->getMessage());
             }
         }
 
+        // Update flag sent_email kalau email channel sukses (backward-compat).
+        if (in_array('email', $sentChannels, true)) {
+            $db->table('notifications')->where('id', $notifId)->update([
+                'sent_email'    => 1,
+                'email_sent_at' => $now,
+            ]);
+        }
+
         return $notifId;
+    }
+
+    /**
+     * Tentukan channel mana yang aktif untuk user+type. In-app selalu aktif.
+     * Email/WA/push: cek user prefs, fallback ke default per type.
+     *
+     * @param bool $forceEmail Override pref email (untuk backward-compat caller lama)
+     * @return NotificationChannel[]
+     */
+    private function resolveChannelsFor(int $userId, string $type, bool $forceEmail = false): array
+    {
+        $defaults = $this->defaultChannelsFor($type);
+        if ($forceEmail && ! in_array('email', $defaults, true)) {
+            $defaults[] = 'email';
+        }
+
+        // Lookup overrides di user_notification_preferences. Cari yang
+        // notif_type=$type dulu, lalu fallback ke notif_type='*' kalau tidak ada.
+        $db = \Config\Database::connect();
+        $prefs = [];
+        try {
+            $rows = $db->table('user_notification_preferences')
+                ->where('user_id', $userId)
+                ->whereIn('notif_type', [$type, '*'])
+                ->get()->getResultArray();
+            foreach ($rows as $r) {
+                // Specific (notif_type=$type) menang atas wildcard '*'
+                $key = $r['channel'];
+                if (isset($prefs[$key]) && $prefs[$key]['notif_type'] === $type) continue;
+                $prefs[$key] = $r;
+            }
+        } catch (\Throwable $e) {
+            // Tabel belum migrate — pakai defaults saja
+        }
+
+        $enabledSlugs = [];
+        foreach ($this->channels() as $channel) {
+            $slug = $channel->slug();
+            // In-app selalu di-include (tidak boleh di-disable)
+            if ($slug === 'in_app') {
+                $enabledSlugs[] = $slug;
+                continue;
+            }
+            if (isset($prefs[$slug])) {
+                if ((int) $prefs[$slug]['enabled'] === 1) $enabledSlugs[] = $slug;
+            } elseif (in_array($slug, $defaults, true)) {
+                $enabledSlugs[] = $slug;
+            }
+        }
+
+        // Filter ke instance channel sesuai enabled slugs.
+        return array_values(array_filter(
+            $this->channels(),
+            fn ($c) => in_array($c->slug(), $enabledSlugs, true),
+        ));
+    }
+
+    /**
+     * Default channel set per notif type. Bisa di-override di setting per company.
+     * Fallback '*' default = in_app saja.
+     *
+     * @return string[] list slug channel
+     */
+    private function defaultChannelsFor(string $type): array
+    {
+        // Pola: <module>.<action> → set channel default
+        $rules = [
+            'leave.requested'         => ['in_app', 'email'],
+            'overtime.requested'      => ['in_app', 'email'],
+            'attendance.change_requested' => ['in_app', 'email'],
+            'approval.pending'        => ['in_app', 'email', 'whatsapp'],
+            'leave.approved'          => ['in_app', 'email'],
+            'leave.rejected'          => ['in_app', 'email'],
+            'overtime.approved'       => ['in_app', 'email'],
+            'overtime.rejected'       => ['in_app', 'email'],
+            'payslip.published'       => ['in_app', 'email'],
+            'contract.expiring'       => ['in_app', 'email'],
+            'cert.expiring'           => ['in_app', 'email'],
+            'sp.issued'               => ['in_app', 'email'],
+        ];
+        return $rules[$type] ?? ['in_app'];
+    }
+
+    /** @return NotificationChannel[] */
+    private function channels(): array
+    {
+        if ($this->channels === null) {
+            $this->channels = [
+                new InAppChannel(),
+                new EmailChannel(),
+                new WhatsAppChannel(),
+                new WebPushChannel(),
+            ];
+        }
+        return $this->channels;
+    }
+
+    /** Set preference channel untuk user + notif type. Idempotent (UPSERT). */
+    public function setPreference(int $userId, string $notifType, string $channel, bool $enabled): void
+    {
+        $db = \Config\Database::connect();
+        $now = date('Y-m-d H:i:s');
+        $exists = $db->table('user_notification_preferences')
+            ->where('user_id', $userId)
+            ->where('notif_type', $notifType)
+            ->where('channel', $channel)
+            ->countAllResults();
+        if ($exists > 0) {
+            $db->table('user_notification_preferences')
+                ->where('user_id', $userId)
+                ->where('notif_type', $notifType)
+                ->where('channel', $channel)
+                ->update(['enabled' => $enabled ? 1 : 0, 'updated_at' => $now]);
+        } else {
+            $db->table('user_notification_preferences')->insert([
+                'user_id'    => $userId,
+                'notif_type' => $notifType,
+                'channel'    => $channel,
+                'enabled'    => $enabled ? 1 : 0,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+    }
+
+    /** Get all preferences for a user (untuk UI Profile → Notifikasi). */
+    public function getPreferences(int $userId): array
+    {
+        $db = \Config\Database::connect();
+        return $db->table('user_notification_preferences')
+            ->where('user_id', $userId)
+            ->orderBy('notif_type', 'ASC')
+            ->orderBy('channel', 'ASC')
+            ->get()->getResultArray();
     }
 
     public function queueEmail(?int $companyId, string $toEmail, ?string $toName, string $subject, string $bodyHtml, array $attachments = []): int

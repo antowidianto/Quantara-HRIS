@@ -16,7 +16,7 @@ class GeneratedContractController extends ApiController
         $db   = \Config\Database::connect();
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $status = trim((string) $this->request->getGet('status'));
 
         $builder = $db->table('generated_contracts gc')
@@ -27,8 +27,19 @@ class GeneratedContractController extends ApiController
             ->join('employees e', 'e.id = gc.employee_id', 'left')
             ->join('contract_templates t', 't.id = gc.template_id', 'left')
             ->where('gc.deleted_at IS NULL');
-        $this->tenant()->applyScope($builder, 'gc.company_id');
-        if ($employeeId) $builder->where('gc.employee_id', $employeeId);
+
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): kontrak = sangat sensitif
+        // (memuat gaji, term & condition). Tanpa permission HR
+        // (`contract.view`/`manage`/`employee.view`), karyawan hanya boleh
+        // lihat kontraknya sendiri.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'contract',
+            companyColumn: 'gc.company_id',
+            employeeColumn: 'gc.employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($status !== '') $builder->where('gc.status', $status);
 
         $total = $builder->countAllResults(false);

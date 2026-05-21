@@ -37,7 +37,7 @@ class DisciplinaryController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
 
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $level      = (string) ($this->request->getGet('level') ?? '');
         $status     = (string) ($this->request->getGet('status') ?? '');
         $mine       = (int) ($this->request->getGet('mine') ?? 0) === 1;
@@ -55,18 +55,19 @@ class DisciplinaryController extends ApiController
             ->join('disciplinary_categories cat', 'cat.id = dr.category_id', 'left')
             ->join('users iu', 'iu.id = dr.issued_by', 'left')
             ->where('dr.deleted_at IS NULL');
-        $tenant->applyScope($builder, 'dr.company_id');
 
-        // Authorization scope: pegawai biasa hanya boleh lihat SP miliknya
-        $canViewAll = $tenant->isSuperAdmin()
-            || $tenant->hasPermission('disciplinary.view')
-            || $tenant->hasPermission('disciplinary.manage');
-        if (! $canViewAll || $mine) {
-            $myEmpId = $tenant->getEmployeeId();
-            if (! $myEmpId) return $this->fail('No employee linked', 400);
-            $builder->where('dr.employee_id', $myEmpId);
-        }
-        if ($employeeId && $canViewAll) $builder->where('dr.employee_id', $employeeId);
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): SP karyawan adalah
+        // sangat sensitif — pegawai biasa hanya boleh lihat miliknya.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'disciplinary',
+            companyColumn: 'dr.company_id',
+            employeeColumn: 'dr.employee_id',
+            requestedEmployeeId: $mine
+                ? $tenant->getEmployeeId()
+                : ($requestedEmpId ?: null),
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($level !== '' && in_array($level, self::VALID_LEVELS, true)) $builder->where('dr.level', $level);
         if ($status !== '' && in_array($status, self::VALID_STATUSES, true)) $builder->where('dr.status', $status);
         if ($q !== '') {

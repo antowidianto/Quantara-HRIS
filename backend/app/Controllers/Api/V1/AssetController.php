@@ -36,6 +36,18 @@ class AssetController extends ApiController
     // Asset master CRUD
     // ────────────────────────────────────────────────────────────────
 
+    
+    private function getMyEmployeeId(): ?int
+    {
+        $eid = (int) $this->tenant()->getEmployeeId();
+        if ($eid > 0) return $eid;
+        $userId = (int) $this->tenant()->getUserId();
+        if (! $userId) return null;
+        $emp = $this->db()->table('employees')->where('user_id', $userId)
+            ->where('deleted_at IS NULL')->limit(1)->get()->getRowArray();
+        return $emp ? (int) $emp['id'] : null;
+    }
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -45,14 +57,25 @@ class AssetController extends ApiController
         $q = trim((string) ($this->request->getGet('q') ?? ''));
         $status = strtoupper((string) ($this->request->getGet('status') ?? ''));
         $category = strtoupper((string) ($this->request->getGet('category') ?? ''));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = $this->getMyEmployeeId();
 
         $builder = $db->table('assets a')
             ->select('a.*, b.name AS branch_name, e.full_name AS employee_name, e.employee_number AS employee_no')
             ->join('branches b', 'b.id = a.branch_id', 'left')
             ->join('employees e', 'e.id = a.current_employee_id', 'left')
-            ->where('a.deleted_at IS NULL');
-        $this->tenant()->applyScope($builder, 'a.company_id');
+            ->where('a.deleted_at IS NULL')
+            ->where('e.id', $requestedEmpId);
+
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): asset master pakai
+        // `current_employee_id` sebagai pemegang aset. User tanpa
+        // `asset.view`/`asset.manage` (HR) hanya boleh lihat aset miliknya.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'asset',
+            companyColumn: 'a.company_id',
+            employeeColumn: 'a.current_employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
 
         if ($q !== '') {
             $builder->groupStart()
@@ -64,7 +87,6 @@ class AssetController extends ApiController
         }
         if ($status !== '' && in_array($status, self::VALID_STATUSES, true)) $builder->where('a.status', $status);
         if ($category !== '' && in_array($category, self::VALID_CATEGORIES, true)) $builder->where('a.category', $category);
-        if ($employeeId) $builder->where('a.current_employee_id', $employeeId);
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('a.id', 'DESC')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
@@ -325,7 +347,7 @@ class AssetController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
 
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $assetId = (int) ($this->request->getGet('asset_id') ?? 0);
         $returnedOnly = (int) ($this->request->getGet('returned') ?? 0) === 1;
         $activeOnly = (int) ($this->request->getGet('active') ?? 0) === 1;
@@ -335,9 +357,17 @@ class AssetController extends ApiController
                 . ' e.full_name AS employee_name, e.employee_number')
             ->join('assets a', 'a.id = aa.asset_id')
             ->join('employees e', 'e.id = aa.employee_id');
-        $this->tenant()->applyScope($builder, 'aa.company_id');
 
-        if ($employeeId) $builder->where('aa.employee_id', $employeeId);
+        // Privacy scope: tanpa permission HR, employee biasa hanya boleh
+        // lihat history assignment miliknya.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'asset',
+            companyColumn: 'aa.company_id',
+            employeeColumn: 'aa.employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($assetId) $builder->where('aa.asset_id', $assetId);
         if ($returnedOnly) $builder->where('aa.returned_at IS NOT NULL');
         if ($activeOnly) $builder->where('aa.returned_at IS NULL');
