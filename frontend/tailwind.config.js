@@ -1,5 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // Sprint 5-6 item S — class-based dark mode (toggle via useDarkMode composable).
+  // Pakai class strategy supaya bisa override OS preference. Default ke light;
+  // user set 'dark' via toggle yang persist di localStorage.
+  darkMode: 'class',
   content: [
     './index.html',
     './src/**/*.{vue,js,ts,jsx,tsx}',

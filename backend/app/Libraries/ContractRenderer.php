@@ -37,7 +37,7 @@ class ContractRenderer
         // apa adanya kalau template tidak memintanya).
         if (! empty($emp)) {
             try {
-                $enc = new Encryption();
+                $enc = \Config\Services::encryption();
                 $emp['nik']          = $enc->decrypt($emp['nik_encrypted'] ?? null) ?? '-';
                 $emp['npwp']         = $enc->decrypt($emp['npwp_encrypted'] ?? null) ?? '-';
                 $emp['bank_account'] = $enc->decrypt($emp['bank_account_encrypted'] ?? null) ?? '-';

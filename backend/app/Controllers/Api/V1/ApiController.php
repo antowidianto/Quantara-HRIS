@@ -48,6 +48,16 @@ abstract class ApiController extends BaseController
         return Services::tenant();
     }
 
+    /**
+     * PrivacyScope helper — pakai untuk endpoint list/show yang menampilkan
+     * data personal employee (leave, payslip, overtime, attendance, dsb).
+     * Lihat docs/DATA_PRIVACY.md untuk pola penggunaan.
+     */
+    protected function privacy(): \App\Libraries\PrivacyScope
+    {
+        return Services::privacy();
+    }
+
     protected function userId(): int
     {
         return $this->tenant()->getUserId();

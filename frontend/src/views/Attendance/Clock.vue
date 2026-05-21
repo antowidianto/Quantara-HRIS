@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
+import { confirm } from '@/composables/useConfirm'
 import {
   ClockIcon, MapPinIcon, ArrowPathIcon, CheckCircleIcon,
   ExclamationTriangleIcon, BoltIcon, CalendarDaysIcon,
@@ -325,7 +326,13 @@ async function clockIn() {
     return
   }
   if (geofenceStatus.value.state === 'outside') {
-    const ok = window.confirm('Anda berada di luar radius kantor. Tetap lanjutkan? (mungkin akan ditolak server)')
+    const ok = await confirm({
+      title: 'Di luar radius kantor',
+      message: 'Anda berada di luar radius kantor.\nTetap lanjutkan? Server mungkin akan menolak absensi ini.',
+      okText: 'Tetap absen',
+      cancelText: 'Batal',
+      variant: 'warning',
+    })
     if (! ok) return
   }
   loading.value = true

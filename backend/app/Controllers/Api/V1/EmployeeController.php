@@ -54,7 +54,7 @@ class EmployeeController extends ApiController
         }
 
         // Decrypt sensitive fields
-        $enc = new \App\Libraries\Encryption();
+        $enc = \Config\Services::encryption();
         $emp['nik'] = $enc->decrypt($emp['nik_encrypted']);
         $emp['npwp'] = $enc->decrypt($emp['npwp_encrypted']);
         $emp['bank_account'] = $enc->decrypt($emp['bank_account_encrypted']);
@@ -119,7 +119,7 @@ class EmployeeController extends ApiController
             return $this->fail('Employee number already exists', 422, 'DUPLICATE_EMPLOYEE_NUMBER');
         }
 
-        $enc = new \App\Libraries\Encryption();
+        $enc = \Config\Services::encryption();
         $now = date('Y-m-d H:i:s');
 
         $insert = [
@@ -314,7 +314,7 @@ class EmployeeController extends ApiController
         }
 
         $data = $this->getJsonInput();
-        $enc = new \App\Libraries\Encryption();
+        $enc = \Config\Services::encryption();
 
         $updatable = ['branch_id','department_id','position_id','job_grade_id','manager_id',
             'supervisor_id','work_location_id',

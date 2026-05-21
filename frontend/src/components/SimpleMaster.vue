@@ -4,6 +4,7 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, MagnifyingGlassIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import LocationPicker from '@/components/LocationPicker.vue'
 
 const props = defineProps({
   endpoint: { type: String, required: true },
@@ -150,8 +151,13 @@ function go(page) { params.page = page; fetchData() }
         </div>
         <form @submit.prevent="save" class="px-6 py-4 space-y-4">
           <div v-for="f in fields" :key="f.key">
-            <label class="label">{{ f.label }}{{ f.required ? ' *' : '' }}</label>
-            <select v-if="f.type === 'select'" v-model="form[f.key]" class="input" :required="f.required">
+            <label v-if="f.type !== 'location'" class="label">{{ f.label }}{{ f.required ? ' *' : '' }}</label>
+            <LocationPicker v-if="f.type === 'location'"
+              v-model:lat="form[f.latKey || 'lat']"
+              v-model:lng="form[f.lngKey || 'lng']"
+              v-model:radius="form[f.radiusKey || 'geofence_radius_m']"
+              :show-radius="f.showRadius !== false" />
+            <select v-else-if="f.type === 'select'" v-model="form[f.key]" class="input" :required="f.required">
               <option value="">- Pilih -</option>
               <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>

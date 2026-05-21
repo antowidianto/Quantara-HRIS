@@ -10,14 +10,28 @@ class PayslipController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $periodId = (int) ($this->request->getGet('period_id') ?? 0);
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
 
         $builder = $db->table('payslips ps')
             ->select('ps.*, pp.name AS period_name, pp.code AS period_code')
             ->join('payroll_periods pp', 'pp.id = ps.payroll_period_id');
-        $this->tenant()->applyScope($builder, 'ps.company_id');
+
+        // Privacy scope: payslip = data sangat sensitif (gaji). Tanpa
+        // permission `payslip.view`, paksa filter ke employee_id sendiri.
+        // Karyawan biasa pakai endpoint /payslips/my; endpoint /payslips
+        // ini hanya berguna untuk HR/Finance yang butuh listing lintas employee.
+        $effectiveEmpId = $this->privacy()->applyListScope(
+            $builder,
+            module: 'payslip',
+            companyColumn: 'ps.company_id',
+            employeeColumn: 'ps.employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effectiveEmpId === null) {
+            return $this->fail('Anda tidak memiliki akses ke daftar slip gaji.', 403);
+        }
+
         if ($periodId) $builder->where('ps.payroll_period_id', $periodId);
-        if ($employeeId) $builder->where('ps.employee_id', $employeeId);
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('ps.created_at', 'DESC')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
@@ -46,14 +60,10 @@ class PayslipController extends ApiController
         $ps = $db->table('payslips')->where('id', $id)->get()->getRowArray();
         if (! $ps) return $this->fail('Not found', 404);
 
-        // Authorize: employee can only see own
-        if (! $this->tenant()->isSuperAdmin()) {
-            if ((int) $ps['company_id'] !== $this->companyId()) return $this->fail('Forbidden', 403);
-            // Non-HR can only see own
-            $roleId = $this->tenant()->getRoleId();
-            if (in_array($roleId, [4], true) && (int) $ps['employee_id'] !== $this->tenant()->getEmployeeId()) {
-                return $this->fail('Forbidden', 403);
-            }
+        // Authorization: PrivacyScope cek tenant + (own || canViewAll). Lihat
+        // docs/DATA_PRIVACY.md. Mengganti hardcoded role check lama.
+        if (! $this->privacy()->canAccessRow($ps, 'payslip')) {
+            return $this->fail('Forbidden', 403);
         }
 
         $details = $db->table('payslip_details')->where('payslip_id', $id)->orderBy('sort_order', 'ASC')->get()->getResultArray();
@@ -68,12 +78,8 @@ class PayslipController extends ApiController
         $ps = $db->table('payslips')->where('id', $id)->get()->getRowArray();
         if (! $ps) return $this->fail('Not found', 404);
 
-        if (! $this->tenant()->isSuperAdmin()) {
-            if ((int) $ps['company_id'] !== $this->companyId()) return $this->fail('Forbidden', 403);
-            $roleId = $this->tenant()->getRoleId();
-            if (in_array($roleId, [4], true) && (int) $ps['employee_id'] !== $this->tenant()->getEmployeeId()) {
-                return $this->fail('Forbidden', 403);
-            }
+        if (! $this->privacy()->canAccessRow($ps, 'payslip')) {
+            return $this->fail('Forbidden', 403);
         }
 
         $period = $db->table('payroll_periods')->where('id', $ps['payroll_period_id'])->get()->getRowArray();
@@ -82,9 +88,12 @@ class PayslipController extends ApiController
 
         $html = view('payslip_pdf', compact('ps', 'period', 'company', 'details'));
 
+        // Slip gaji dicetak di kertas setengah A4 (A5 portrait, 148×210mm)
+        // sesuai permintaan user — ringkas, hemat kertas, sesuai praktik
+        // umum slip gaji yang biasanya dipotong jadi 2 di A4.
         $dompdf = new \Dompdf\Dompdf(['isHtml5ParserEnabled' => true]);
         $dompdf->loadHtml($html);
-        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->setPaper('A5', 'landscape');
         $dompdf->render();
         $output = $dompdf->output();
 
@@ -106,13 +115,9 @@ class PayslipController extends ApiController
         $ps = $db->table('payslips')->where('id', $id)->get()->getRowArray();
         if (! $ps) return $this->fail('Not found', 404);
 
-        // Authorization sama dengan show()/pdf().
-        if (! $this->tenant()->isSuperAdmin()) {
-            if ((int) $ps['company_id'] !== $this->companyId()) return $this->fail('Forbidden', 403);
-            $roleId = $this->tenant()->getRoleId();
-            if (in_array($roleId, [4], true) && (int) $ps['employee_id'] !== $this->tenant()->getEmployeeId()) {
-                return $this->fail('Forbidden', 403);
-            }
+        // Authorization sama dengan show()/pdf() — pakai PrivacyScope.
+        if (! $this->privacy()->canAccessRow($ps, 'payslip')) {
+            return $this->fail('Forbidden', 403);
         }
 
         try {

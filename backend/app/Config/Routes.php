@@ -32,6 +32,14 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     // Health check
     $routes->get('health', 'HealthController::index');
 
+    // CSP violation report (browser POST sebagai application/csp-report) — public,
+    // browser tidak forward auth header. Throttle:api di global filter sudah cover.
+    $routes->post('csp-report', 'CspReportController::report');
+
+    // File serve via signed URL — public karena <img> tag tidak forward JWT.
+    // Token HMAC + expiry pendek (lihat FileStorage::signedUrl) cover akses.
+    $routes->get('files/serve', 'FileServeController::serve');
+
     // ─── Authenticated routes ────────────────────────────────────────
     $routes->group('', ['filter' => 'jwt'], static function ($routes) {
 
@@ -41,6 +49,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/2fa/enable', 'AuthController::enableTwoFactor');
         $routes->post('auth/2fa/disable', 'AuthController::disableTwoFactor');
+        // Foto profil — self-service upload/hapus, JPEG/PNG/WebP ≤ 2 MB.
+        $routes->post('auth/me/avatar',   'AuthController::uploadAvatar');
+        $routes->delete('auth/me/avatar', 'AuthController::deleteAvatar');
 
         // Master: Companies / Business Units
         $routes->resource('companies', ['controller' => 'CompanyController']);
@@ -124,14 +135,19 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
 
         // Payroll
         $routes->resource('payroll-components', ['controller' => 'PayrollComponentController']);
-        $routes->resource('payroll-periods', ['controller' => 'PayrollPeriodController']);
-        $routes->post('payroll-periods/(:num)/calculate', 'PayrollPeriodController::calculate/$1');
-        $routes->post('payroll-periods/(:num)/finalize', 'PayrollPeriodController::finalize/$1');
-        // Payroll Output (export untuk bank, e-SPT, BPJS)
+
+        // Payroll periods — endpoint khusus harus didefinisikan SEBELUM
+        // resource() supaya path multi-segment seperti
+        // /payroll-periods/4/export-summary tidak nyangkut sebagai
+        // resource show() (yang akan return period biasa, bukan summary
+        // export). Pola sama dengan leaves & goals di atas.
+        $routes->post('payroll-periods/(:num)/calculate',     'PayrollPeriodController::calculate/$1');
+        $routes->post('payroll-periods/(:num)/finalize',      'PayrollPeriodController::finalize/$1');
         $routes->get('payroll-periods/(:num)/export-summary', 'PayrollPeriodController::exportSummary/$1');
         $routes->get('payroll-periods/(:num)/bank-export',    'PayrollPeriodController::bankExport/$1');
         $routes->get('payroll-periods/(:num)/pph21-export',   'PayrollPeriodController::pph21Export/$1');
         $routes->get('payroll-periods/(:num)/bpjs-export',    'PayrollPeriodController::bpjsExport/$1');
+        $routes->resource('payroll-periods', ['controller' => 'PayrollPeriodController']);
         $routes->get('payslips', 'PayslipController::index');
         $routes->get('payslips/my', 'PayslipController::my');
         $routes->get('payslips/(:num)', 'PayslipController::show/$1');
@@ -149,6 +165,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('notifications/(:num)/read', 'NotificationController::markRead/$1');
         $routes->post('notifications/read-all', 'NotificationController::markAllRead');
 
+        // Notification preferences (per user, multi-channel)
+        // Lihat docs/AUDIT.md item K
+        $routes->get('notification-preferences',  'NotificationPreferenceController::index');
+        $routes->put('notification-preferences',  'NotificationPreferenceController::update');
+
         // Roles & Permissions (admin)
         $routes->resource('roles', ['controller' => 'RoleController']);
         $routes->resource('permissions', ['controller' => 'PermissionController']);
@@ -157,6 +178,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Reports
         $routes->get('reports/headcount', 'ReportController::headcount');
         $routes->get('reports/attendance-summary', 'ReportController::attendanceSummary');
+        $routes->get('reports/attendance-heatmap', 'ReportController::attendanceHeatmap');
         $routes->get('reports/payroll-summary', 'ReportController::payrollSummary');
         $routes->get('reports/leave-summary', 'ReportController::leaveSummary');
 
@@ -169,6 +191,15 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Settings (per company)
         $routes->get('settings', 'SettingController::index');
         $routes->put('settings', 'SettingController::update');
+
+        // Organization Development — Easy Setting (drag-and-drop org structure)
+        // Lihat docs/ORG_STRUCTURE.md untuk pola pemakaian.
+        $routes->get('org-structure',                       'OrgStructureController::index');
+        $routes->post('org-structure/move-department',      'OrgStructureController::moveDepartment');
+        $routes->post('org-structure/move-position',        'OrgStructureController::movePosition');
+        $routes->post('org-structure/set-manager',          'OrgStructureController::setManager');
+        $routes->post('org-structure/bulk-reorder',         'OrgStructureController::bulkReorder');
+        $routes->post('org-structure/recompute-reports',    'OrgStructureController::recomputeReports');
 
         // Allowance mapping (per cabang & grade)
         $routes->get('allowance-types',          'AllowanceController::listTypes');
@@ -406,6 +437,29 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->delete('contract-templates/(:num)',             'ContractTemplateController::delete/$1');
         $routes->post('contract-templates/(:num)/preview',       'ContractTemplateController::preview/$1');
         $routes->post('contract-templates/(:num)/generate',      'ContractTemplateController::generate/$1');
+
+        // ─── Generic File Upload (Sprint 3 item I) ─────────────────
+        // POST /upload?context=ticket|candidate_doc|employee_doc|training_cert&entity_id=N
+        // Validasi MIME + size + multi-tenant ownership di controller.
+        $routes->post('upload', 'FileUploadController::upload');
+
+        // ─── Pre-create attachment upload ──────────────────────────
+        // POST /upload/attachment?context=leave|overtime|reimbursement|...
+        // Untuk lampiran/bukti yang ditempel ke field `attachment_path`
+        // di payload create form. Boleh dipanggil sebelum parent record
+        // dibuat. Lihat FileUploadController::ATTACHMENT_CONTEXTS.
+        $routes->post('upload/attachment', 'FileUploadController::uploadAttachment');
+
+        // ─── Resignation Requests (self-service) ───────────────────
+        // Karyawan ajukan surat resign → atasan approve → HR approve →
+        // auto-trigger offboarding tasks (lihat docs/RESIGNATION.md).
+        $routes->get('resignations/reasons',          'ResignationController::reasons');
+        $routes->get('resignations',                  'ResignationController::index');
+        $routes->post('resignations',                 'ResignationController::create');
+        $routes->get('resignations/(:num)',           'ResignationController::show/$1');
+        $routes->post('resignations/(:num)/approve',  'ResignationController::approve/$1');
+        $routes->post('resignations/(:num)/reject',   'ResignationController::reject/$1');
+        $routes->post('resignations/(:num)/cancel',   'ResignationController::cancel/$1');
 
         // ─── Generated Contracts ───────────────────────────────────
         $routes->get('generated-contracts',                  'GeneratedContractController::index');

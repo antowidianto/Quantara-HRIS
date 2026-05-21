@@ -27,7 +27,7 @@ class SeveranceController extends ApiController
         $db = \Config\Database::connect();
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $status = (string) ($this->request->getGet('status') ?? '');
 
         $builder = $db->table('severance_calculations sc')
@@ -37,9 +37,18 @@ class SeveranceController extends ApiController
             ->join('positions p', 'p.id = e.position_id', 'left')
             ->join('departments d', 'd.id = e.department_id', 'left')
             ->where('sc.deleted_at IS NULL');
-        $this->tenant()->applyScope($builder, 'sc.company_id');
 
-        if ($employeeId) $builder->where('sc.employee_id', $employeeId);
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): pesangon =
+        // sangat sensitif. Tanpa `severance.view`/`manage`, paksa filter
+        // ke milik sendiri. Sebelumnya `?employee_id=X` mentah → bocor.
+        $effective = $this->privacy()->applyListScope(
+            $builder, module: 'severance',
+            companyColumn: 'sc.company_id',
+            employeeColumn: 'sc.employee_id',
+            requestedEmployeeId: $requestedEmpId ?: null,
+        );
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($status !== '' && in_array($status, ['DRAFT','FINALIZED','PAID','CANCELLED'], true)) {
             $builder->where('sc.status', $status);
         }
@@ -105,7 +114,10 @@ class SeveranceController extends ApiController
         $salary = (float) ($data['last_monthly_salary']
             ?? $emp['basic_salary'] + ($emp['fixed_allowance'] ?? 0));
 
-        // Default unused leave dari leave_balances kalau tidak diberikan
+        // Default unused leave dari leave_balances kalau tidak diberikan.
+        // Schema kolomnya `period_year` (bukan `year`) — lihat migrasi
+        // 000004_CreateLeaveOvertimeTables. Filter category=ANNUAL bukan
+        // code agar tidak bergantung kode lokal mis. 'ANN', 'CT', dst.
         $unusedLeave = $data['unused_leave_days'] ?? null;
         if ($unusedLeave === null) {
             $year = (int) date('Y', strtotime($data['termination_date']));
@@ -113,8 +125,10 @@ class SeveranceController extends ApiController
                 ->select('lb.remaining')
                 ->join('leave_types lt', 'lt.id = lb.leave_type_id')
                 ->where('lb.employee_id', (int) $emp['id'])
-                ->where('lb.year', $year)
-                ->where('lt.code', 'ANNUAL')
+                ->where('lb.period_year', $year)
+                ->where('lt.category', 'ANNUAL')
+                ->orderBy('lb.id', 'DESC')
+                ->limit(1)
                 ->get()->getRowArray();
             $unusedLeave = $row ? (float) $row['remaining'] : 0;
         }
@@ -239,10 +253,15 @@ class SeveranceController extends ApiController
         $db->table('severance_calculations')->insert($insert);
         $id = (int) $db->insertID();
 
+        // logCreate signature: (entity, entityId, after, description, metadata)
+        // Severity ditentukan internal oleh AuditLogger; tidak ada named param.
+        // Semua method dengan severity custom pakai `log(action: ..., severity: ...)`.
         Services::audit()->forModule('HR')->logCreate(
-            'severance_calculation', $id, $insert,
-            "Hitung severance untuk {$emp['full_name']} ({$result['reason_label']}, total: " . number_format($result['total_amount'], 0, ',', '.') . ')',
-            severity: 'NOTICE'
+            'severance_calculation',
+            $id,
+            $insert,
+            "Hitung severance untuk {$emp['full_name']} ({$result['reason_label']}, total: "
+                . number_format($result['total_amount'], 0, ',', '.') . ')',
         );
         return $this->ok(['id' => $id, 'result' => $result], 'Perhitungan disimpan sebagai DRAFT', 201);
     }

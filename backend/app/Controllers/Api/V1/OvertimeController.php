@@ -12,14 +12,26 @@ class OvertimeController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $status = trim((string) $this->request->getGet('status'));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $mine = $this->request->getGet('mine');
 
         $builder = $db->table('overtimes o')
             ->select('o.*, e.full_name AS employee_name, e.employee_number')
             ->join('employees e', 'e.id = o.employee_id');
-        $this->tenant()->applyScope($builder, 'o.company_id');
 
-        if ($employeeId) $builder->where('o.employee_id', $employeeId);
+        // Privacy scope: tanpa `overtime.view`, paksa filter ke employee_id
+        // sendiri. Detail jam lembur termasuk data sensitif (gaji turunan).
+        $effectiveEmpId = $this->privacy()->applyListScope(
+            $builder,
+            module: 'overtime',
+            companyColumn: 'o.company_id',
+            employeeColumn: 'o.employee_id',
+            requestedEmployeeId: $mine ? $this->tenant()->getEmployeeId() : ($requestedEmpId ?: null),
+        );
+        if ($effectiveEmpId === null) {
+            return $this->fail('Anda tidak memiliki akses ke modul lembur.', 403);
+        }
+
         if ($status) $builder->where('o.status', $status);
 
         $total = $builder->countAllResults(false);
@@ -33,6 +45,11 @@ class OvertimeController extends ApiController
         $db = \Config\Database::connect();
         $row = $db->table('overtimes')->where('id', (int) $id)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
+        // Sebelumnya endpoint ini tanpa authorization — bisa diakses ID lain
+        // di tenant berbeda. PrivacyScope::canAccessRow cek tenant + own/all.
+        if (! $this->privacy()->canAccessRow($row, 'overtime')) {
+            return $this->fail('Forbidden', 403);
+        }
         return $this->ok($row);
     }
 

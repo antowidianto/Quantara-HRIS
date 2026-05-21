@@ -23,6 +23,40 @@ class ApiSecurityHeadersFilter implements FilterInterface
         $response->setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
         $response->setHeader('Pragma', 'no-cache');
 
+        // Content-Security-Policy: dimulai dari report-only di staging supaya
+        // kita bisa observe dulu sebelum enforce. Set env `csp.enforce=true`
+        // untuk switch ke enforce mode setelah verifikasi.
+        //
+        // - default-src 'self'                  → semua resource dari origin sendiri
+        // - script-src 'self'                   → tidak ada inline script + tidak ada CDN luar
+        // - style-src 'self' 'unsafe-inline'    → Tailwind generate inline style minor
+        // - img-src 'self' data: blob:          → izinkan base64 selfie + map tile
+        // - connect-src 'self'                  → API call hanya ke origin
+        // - frame-ancestors 'none'              → tidak boleh di-iframe (clickjacking)
+        // - object-src 'none'                   → blok Flash/applet
+        // - base-uri 'self'                     → cegah base tag injection
+        // - form-action 'self'                  → form tidak bisa POST ke domain luar
+        $cspParts = [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob: https:",
+            "font-src 'self' data:",
+            "connect-src 'self'",
+            "frame-ancestors 'none'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "report-uri /api/v1/csp-report",
+        ];
+        $csp = implode('; ', $cspParts);
+
+        $enforce = (bool) (env('csp.enforce') ?? false);
+        $headerName = $enforce
+            ? 'Content-Security-Policy'
+            : 'Content-Security-Policy-Report-Only';
+        $response->setHeader($headerName, $csp);
+
         if (ENVIRONMENT === 'production') {
             $response->setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
         }

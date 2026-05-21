@@ -80,6 +80,19 @@ class Services extends BaseService
         return new \App\Libraries\TenantContext();
     }
 
+    /**
+     * PrivacyScope — enforce employee-level data isolation + filter whitelist
+     * permission-aware. Lihat docs/DATA_PRIVACY.md.
+     */
+    public static function privacy(bool $getShared = true): \App\Libraries\PrivacyScope
+    {
+        if ($getShared) {
+            return static::getSharedInstance('privacy');
+        }
+
+        return new \App\Libraries\PrivacyScope(static::tenant());
+    }
+
     public static function allowance(bool $getShared = true): \App\Libraries\AllowanceService
     {
         if ($getShared) {
@@ -213,5 +226,36 @@ class Services extends BaseService
         }
 
         return new \App\Libraries\PerformanceService();
+    }
+
+    /**
+     * FileStorage — abstraksi storage backend untuk file user-uploaded.
+     * Default LocalDriver. Future: env('storage.driver') = 's3' bisa pilih S3Driver.
+     * Lihat docs/AUDIT.md item C.5.
+     */
+    public static function fileStorage(bool $getShared = true): \App\Libraries\FileStorage\FileStorageInterface
+    {
+        if ($getShared) {
+            return static::getSharedInstance('fileStorage');
+        }
+
+        $driver = (string) (env('storage.driver') ?? 'local');
+        return match ($driver) {
+            // 's3' => new \App\Libraries\FileStorage\S3Driver(),  // future
+            default => new \App\Libraries\FileStorage\LocalDriver(),
+        };
+    }
+
+    /**
+     * Encryption — AES-256-GCM dengan multi-key versioning.
+     * Lihat docs/AUDIT.md item B.
+     */
+    public static function encryption(bool $getShared = true): \App\Libraries\Encryption
+    {
+        if ($getShared) {
+            return static::getSharedInstance('encryption');
+        }
+
+        return new \App\Libraries\Encryption();
     }
 }

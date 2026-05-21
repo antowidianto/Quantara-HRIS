@@ -67,7 +67,7 @@ class PayrollExporter
             ->orderBy('e.full_name', 'ASC')
             ->get()->getResultArray();
 
-        $crypt = new Encryption();
+        $crypt = \Config\Services::encryption();
 
         $rows = [];
         $rows[] = $this->bankHeader($bank);
@@ -175,7 +175,7 @@ class PayrollExporter
             ->orderBy('e.full_name', 'ASC')
             ->get()->getResultArray();
 
-        $crypt = new Encryption();
+        $crypt = \Config\Services::encryption();
         $masa  = (int) ($period['period_month'] ?? date('n', strtotime($period['start_date'])));
         $tahun = (int) $period['period_year'];
         $isDecember = (int) ($period['is_december_correction'] ?? 0) === 1 || $finalForm;
@@ -235,7 +235,7 @@ class PayrollExporter
             ->orderBy('e.full_name', 'ASC')
             ->get()->getResultArray();
 
-        $crypt = new Encryption();
+        $crypt = \Config\Services::encryption();
         $rows = [];
         $rows[] = 'No_KPJ;NIK;Nama;Tgl_Lahir;Upah;JHT_Karyawan;JHT_Perusahaan;JP_Karyawan;JP_Perusahaan;JKK;JKM';
 
@@ -285,7 +285,7 @@ class PayrollExporter
             ->orderBy('e.full_name', 'ASC')
             ->get()->getResultArray();
 
-        $crypt = new Encryption();
+        $crypt = \Config\Services::encryption();
         $rows = [];
         $rows[] = 'No_BPJS;NIK;Nama;Status_PTKP;Upah_Pokok;Iuran_Karyawan;Iuran_Perusahaan;Total';
 
@@ -335,7 +335,7 @@ class PayrollExporter
             throw new \InvalidArgumentException('Payslip tidak ditemukan');
         }
 
-        $crypt = new Encryption();
+        $crypt = \Config\Services::encryption();
         $npwp = '';
         $nik  = '';
         try {

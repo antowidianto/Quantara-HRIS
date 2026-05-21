@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
+import FileUploader from '@/components/FileUploader.vue'
 
 const props = defineProps({
   day: { type: Object, required: true },
@@ -130,8 +131,11 @@ async function submit() {
 
         <div>
           <label class="block text-sm font-medium mb-1">Lampiran (opsional)</label>
-          <input v-model="form.attachment_path" type="text" class="input w-full"
-            placeholder="URL/path file pendukung (mis. surat dokter)" />
+          <FileUploader
+            v-model="form.attachment_path"
+            context="change_request"
+            hint="Surat dokter, screenshot meeting, dst. Max 5 MB."
+          />
         </div>
       </div>
 

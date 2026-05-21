@@ -47,6 +47,31 @@ const detailLoading = ref(false)
 const note = ref('')
 const submitting = ref(false)
 
+// Sprint 5-6 item O — bulk action di Approval Inbox.
+// Set ID yang dicentang (Set untuk O(1) toggle, di-spread ke array saat dipakai).
+const bulkSelected = ref(new Set())
+const bulkProcessing = ref(false)
+
+const allSelected = computed(() =>
+  items.value.length > 0 && bulkSelected.value.size === items.value.length
+)
+const someSelected = computed(() =>
+  bulkSelected.value.size > 0 && bulkSelected.value.size < items.value.length
+)
+function toggleAll() {
+  if (allSelected.value) {
+    bulkSelected.value = new Set()
+  } else {
+    bulkSelected.value = new Set(items.value.map(i => i.id))
+  }
+}
+function toggleOne(id) {
+  // Trigger reactivity dengan rebuild Set
+  const next = new Set(bulkSelected.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  bulkSelected.value = next
+}
+
 async function fetchData() {
   loading.value = true
   try {
@@ -104,6 +129,43 @@ async function decide(action) {
   }
 }
 
+/**
+ * Bulk approve/reject. Sequential supaya backend tidak overloaded dan kalau
+ * ada satu yang gagal, sisanya masih lanjut. Setiap success/failure di-summary
+ * di toast akhir; detail per-id bisa dilihat di audit log kalau perlu.
+ */
+async function bulkDecide(action) {
+  if (bulkSelected.value.size === 0) return
+  let bulkNote = ''
+  if (action === 'reject') {
+    const promptResult = window.prompt('Alasan penolakan (akan dipakai untuk semua):', '')
+    if (! promptResult || ! promptResult.trim()) {
+      toast.warning('Alasan penolakan wajib diisi untuk bulk reject')
+      return
+    }
+    bulkNote = promptResult.trim()
+  } else {
+    if (! window.confirm(`Setujui ${bulkSelected.value.size} permintaan sekaligus?`)) return
+  }
+  bulkProcessing.value = true
+  const ids = Array.from(bulkSelected.value)
+  let ok = 0, fail = 0
+  for (const id of ids) {
+    try {
+      await api.post(`/approval-requests/${id}/${action}`, { note: bulkNote })
+      ok++
+    } catch (_) {
+      fail++
+    }
+  }
+  bulkProcessing.value = false
+  bulkSelected.value = new Set()
+  if (ok > 0 && fail === 0) toast.success(`${ok} permintaan ${action === 'approve' ? 'disetujui' : 'ditolak'}`)
+  else if (ok > 0 && fail > 0) toast.warning(`${ok} berhasil, ${fail} gagal. Cek detail.`)
+  else toast.error(`Semua ${fail} permintaan gagal diproses`)
+  fetchData()
+}
+
 onMounted(() => fetchData())
 watch(filterModule, () => fetchData())
 
@@ -152,8 +214,29 @@ function isDelegateRole(role) {
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- LIST -->
       <div class="lg:col-span-1 card overflow-hidden">
-        <div class="card-header text-sm text-gray-500">
-          {{ items.length }} permintaan menunggu
+        <!-- Header dengan bulk action bar (Sprint 5-6 item O) -->
+        <div class="card-header">
+          <div v-if="bulkSelected.size === 0" class="flex items-center gap-2 text-sm text-gray-500">
+            <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected"
+                   @change="toggleAll" class="rounded border-gray-300"
+                   :disabled="items.length === 0" :title="`Pilih ${items.length}`">
+            <span>{{ items.length }} permintaan menunggu</span>
+          </div>
+          <div v-else class="flex items-center justify-between text-sm bg-primary-50 -mx-4 -my-3 px-4 py-3 border-b border-primary-200">
+            <div class="flex items-center gap-2">
+              <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected"
+                     @change="toggleAll" class="rounded border-gray-300">
+              <span class="font-medium text-primary-900">{{ bulkSelected.size }} dipilih</span>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-sm btn-success" :disabled="bulkProcessing" @click="bulkDecide('approve')">
+                <CheckCircleIcon class="w-4 h-4" /> Setujui Semua
+              </button>
+              <button class="btn btn-sm btn-danger" :disabled="bulkProcessing" @click="bulkDecide('reject')">
+                <XCircleIcon class="w-4 h-4" /> Tolak Semua
+              </button>
+            </div>
+          </div>
         </div>
         <div class="divide-y divide-gray-100 max-h-[70vh] overflow-y-auto">
           <div v-if="loading" class="px-4 py-8 text-center text-sm text-gray-400">Memuat...</div>
@@ -161,19 +244,28 @@ function isDelegateRole(role) {
             <CheckCircleIcon class="w-10 h-10 mx-auto mb-2 text-gray-300" />
             Tidak ada yang perlu disetujui
           </div>
-          <button v-for="item in items" :key="item.id"
-            class="w-full text-left px-4 py-3 hover:bg-gray-50 transition"
+          <div v-for="item in items" :key="item.id"
+            class="flex w-full items-start gap-2 px-4 py-3 hover:bg-gray-50 transition cursor-pointer"
             :class="{ 'bg-primary-50/40 border-l-4 border-primary-500': selected === item.id }"
             @click="selectItem(item)">
+            <input
+              type="checkbox"
+              :checked="bulkSelected.has(item.id)"
+              @click.stop="toggleOne(item.id)"
+              class="mt-1 rounded border-gray-300"
+              :title="`Centang untuk bulk action`"
+            >
+            <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between mb-1">
-              <span class="font-medium text-sm">{{ item.subject }}</span>
-              <span class="text-xs text-gray-400">{{ moduleLabel[item.module] || item.module }}</span>
+              <span class="font-medium text-sm truncate">{{ item.subject }}</span>
+              <span class="text-xs text-gray-400 ml-2 shrink-0">{{ moduleLabel[item.module] || item.module }}</span>
             </div>
             <div class="text-xs text-gray-500">
               {{ item.employee_name }} · Step {{ item.current_step_order }} ({{ item.step_name }})
             </div>
             <div class="text-xs text-gray-400 mt-1">{{ fmtDate(item.created_at) }}</div>
-          </button>
+            </div>
+          </div>
         </div>
       </div>
 

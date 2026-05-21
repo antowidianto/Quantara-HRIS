@@ -72,12 +72,14 @@ class TrainingController extends ApiController
         $q       = trim((string) $this->request->getGet('q'));
         $status  = trim((string) $this->request->getGet('status'));
         $cat     = trim((string) $this->request->getGet('category'));
+        $employeeId = $this->getMyEmployeeId();
 
         $b = $this->db()->table('trainings t')
             ->select('t.*, d.name AS department_name, '
                 . '(SELECT COUNT(*) FROM training_registrations r WHERE r.training_id = t.id AND r.status NOT IN ("CANCELLED","REJECTED")) AS participant_count')
             ->join('departments d', 'd.id = t.department_id', 'left')
-            ->where('t.deleted_at IS NULL');
+            ->where('t.deleted_at IS NULL')
+            ->where('t.company_id', $this->tenant()->getCompanyId());
         $this->tenant()->applyScope($b, 't.company_id');
 
         if ($q !== '') $b->groupStart()->like('t.title', $q)->orLike('t.code', $q)->orLike('t.provider', $q)->groupEnd();
@@ -376,10 +378,12 @@ class TrainingController extends ApiController
 
     public function listCertificates()
     {
-        if (! $this->can('certificate.view')) return $this->fail('Forbidden', 403);
+        // Permission cek lewat PrivacyScope (canViewOwn untuk training =
+        // include certificate juga). User tanpa cert.view tetap bisa lihat
+        // sertifikatnya sendiri.
         $perPage = max(1, min(100, (int) ($this->request->getGet('per_page') ?? 20)));
         $page    = max(1, (int) ($this->request->getGet('page') ?? 1));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $status = trim((string) $this->request->getGet('status'));
         $mine = (int) ($this->request->getGet('mine') ?? 0);
 
@@ -387,15 +391,25 @@ class TrainingController extends ApiController
             ->select('c.*, e.full_name AS employee_name, e.employee_number, t.title AS training_title')
             ->join('employees e', 'e.id = c.employee_id')
             ->join('trainings t', 't.id = c.training_id', 'left')
-            ->where('c.deleted_at IS NULL');
-        $this->tenant()->applyScope($b, 'c.company_id');
+            ->where('c.deleted_at IS NULL') 
+            ->where('c.employee_id', $this->getMyEmployeeId());
 
-        if ($mine) {
-            $myEmpId = $this->getMyEmployeeId();
-            if ($myEmpId) $b->where('c.employee_id', $myEmpId);
-        } elseif ($employeeId) {
-            $b->where('c.employee_id', $employeeId);
-        }
+        // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa permission HR
+        // (`training.view`/`manage`/`certificate.view`), karyawan hanya boleh
+        // lihat sertifikatnya sendiri. Sebelumnya `?employee_id=X` mentah
+        // → bocor.
+        
+        $effective = $this->privacy()->applyListScope(
+            $b, module: 'training',
+            companyColumn: 'c.company_id',
+            employeeColumn: 'c.employee_id',
+            requestedEmployeeId: $mine
+                ? $this->getMyEmployeeId()
+                : ($requestedEmpId ?: null),
+        );
+        
+        if ($effective === null) return $this->fail('Forbidden', 403);
+
         if ($status) $b->where('c.status', $status);
 
         $total = $b->countAllResults(false);

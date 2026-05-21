@@ -197,6 +197,10 @@ class AuditLogController extends ApiController
         $startDate = trim((string) $this->request->getGet('start_date'));
         $endDate   = trim((string) $this->request->getGet('end_date'));
         $requestId = trim((string) $this->request->getGet('request_id'));
+        // Default exclude data yang sudah di-archive (>2 tahun, lihat
+        // hr:archive-audit). Operator bisa override via ?include_archived=1
+        // untuk forensic / compliance review yang perlu data lama.
+        $includeArchived = (bool) ($this->request->getGet('include_archived') ?? 0);
 
         $builder = $db->table('audit_logs al')
             ->select('al.*, u.email AS user_email, u.name AS user_name')
@@ -204,6 +208,9 @@ class AuditLogController extends ApiController
 
         if (! $this->tenant()->isSuperAdmin()) {
             $builder->where('al.company_id', $this->companyId());
+        }
+        if (! $includeArchived) {
+            $builder->where('al.archived_at IS NULL');
         }
         if ($userId)    $builder->where('al.user_id', $userId);
         if ($entity)    $builder->where('al.entity', $entity);

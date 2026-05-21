@@ -5,6 +5,7 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
 import { InformationCircleIcon, ExclamationTriangleIcon } from '@heroicons/vue/24/outline'
+import FileUploader from '@/components/FileUploader.vue'
 
 /**
  * Form pengajuan cuti / izin (full page).
@@ -366,8 +367,11 @@ async function submit() {
             <span v-if="selectedType?.requires_doc" class="text-red-500">*</span>
             <span v-else class="text-gray-400">(opsional)</span>
           </label>
-          <input v-model="form.attachment" type="text" class="input"
-            placeholder="URL/path file pendukung (mis. surat dokter)" />
+          <FileUploader
+            v-model="form.attachment"
+            context="leave"
+            hint="Surat dokter, surat keterangan, dst. Max 5 MB."
+          />
         </div>
 
         <div>

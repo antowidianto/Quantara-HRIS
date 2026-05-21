@@ -15,7 +15,7 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
-import { useConfirm } from '@/composables/useConfirm'
+import { useConfirm, promptDialog } from '@/composables/useConfirm'
 import {
   ShieldExclamationIcon, ExclamationTriangleIcon, CheckCircleIcon,
   DevicePhoneMobileIcon, NoSymbolIcon, HandThumbUpIcon, FlagIcon,
@@ -143,12 +143,17 @@ async function trustDevice(d) {
 }
 
 async function blockDevice(d) {
-  const reason = window.prompt(
-    `Masukkan alasan memblokir device "${d.device_name || 'unknown'}":\n` +
-    `(Min 5 karakter — akan ditampilkan di audit log.)`
-  )
+  const reason = await promptDialog({
+    title: `Blokir device "${d.device_name || 'unknown'}"`,
+    message: 'Alasan akan ditampilkan di audit log.',
+    inputLabel: 'Alasan blok (min 5 karakter)',
+    inputType: 'textarea',
+    inputRequired: true,
+    okText: 'Blokir',
+    variant: 'danger',
+  })
   if (! reason || reason.trim().length < 5) {
-    toast.warning('Alasan blok min 5 karakter')
+    if (reason !== null) toast.warning('Alasan blok min 5 karakter')
     return
   }
   try {

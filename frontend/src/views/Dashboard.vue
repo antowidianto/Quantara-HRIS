@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api/client'
 import { UsersIcon, ClockIcon, CalendarDaysIcon, CurrencyDollarIcon, GiftIcon, CakeIcon } from '@heroicons/vue/24/outline'
+import AttendanceHeatmap from '@/components/AttendanceHeatmap.vue'
 
 const auth = useAuthStore()
 const headcount = ref(null)
@@ -208,6 +209,12 @@ function fmtCurrency(v) {
           </ul>
         </div>
       </div>
+    </div>
+
+    <!-- Heatmap absensi (HR only). Gating ke permission attendance.view_all
+         supaya non-HR tidak lihat agregat antar departemen. Sprint 5-6 item T. -->
+    <div v-if="auth.can('attendance.view_all') || auth.can('report.view')" class="mt-6">
+      <AttendanceHeatmap />
     </div>
   </div>
 </template>

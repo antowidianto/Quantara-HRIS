@@ -267,7 +267,7 @@ class DemoDataSeeder extends Seeder
             if ($r) $roleIds[$slug] = (int) $r['id'];
         }
 
-        $enc = new \App\Libraries\Encryption();
+        $enc = \Config\Services::encryption();
         $tempPassword = 'Demo@12345';
         $passwordHash = password_hash($tempPassword, PASSWORD_ARGON2ID);
 

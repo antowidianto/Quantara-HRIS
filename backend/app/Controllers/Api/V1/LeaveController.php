@@ -269,23 +269,45 @@ class LeaveController extends ApiController
         ]);
     }
 
+    private function getGender(){
+        $db = \Config\Database::connect();
+        $employeeId = $this->tenant()->getEmployeeId();
+        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        return strtoupper((string) ($emp['gender'] ?? ''));
+    }
+    
     public function index()
     {
         $db = \Config\Database::connect();
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $status = trim((string) $this->request->getGet('status'));
-        $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
+        // employee_id dari query param di-sanitasi via PrivacyScope:
+        //   - canViewAll: pakai apa adanya
+        //   - hanya view.own: di-paksa ke employee_id user, abaikan input
+        $requestedEmpId = (int) ($this->request->getGet('employee_id') ?? 0);
         $mine = $this->request->getGet('mine');
 
         $builder = $db->table('leaves l')
             ->select('l.*, e.full_name AS employee_name, e.employee_number, lt.code AS leave_code, lt.name AS leave_name')
             ->join('employees e', 'e.id = l.employee_id')
             ->join('leave_types lt', 'lt.id = l.leave_type_id');
-        $this->tenant()->applyScope($builder, 'l.company_id');
 
-        if ($mine) $builder->where('l.employee_id', $this->tenant()->getEmployeeId() ?: 0);
-        if ($employeeId) $builder->where('l.employee_id', $employeeId);
+        // Privacy scope: tenant + (kalau view.own only) paksa employee_id sendiri.
+        // `mine=1` query param adalah shortcut yang di-honor oleh applyListScope
+        // saat user punya canViewAll dan ingin filter eksplisit ke diri sendiri.
+        $effectiveEmpId = $this->privacy()->applyListScope(
+            $builder,
+            module: 'leave',
+            companyColumn: 'l.company_id',
+            employeeColumn: 'l.employee_id',
+            requestedEmployeeId: $mine ? $this->tenant()->getEmployeeId() : ($requestedEmpId ?: null),
+        );
+        if ($effectiveEmpId === null) {
+            return $this->fail('Anda tidak memiliki akses ke modul cuti.', 403);
+        }
+
+        // Filter status di-allow untuk semua role (tidak ada PII di status).
         if ($status) $builder->where('l.status', $status);
 
         $total = $builder->countAllResults(false);
