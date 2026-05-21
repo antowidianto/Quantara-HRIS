@@ -1,4 +1,4 @@
-# HRIS Project — Production-Ready Indonesian HRIS
+# Quantara - HRIS System
 
 Sistem Human Resource Information System (HRIS) yang patuh pada peraturan Kemenaker terbaru, mendukung **multi business unit**, payroll siap pakai, notifikasi in-app & email, dan keamanan berlapis.
 
