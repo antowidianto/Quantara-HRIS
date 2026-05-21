@@ -6,11 +6,15 @@ import 'vue-toastification/dist/index.css'
 import App from './App.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
+import { i18nPlugin } from './locales'
 import './assets/main.css'
 
 const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
+// i18n — register $t global property dan inject('i18n') untuk composable.
+// Ringan (~1 kB), reactive, persist ke localStorage. Lihat src/locales/index.js.
+app.use(i18nPlugin)
 app.use(Toast, {
   position: POSITION.TOP_RIGHT,
   timeout: 3500,

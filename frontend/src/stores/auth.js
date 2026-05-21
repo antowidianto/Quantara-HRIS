@@ -89,6 +89,9 @@ export const useAuthStore = defineStore('auth', {
       this.branch = d.branch || null
       this.role = d.role
       this.permissions = d.permissions || []
+      // avatar_url sudah ditandatangani backend (signed URL valid 1 jam).
+      // Komponen lain (sidebar, header) bisa pakai langsung sebagai
+      // <img :src="auth.user.avatar_url"> tanpa header Authorization.
 
       // User non-super-admin: activeCompany = company mereka
       if (d.role?.slug !== 'super_admin' && d.company?.id) {
@@ -118,6 +121,21 @@ export const useAuthStore = defineStore('auth', {
     async logout() {
       try { await api.post('/auth/logout') } catch (_) {}
       this.logoutLocal()
+    },
+
+    /**
+     * Update kolom user di store setelah upload/hapus avatar.
+     * Dipanggil dari Profile.vue setelah POST/DELETE /auth/me/avatar
+     * supaya semua komponen yang reaktif (sidebar, header) langsung
+     * lihat foto baru tanpa perlu fetchMe ulang.
+     */
+    setAvatar(avatarPath, avatarUrl) {
+      if (this.user) {
+        this.user = { ...this.user, avatar_path: avatarPath, avatar_url: avatarUrl }
+      }
+      if (this.employee) {
+        this.employee = { ...this.employee, avatar_path: avatarPath, avatar_url: avatarUrl }
+      }
     },
 
     logoutLocal() {

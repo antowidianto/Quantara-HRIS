@@ -31,6 +31,13 @@ const columns = [
   { key: 'type', label: 'Tipe', formatter: v => typeOptions.find(t => t.value === v)?.label || v },
   { key: 'branch_name', label: 'Cabang Induk' },
   { key: 'city', label: 'Kota' },
+  { key: 'lat', label: 'Geofence', formatter: (_v, item) => {
+      if (item.lat && item.lng) {
+        const r = item.geofence_radius_m ? `${item.geofence_radius_m} m` : 'tanpa radius'
+        return `✓ ${r}`
+      }
+      return '— belum di-set'
+    } },
   { key: 'allow_clock_here', label: 'Clock In/Out', formatter: v => v ? 'Ya' : 'Tidak' },
   { key: 'is_active', label: 'Status', formatter: v => v ? 'Aktif' : 'Non-aktif' },
 ]
@@ -45,9 +52,9 @@ const fields = [
   { key: 'city', label: 'Kota' },
   { key: 'postal_code', label: 'Kode Pos' },
   { key: 'phone', label: 'Telepon' },
-  { key: 'lat', label: 'Latitude', type: 'number', step: 'any' },
-  { key: 'lng', label: 'Longitude', type: 'number', step: 'any' },
-  { key: 'geofence_radius_m', label: 'Radius Geofence (m)', type: 'number' },
+  // Geofence picker (lat/lng + radius) — admin bisa "Ambil dari GPS sekarang"
+  // saat berdiri di lokasi, atau isi manual decimal kalau dari desktop.
+  { key: 'location', type: 'location' },
   { key: 'allow_clock_here', label: 'Izinkan Clock In/Out', type: 'checkbox' },
   { key: 'notes', label: 'Catatan', type: 'textarea' },
 ]

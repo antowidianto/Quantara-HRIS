@@ -1,4 +1,17 @@
 <script setup>
+/**
+ * Severance / Pesangon — kalkulator hak karyawan PHK.
+ *
+ * UX yang penting: backend `/severance/calculate` sudah men-derive semua
+ * variabel kalkulasi otomatis dari profil karyawan:
+ *   - last_monthly_salary  ← employees.basic_salary + fixed_allowance
+ *   - service_years        ← (termination_date - join_date) / 365.25
+ *   - unused_leave_days    ← leave_balances.remaining (kategori ANNUAL)
+ *
+ * Jadi UX modal ini cukup: pilih karyawan → pilih tanggal & alasan PHK →
+ * preview muncul otomatis. User boleh override field nominal kalau ada
+ * kondisi khusus. Lihat docs/SEVERANCE.md untuk detail formula.
+ */
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -7,7 +20,7 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import {
   CalculatorIcon, DocumentArrowDownIcon, CheckCircleIcon, BanknotesIcon,
-  NoSymbolIcon, PlusIcon, ArrowPathIcon,
+  NoSymbolIcon, PlusIcon, ArrowPathIcon, UserCircleIcon,
 } from '@heroicons/vue/24/outline'
 
 const auth = useAuthStore()
@@ -28,7 +41,7 @@ const filters = reactive({
   per_page: 20,
 })
 
-// Modal calculator state
+// ─── Modal calculator state ───────────────────────────────────────
 const showCalc = ref(false)
 const calcInput = reactive({
   employee_id: '',
@@ -46,6 +59,10 @@ const previewResult = ref(null)
 const previewBreakdown = ref('')
 const previewing = ref(false)
 const saving = ref(false)
+// Snapshot karyawan dari response backend — dipakai untuk feedback visual
+// "data ini diambil dari profil karyawan, bukan asumsi".
+const employeeSnapshot = ref(null)
+let previewDebounce = null
 
 const canManage = computed(() => auth.can('severance.manage'))
 
@@ -84,38 +101,62 @@ function openCalc() {
   })
   previewResult.value = null
   previewBreakdown.value = ''
+  employeeSnapshot.value = null
   showCalc.value = true
 }
 
-async function preview() {
+/**
+ * Kirim payload ke /severance/calculate. Backend sudah bertanggung jawab
+ * untuk auto-derive nilai default — kita cukup kirim apa yang user isi
+ * (termasuk yang kosong → backend skip dan pakai default).
+ *
+ * autoFill = true  → overwrite form input dengan nilai backend.
+ *                    Dipakai saat user pilih karyawan baru atau klik
+ *                    tombol "Hitung Ulang" manual.
+ * autoFill = false → cuma update preview, jangan ganggu input yang
+ *                    sedang user ketik (override manual tetap dihormati).
+ */
+async function preview(autoFill = false) {
   if (! calcInput.employee_id || ! calcInput.termination_date || ! calcInput.termination_reason) {
-    toast.error('Lengkapi: karyawan, tanggal PHK, alasan')
     return
   }
   previewing.value = true
   try {
     const payload = { ...calcInput }
-    // Hapus string kosong agar backend pakai default
     Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k] })
     const res = await api.post('/severance/calculate', payload)
-    previewResult.value = res.data.data.result
-    previewBreakdown.value = res.data.data.breakdown
-    // Auto-fill yang dihitung backend (mis. service_years dari join_date)
-    if (! calcInput.service_years && previewResult.value?.service_years) {
-      calcInput.service_years = previewResult.value.service_years
-    }
-    if (! calcInput.last_monthly_salary && previewResult.value?.last_monthly_salary) {
-      calcInput.last_monthly_salary = previewResult.value.last_monthly_salary
-    }
-    if (! calcInput.unused_leave_days && previewResult.value?.unused_leave_days) {
-      calcInput.unused_leave_days = previewResult.value.unused_leave_days
+    const d = res.data?.data || {}
+    previewResult.value = d.result || null
+    previewBreakdown.value = d.breakdown || ''
+    employeeSnapshot.value = d.employee || null
+
+    if (autoFill && previewResult.value) {
+      if (previewResult.value.service_years != null) {
+        calcInput.service_years = previewResult.value.service_years
+      }
+      if (previewResult.value.last_monthly_salary != null) {
+        calcInput.last_monthly_salary = previewResult.value.last_monthly_salary
+      }
+      if (previewResult.value.unused_leave_days != null) {
+        calcInput.unused_leave_days = previewResult.value.unused_leave_days
+      }
     }
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghitung')
+    if (autoFill) {
+      toast.error(e.response?.data?.message || 'Gagal menghitung')
+    }
     previewResult.value = null
   } finally {
     previewing.value = false
   }
+}
+
+function manualRecalc() {
+  if (! calcInput.employee_id) {
+    toast.error('Pilih karyawan terlebih dahulu')
+    return
+  }
+  preview(true)
 }
 
 async function save() {
@@ -204,9 +245,40 @@ const STATUS_BADGE = {
 const selectedReason = computed(() =>
   reasons.value.find(r => r.value === calcInput.termination_reason))
 
-// Auto re-preview saat input berubah
-watch(() => [calcInput.employee_id, calcInput.termination_date, calcInput.termination_reason],
-  () => { if (calcInput.employee_id) preview() })
+// ─── Watchers reaktif untuk live preview ───────────────────────────
+// Saat ganti karyawan: fetch profil + auto-fill SEMUA nominal.
+watch(() => calcInput.employee_id, (newId, oldId) => {
+  if (! newId) {
+    employeeSnapshot.value = null
+    previewResult.value = null
+    return
+  }
+  if (newId !== oldId) {
+    // Reset agar nilai dari karyawan sebelumnya tidak nyangkut.
+    calcInput.last_monthly_salary = ''
+    calcInput.service_years       = ''
+    calcInput.unused_leave_days   = ''
+  }
+  preview(true)
+})
+
+// Saat ganti tanggal/alasan: re-preview tanpa overwrite input lain.
+watch(() => [calcInput.termination_date, calcInput.termination_reason], () => {
+  if (! calcInput.employee_id) return
+  clearTimeout(previewDebounce)
+  previewDebounce = setTimeout(() => preview(false), 250)
+})
+
+// Saat user edit nominal manual: re-preview untuk update breakdown.
+// Debounce supaya tidak spam request setiap keystroke.
+watch(() => [
+  calcInput.last_monthly_salary, calcInput.service_years, calcInput.unused_leave_days,
+  calcInput.uph_homecoming_amount, calcInput.uph_other_amount, calcInput.separation_pay,
+], () => {
+  if (! calcInput.employee_id || ! previewResult.value) return
+  clearTimeout(previewDebounce)
+  previewDebounce = setTimeout(() => preview(false), 400)
+})
 </script>
 
 <template>
@@ -330,6 +402,40 @@ watch(() => [calcInput.employee_id, calcInput.termination_date, calcInput.termin
                   {{ e.full_name }} ({{ e.employee_number }})
                 </option>
               </select>
+              <p v-if="! calcInput.employee_id" class="text-xs text-gray-500 mt-1">
+                Setelah pilih karyawan, data gaji, masa kerja, dan sisa cuti akan dimuat otomatis.
+              </p>
+            </div>
+
+            <!-- Snapshot data karyawan terpilih — feedback visual bahwa
+                 backend sudah men-load profil + saldo cuti + masa kerja. -->
+            <div v-if="employeeSnapshot"
+              class="border border-emerald-200 bg-emerald-50 rounded p-3 text-xs space-y-1.5">
+              <div class="flex items-center gap-2 text-emerald-800 font-medium">
+                <UserCircleIcon class="w-4 h-4" />
+                Data Karyawan Ter-load Otomatis
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-emerald-900">
+                <div>
+                  <span class="text-emerald-600">Posisi:</span>
+                  {{ employeeSnapshot.position_name || '—' }}
+                </div>
+                <div>
+                  <span class="text-emerald-600">Departemen:</span>
+                  {{ employeeSnapshot.department_name || '—' }}
+                </div>
+                <div>
+                  <span class="text-emerald-600">Bergabung:</span>
+                  {{ fmtDate(employeeSnapshot.join_date) }}
+                </div>
+                <div>
+                  <span class="text-emerald-600">Gaji Pokok:</span>
+                  <strong>{{ fmtCurrency(employeeSnapshot.basic_salary || 0) }}</strong>
+                </div>
+              </div>
+              <div class="text-emerald-700 italic">
+                Field di bawah sudah di-auto-fill dari profil + saldo cuti. Edit kalau ada penyesuaian.
+              </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
@@ -393,7 +499,7 @@ watch(() => [calcInput.employee_id, calcInput.termination_date, calcInput.termin
             </div>
 
             <div class="flex gap-2 pt-2">
-              <button class="btn-secondary flex-1" :disabled="previewing" @click="preview">
+              <button class="btn-secondary flex-1" :disabled="previewing || ! calcInput.employee_id" @click="manualRecalc">
                 <ArrowPathIcon class="w-4 h-4" /> {{ previewing ? 'Menghitung...' : 'Hitung Ulang' }}
               </button>
               <button class="btn-primary flex-1" :disabled="saving || ! previewResult" @click="save">
@@ -404,11 +510,19 @@ watch(() => [calcInput.employee_id, calcInput.termination_date, calcInput.termin
 
           <!-- Right: preview -->
           <div class="border border-gray-200 rounded">
-            <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium text-sm">
-              Preview Perhitungan
+            <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium text-sm flex items-center justify-between">
+              <span>Preview Perhitungan</span>
+              <span v-if="previewing" class="text-xs text-blue-600 inline-flex items-center gap-1">
+                <ArrowPathIcon class="w-3 h-3 animate-spin" /> Menghitung...
+              </span>
             </div>
             <div v-if="! previewResult" class="p-12 text-center text-gray-400 text-sm">
-              Lengkapi karyawan + alasan, lalu klik Hitung Ulang.
+              <div v-if="! calcInput.employee_id">
+                Pilih karyawan untuk memulai. Sistem akan otomatis menghitung berdasarkan profil dan masa kerja.
+              </div>
+              <div v-else>
+                Memuat perhitungan...
+              </div>
             </div>
             <div v-else class="p-4 text-sm">
               <table class="w-full">
@@ -433,7 +547,8 @@ watch(() => [calcInput.employee_id, calcInput.termination_date, calcInput.termin
               </table>
               <div class="mt-3 text-xs text-gray-500">
                 Berdasarkan: {{ previewResult.reason_label }}<br>
-                Masa kerja: {{ Number(previewResult.service_years).toFixed(2) }} tahun ({{ previewResult.service_months }} bulan)
+                Masa kerja: {{ Number(previewResult.service_years).toFixed(2) }} tahun ({{ previewResult.service_months }} bulan)<br>
+                Upah dasar: {{ fmtCurrency(previewResult.last_monthly_salary) }} / bulan
               </div>
             </div>
           </div>

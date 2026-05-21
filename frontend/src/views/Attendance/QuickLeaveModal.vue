@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { LockClosedIcon, InformationCircleIcon } from '@heroicons/vue/24/outline'
+import FileUploader from '@/components/FileUploader.vue'
 
 /**
  * Modal pengajuan cuti / izin sakit cepat dari halaman Absensi Saya.
@@ -287,15 +288,17 @@ async function submit() {
             <div class="text-xs text-gray-500 mt-1">Minimal 5 karakter. Akan ditinjau oleh atasan / HR.</div>
           </div>
 
-          <div v-if="selectedType?.requires_doc">
-            <label class="block text-sm font-medium mb-1">Lampiran *</label>
-            <input v-model="form.attachment" type="text" class="input w-full"
-              placeholder="URL/path file pendukung (mis. surat dokter)" />
-          </div>
-          <div v-else>
-            <label class="block text-sm font-medium mb-1">Lampiran (opsional)</label>
-            <input v-model="form.attachment" type="text" class="input w-full"
-              placeholder="URL/path file pendukung" />
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              Lampiran
+              <span v-if="selectedType?.requires_doc" class="text-red-500">*</span>
+              <span v-else class="text-gray-400">(opsional)</span>
+            </label>
+            <FileUploader
+              v-model="form.attachment"
+              context="leave"
+              hint="Surat dokter, surat keterangan, dst. Max 5 MB."
+            />
           </div>
         </template>
       </div>

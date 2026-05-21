@@ -142,10 +142,14 @@
             </div>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Path File (opsional)</label>
-            <input v-model="form.file_path"
-              class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-              placeholder="/uploads/certs/xxx.pdf" />
+            <label class="block text-sm font-medium text-gray-700 mb-1">File Sertifikat (opsional)</label>
+            <FileUploader
+              v-model="form.file_path"
+              context="training"
+              accept=".pdf,.jpg,.jpeg,.png"
+              :max-size-mb="8"
+              hint="PDF/JPG/PNG sertifikat. Max 8 MB."
+            />
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Catatan</label>
@@ -169,6 +173,7 @@
 import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import FileUploader from '@/components/FileUploader.vue'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.can('certificate.manage'))

@@ -40,6 +40,40 @@ const generateForm = ref({ template_id: null, employee_contract_id: null, subjec
 const previewHtml = ref('')
 const previewLoading = ref(false)
 
+// ─── Riwayat & Aset (Sprint 3 item H) ──────────────────────────
+// Tab "Riwayat & Aset" lazy-loads 3 endpoint paralel saat di-aktifkan
+// pertama kali. Cache di state lokal sampai modal ditutup. Lihat
+// docs/AUDIT.md item H.
+const historyAssets = ref([])
+const historyDisciplinary = ref(null)
+const historyTasks = ref([])
+const historyLoaded = ref(false)
+const historyLoading = ref(false)
+const historyError = ref('')
+
+async function loadHistoryTab() {
+  if (! props.employeeId || historyLoaded.value || historyLoading.value) return
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    // Promise.allSettled supaya 1 endpoint gagal tidak blok yang lain
+    const eid = props.employeeId
+    const [aRes, dRes, tRes] = await Promise.allSettled([
+      api.get(`/asset-assignments/employee/${eid}`),
+      api.get(`/disciplinary-records/employee-summary/${eid}`),
+      api.get(`/employee-tasks/employee/${eid}`),
+    ])
+    historyAssets.value      = aRes.status === 'fulfilled' ? (aRes.value.data?.data || []) : []
+    historyDisciplinary.value= dRes.status === 'fulfilled' ? (dRes.value.data?.data || null) : null
+    historyTasks.value       = tRes.status === 'fulfilled' ? (tRes.value.data?.data || []) : []
+    historyLoaded.value = true
+  } catch (e) {
+    historyError.value = e?.message || 'Gagal memuat riwayat'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 const isCreating = computed(() => ! props.employeeId)
 const isEditing = computed(() => internalMode.value === 'edit' || isCreating.value)
 
@@ -331,18 +365,36 @@ async function deactivateEmployee() {
   }
 }
 
-const tabs = [
-  { id: 'general',    label: 'Identitas' },
-  { id: 'ktp',        label: 'KTP & Keluarga' },
-  { id: 'employment', label: 'Kepegawaian' },
-  { id: 'approval',   label: 'Approval' },
-  { id: 'salary',     label: 'Gaji & Pajak' },
-  { id: 'address',    label: 'Alamat & Lokasi' },
-  { id: 'allowances', label: 'Tunjangan' },
-  { id: 'contracts',  label: 'Kontrak' },
-  { id: 'leave',      label: 'Saldo Cuti' },
-]
+const tabs = computed(() => {
+  // Tab "Riwayat & Aset" hanya tampil saat editing existing employee.
+  // Saat create baru (employeeId null), endpoint history belum ada datanya.
+  const list = [
+    { id: 'general',    label: 'Identitas' },
+    { id: 'ktp',        label: 'KTP & Keluarga' },
+    { id: 'employment', label: 'Kepegawaian' },
+    { id: 'approval',   label: 'Approval' },
+    { id: 'salary',     label: 'Gaji & Pajak' },
+    { id: 'address',    label: 'Alamat & Lokasi' },
+    { id: 'allowances', label: 'Tunjangan' },
+    { id: 'contracts',  label: 'Kontrak' },
+    { id: 'leave',      label: 'Saldo Cuti' },
+  ]
+  if (! isCreating.value) {
+    list.push({ id: 'history', label: 'Riwayat & Aset' })
+  }
+  return list
+})
 const activeTab = ref('general')
+
+// Lazy-load history saat user pertama kali klik tab itu.
+watch(activeTab, (val) => {
+  if (val === 'history') loadHistoryTab()
+})
+
+function fmtDateOrDash(v) {
+  if (! v) return '—'
+  return new Date(v).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 </script>
 
 <template>
@@ -926,6 +978,133 @@ const activeTab = ref('general')
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- ── RIWAYAT & ASET (Sprint 3 item H) ─────────────────── -->
+        <div v-else-if="activeTab === 'history'" class="space-y-6">
+          <div v-if="historyLoading" class="text-center py-8 text-gray-400">Memuat riwayat…</div>
+          <div v-else-if="historyError" class="rounded-md p-3 bg-red-50 text-red-700 text-sm">
+            {{ historyError }}
+            <button class="ml-2 underline" @click="historyLoaded = false; loadHistoryTab()">Coba lagi</button>
+          </div>
+          <template v-else>
+            <!-- Aset Aktif -->
+            <section>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold">Aset Aktif & Histori</h3>
+                <span class="text-xs text-gray-500">{{ historyAssets.length }} aset</span>
+              </div>
+              <table v-if="historyAssets.length" class="table">
+                <thead>
+                  <tr>
+                    <th>Kode</th><th>Nama Aset</th><th>Kategori</th>
+                    <th>Mulai</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr v-for="a in historyAssets" :key="a.id">
+                    <td class="font-mono">{{ a.asset_code || a.code || '-' }}</td>
+                    <td>
+                      <div class="font-medium">{{ a.asset_name || a.name || '-' }}</div>
+                      <div v-if="a.serial_number" class="text-xs text-gray-500">SN: {{ a.serial_number }}</div>
+                    </td>
+                    <td>{{ a.category || '-' }}</td>
+                    <td>{{ fmtDateOrDash(a.assigned_at || a.start_date) }}</td>
+                    <td>
+                      <span v-if="a.returned_at" class="badge-gray">Dikembalikan</span>
+                      <span v-else class="badge-green">Aktif</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-else class="text-sm text-gray-400 italic">Belum ada aset yang dipinjamkan ke karyawan ini.</p>
+            </section>
+
+            <!-- Surat Peringatan -->
+            <section>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold">Surat Peringatan / Disciplinary</h3>
+                <span class="text-xs text-gray-500">
+                  Aktif: {{ historyDisciplinary?.active_count ?? 0 }}
+                  · Total: {{ historyDisciplinary?.total_count ?? 0 }}
+                </span>
+              </div>
+              <div v-if="historyDisciplinary?.active_count > 0"
+                class="mb-2 rounded-md p-2 bg-amber-50 text-amber-800 text-xs">
+                <strong>Level tertinggi aktif:</strong>
+                {{ historyDisciplinary?.highest_active_level || '-' }}
+                · berlaku sampai {{ fmtDateOrDash(historyDisciplinary?.highest_active_until) }}
+              </div>
+              <table v-if="(historyDisciplinary?.records || []).length" class="table">
+                <thead>
+                  <tr>
+                    <th>No SP</th><th>Level</th><th>Kategori</th>
+                    <th>Tanggal</th><th>Berlaku s.d</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr v-for="r in historyDisciplinary.records" :key="r.id">
+                    <td class="font-mono">{{ r.record_number || r.number || '-' }}</td>
+                    <td>
+                      <span :class="r.level === 'SP3' || r.level === 'PHK'
+                        ? 'badge-red' : (r.level === 'SP2' ? 'badge-yellow' : 'badge-blue')">
+                        {{ r.level }}
+                      </span>
+                    </td>
+                    <td>{{ r.category_name || r.category || '-' }}</td>
+                    <td>{{ fmtDateOrDash(r.issue_date || r.created_at) }}</td>
+                    <td>{{ fmtDateOrDash(r.valid_until || r.expires_at) }}</td>
+                    <td>
+                      <span v-if="r.status === 'ACTIVE'" class="badge-yellow">Aktif</span>
+                      <span v-else-if="r.status === 'EXPIRED'" class="badge-gray">Kadaluarsa</span>
+                      <span v-else-if="r.status === 'REVOKED'" class="badge-gray">Dicabut</span>
+                      <span v-else class="badge-gray">{{ r.status || '-' }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-else class="text-sm text-gray-400 italic">
+                Karyawan belum pernah menerima surat peringatan.
+              </p>
+            </section>
+
+            <!-- Onboarding / Offboarding Tasks -->
+            <section>
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold">Progress Tugas (Onboarding / Offboarding)</h3>
+                <span class="text-xs text-gray-500">{{ historyTasks.length }} task</span>
+              </div>
+              <table v-if="historyTasks.length" class="table">
+                <thead>
+                  <tr>
+                    <th>Tipe</th><th>Tugas</th><th>PIC</th>
+                    <th>Tenggat</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr v-for="t in historyTasks" :key="t.id">
+                    <td>
+                      <span :class="t.task_type === 'OFFBOARD' ? 'badge-red' : 'badge-blue'">
+                        {{ t.task_type || '-' }}
+                      </span>
+                    </td>
+                    <td>{{ t.title || t.name || '-' }}</td>
+                    <td>{{ t.assignee_name || '—' }}</td>
+                    <td>{{ fmtDateOrDash(t.due_date) }}</td>
+                    <td>
+                      <span v-if="t.status === 'DONE' || t.completed_at" class="badge-green">Selesai</span>
+                      <span v-else-if="t.status === 'IN_PROGRESS'" class="badge-blue">Berjalan</span>
+                      <span v-else-if="t.due_date && new Date(t.due_date) < new Date()" class="badge-red">Overdue</span>
+                      <span v-else class="badge-gray">{{ t.status || 'Pending' }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-else class="text-sm text-gray-400 italic">
+                Belum ada tugas onboarding/offboarding di-assign.
+              </p>
+            </section>
+          </template>
         </div>
       </div>
 

@@ -6,6 +6,13 @@ const columns = [
   { key: 'name', label: 'Nama' },
   { key: 'city', label: 'Kota' },
   { key: 'phone', label: 'Telepon' },
+  { key: 'lat', label: 'Geofence', formatter: (_v, item) => {
+      if (item.lat && item.lng) {
+        const r = item.geofence_radius_m ? `${item.geofence_radius_m} m` : 'tanpa radius'
+        return `✓ ${r}`
+      }
+      return '— belum di-set'
+    } },
   { key: 'is_active', label: 'Status', formatter: v => v ? 'Aktif' : 'Non-aktif' },
 ]
 const fields = [
@@ -15,9 +22,9 @@ const fields = [
   { key: 'province', label: 'Provinsi' },
   { key: 'city', label: 'Kota' },
   { key: 'phone', label: 'Telepon' },
-  { key: 'lat', label: 'Latitude', type: 'number', step: 'any' },
-  { key: 'lng', label: 'Longitude', type: 'number', step: 'any' },
-  { key: 'geofence_radius_m', label: 'Radius Geofence (m)', type: 'number' },
+  // Geofence picker (lat/lng + radius) — sumber kebenaran untuk validasi clock-in.
+  // Tombol "Ambil dari GPS sekarang" mengisi otomatis kalau admin sedang di lokasi.
+  { key: 'location', type: 'location' },
 ]
 </script>
 

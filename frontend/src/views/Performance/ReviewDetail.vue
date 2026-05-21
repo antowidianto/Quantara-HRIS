@@ -141,9 +141,9 @@
     </div>
 
     <!-- Employee comment (post-acknowledge) -->
-    <div v-if="review?.status !== 'DRAFT'" class="bg-white rounded-lg border border-gray-200 p-5">
+    <div v-if="review && review.status !== 'DRAFT'" class="bg-white rounded-lg border border-gray-200 p-5">
       <h2 class="font-bold text-gray-900 mb-3">Tanggapan Karyawan</h2>
-      <div v-if="review.employee_comment" class="text-sm text-gray-900 whitespace-pre-wrap">{{ review.employee_comment }}</div>
+      <div v-if="review?.employee_comment" class="text-sm text-gray-900 whitespace-pre-wrap">{{ review.employee_comment }}</div>
       <div v-else-if="canAcknowledge">
         <textarea v-model="ackComment" rows="3"
           class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500"

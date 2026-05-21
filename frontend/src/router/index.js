@@ -26,6 +26,9 @@ const routes = [
       // Allowance mapping (per cabang & grade)
       { path: 'master/allowances', name: 'allowances', component: () => import('@/views/Master/Allowances.vue') },
 
+      // Org Structure (Organization Development) — drag & drop tree
+      { path: 'master/org-structure', name: 'org-structure', component: () => import('@/views/Master/OrgStructure.vue') },
+
       // Master Data
       { path: 'master/branches', name: 'branches', component: () => import('@/views/Master/Branches.vue') },
       { path: 'master/work-locations', name: 'work-locations', component: () => import('@/views/Master/WorkLocations.vue') },
@@ -55,6 +58,10 @@ const routes = [
       { path: 'hr/severance', name: 'severance', component: () => import('@/views/HR/Severance.vue') },
       // Onboarding & Offboarding
       { path: 'hr/onboarding', name: 'onboarding', component: () => import('@/views/HR/OnboardingBoard.vue') },
+      // Resignation — self-service untuk karyawan + halaman review HR/atasan.
+      // Lihat docs/RESIGNATION.md.
+      { path: 'hr/my-resignation', name: 'my-resignation', component: () => import('@/views/HR/MyResignation.vue') },
+      { path: 'hr/resignations',   name: 'resignations',   component: () => import('@/views/HR/ResignationReview.vue') },
       // Asset / Inventory
       { path: 'hr/assets', name: 'assets', component: () => import('@/views/HR/Assets.vue') },
       // Business Trip / SPPD

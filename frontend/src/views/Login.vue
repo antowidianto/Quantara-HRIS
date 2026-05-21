@@ -3,11 +3,13 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from 'vue-toastification'
+import { useI18n } from '@/locales'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
+const { t } = useI18n()
 
 const email = ref('')
 const password = ref('')
@@ -25,7 +27,7 @@ async function submit() {
     if (result?.requires_2fa) {
       requires2fa.value = true
       challenge.value = result.challenge
-      toast.info('Masukkan kode 2FA dari aplikasi authenticator')
+      toast.info(t('auth.twofa_required'))
       return
     }
     if (result?.mustChangePassword) {
@@ -35,7 +37,7 @@ async function submit() {
     const redirect = route.query.redirect || '/dashboard'
     router.push(redirect)
   } catch (e) {
-    const msg = e.response?.data?.message || 'Login gagal'
+    const msg = e.response?.data?.message || t('auth.login_failed')
     toast.error(msg)
   } finally {
     loading.value = false
@@ -48,7 +50,7 @@ async function submitOtp() {
     await auth.verifyTwoFactor(challenge.value, otpCode.value)
     router.push(route.query.redirect || '/dashboard')
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Kode 2FA tidak valid')
+    toast.error(e.response?.data?.message || t('auth.twofa_invalid'))
   } finally {
     loading.value = false
   }
@@ -60,44 +62,44 @@ async function submitOtp() {
     <div class="max-w-md w-full">
       <div class="text-center mb-8">
         <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-600 text-white text-3xl font-bold mb-4">H</div>
-        <h1 class="text-2xl font-bold text-gray-900">HRIS</h1>
-        <p class="text-gray-500 mt-1">Masuk ke akun Anda</p>
+        <h1 class="text-2xl font-bold text-gray-900">{{ t('auth.title') }}</h1>
+        <p class="text-gray-500 mt-1">{{ t('auth.subtitle') }}</p>
       </div>
 
       <div class="card">
         <div class="card-body">
           <form v-if="!requires2fa" @submit.prevent="submit" class="space-y-4">
             <div>
-              <label class="label" for="email">Email</label>
+              <label class="label" for="email">{{ t('auth.email') }}</label>
               <input id="email" v-model="email" type="email" required autocomplete="email"
-                class="input" placeholder="nama@perusahaan.id" />
+                class="input" :placeholder="t('auth.email_placeholder')" />
             </div>
             <div>
-              <label class="label" for="password">Password</label>
+              <label class="label" for="password">{{ t('auth.password') }}</label>
               <div class="relative">
                 <input id="password" v-model="password" :type="showPassword ? 'text' : 'password'"
                   required autocomplete="current-password" class="input pr-10" />
                 <button type="button" @click="showPassword = !showPassword"
                   class="absolute inset-y-0 right-0 px-3 text-gray-400 text-sm">
-                  {{ showPassword ? 'Sembunyikan' : 'Tampilkan' }}
+                  {{ showPassword ? t('auth.hide_password') : t('auth.show_password') }}
                 </button>
               </div>
             </div>
             <div class="text-right">
               <RouterLink to="/forgot-password" class="text-sm text-primary-600 hover:underline">
-                Lupa password?
+                {{ t('auth.forgot_password') }}
               </RouterLink>
             </div>
             <button type="submit" :disabled="loading"
               class="btn-primary w-full justify-center py-2.5">
-              {{ loading ? 'Memproses...' : 'Masuk' }}
+              {{ loading ? t('auth.signing_in') : t('auth.sign_in') }}
             </button>
           </form>
 
           <form v-else @submit.prevent="submitOtp" class="space-y-4">
             <div class="text-center">
-              <div class="text-sm text-gray-600">Verifikasi 2 Langkah</div>
-              <div class="text-xs text-gray-500 mt-1">Masukkan kode 6-digit dari aplikasi authenticator Anda</div>
+              <div class="text-sm text-gray-600">{{ t('auth.twofa_title') }}</div>
+              <div class="text-xs text-gray-500 mt-1">{{ t('auth.twofa_subtitle') }}</div>
             </div>
             <div>
               <input v-model="otpCode" type="text" inputmode="numeric" maxlength="6" required
@@ -105,17 +107,19 @@ async function submitOtp() {
             </div>
             <button type="submit" :disabled="loading"
               class="btn-primary w-full justify-center py-2.5">
-              {{ loading ? 'Memverifikasi...' : 'Verifikasi' }}
+              {{ loading ? t('auth.verifying') : t('auth.verify') }}
             </button>
             <button type="button" @click="requires2fa = false; otpCode = ''"
               class="w-full text-sm text-gray-500 hover:text-gray-700">
-              Kembali
+              {{ t('auth.back') }}
             </button>
           </form>
         </div>
       </div>
 
-      <p class="text-center text-xs text-gray-400 mt-6">© {{ new Date().getFullYear() }} HRIS. Semua data terenkripsi.</p>
+      <p class="text-center text-xs text-gray-400 mt-6">
+        {{ t('auth.encrypted_footer', { year: new Date().getFullYear() }) }}
+      </p>
     </div>
   </div>
 </template>
