@@ -1,0 +1,481 @@
+<?php
+
+namespace App\Controllers\Api\V1;
+
+use Config\Services;
+
+/**
+ * RecruitmentController
+ *
+ * REST API untuk Recruitment / ATS.
+ *
+ * Authorization:
+ *   - `recruitment.view`   → list/show
+ *   - `recruitment.manage` → create/update/delete posting & candidate, move stage
+ *   - `recruitment.hire`   → convert candidate ke employee
+ *
+ * Endpoint:
+ *   GET    /job-postings                       — list posting
+ *   POST   /job-postings                       — create posting
+ *   GET    /job-postings/(:num)                — detail + pipeline stats
+ *   PUT    /job-postings/(:num)                — update
+ *   DELETE /job-postings/(:num)                — soft-delete
+ *   POST   /job-postings/(:num)/open           — DRAFT/PAUSED → OPEN
+ *   POST   /job-postings/(:num)/close          — OPEN → CLOSED
+ *   GET    /candidates                         — list dgn filter
+ *   POST   /candidates                         — create candidate
+ *   GET    /candidates/(:num)                  — detail + stages history + documents
+ *   PUT    /candidates/(:num)                  — update profil
+ *   DELETE /candidates/(:num)                  — soft-delete
+ *   POST   /candidates/(:num)/move-stage       — pindah stage
+ *   POST   /candidates/(:num)/reject           — reject dengan alasan
+ *   POST   /candidates/(:num)/hire             — convert ke employee + trigger onboarding
+ *   GET    /candidates/(:num)/stages           — history stages
+ *   GET    /recruitment/pipeline-stats         — stats aggregate
+ */
+class RecruitmentController extends ApiController
+{
+    private const STAGES = ['NEW','SCREENING','INTERVIEW_HR','INTERVIEW_USER','OFFER','HIRED','REJECTED','WITHDRAWN'];
+    private const SOURCES = ['WEBSITE','LINKEDIN','JOBSTREET','REFERRAL','WALK_IN','OTHER'];
+    private const DOC_TYPES = ['CV','KTP','IJAZAH','TRANSKRIP','SERTIFIKAT','PORTFOLIO','OTHER'];
+
+    // ────────────────────────────────────────────────────────────────
+    // Job postings
+    // ────────────────────────────────────────────────────────────────
+
+    public function indexJobs()
+    {
+        $db = \Config\Database::connect();
+        $page = max(1, (int) ($this->request->getGet('page') ?? 1));
+        $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
+
+        $q = trim((string) ($this->request->getGet('q') ?? ''));
+        $status = strtoupper((string) ($this->request->getGet('status') ?? ''));
+
+        $builder = $db->table('job_postings jp')
+            ->select('jp.*, d.name AS department_name, p.name AS position_name, b.name AS branch_name,'
+                . ' (SELECT COUNT(*) FROM candidates c WHERE c.job_posting_id = jp.id AND c.deleted_at IS NULL) AS candidate_count')
+            ->join('departments d', 'd.id = jp.department_id', 'left')
+            ->join('positions p', 'p.id = jp.position_id', 'left')
+            ->join('branches b', 'b.id = jp.branch_id', 'left')
+            ->where('jp.deleted_at IS NULL');
+        $this->tenant()->applyScope($builder, 'jp.company_id');
+
+        if ($q !== '') {
+            $builder->groupStart()
+                ->like('jp.title', $q)
+                ->orLike('jp.reference_number', $q)
+                ->orLike('jp.description', $q)
+                ->groupEnd();
+        }
+        if ($status !== '') $builder->where('jp.status', $status);
+
+        $total = $builder->countAllResults(false);
+        $rows = $builder->orderBy('jp.created_at', 'DESC')
+            ->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
+        return $this->paginated($rows, $total, $page, $perPage);
+    }
+
+    public function showJob($id = null)
+    {
+        $row = $this->loadJobOrFail((int) $id);
+        if (! $row) return $this->response;
+
+        // Pipeline stats untuk posting ini
+        $row['pipeline_stats'] = Services::recruitment()->pipelineStats((int) $row['company_id'], (int) $id);
+        return $this->ok($row);
+    }
+
+    public function createJob()
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'title' => 'required|max_length[200]',
+        ]);
+        if (! $valid) return null;
+
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+
+        $svc = Services::recruitment();
+        $now = date('Y-m-d H:i:s');
+        $insert = [
+            'company_id'      => $companyId,
+            'reference_number'=> $svc->nextJobReferenceNumber($companyId),
+            'title'           => $data['title'],
+            'department_id'   => ! empty($data['department_id']) ? (int) $data['department_id'] : null,
+            'position_id'     => ! empty($data['position_id']) ? (int) $data['position_id'] : null,
+            'branch_id'       => ! empty($data['branch_id']) ? (int) $data['branch_id'] : null,
+            'employment_type' => in_array(strtoupper((string) ($data['employment_type'] ?? 'PKWTT')), ['PKWT','PKWTT','MAGANG','OUTSOURCING','PARTTIME','CONTRACT'], true)
+                ? strtoupper((string) ($data['employment_type'] ?? 'PKWTT')) : 'PKWTT',
+            'description'     => $data['description'] ?? null,
+            'requirements'    => $data['requirements'] ?? null,
+            'salary_min'      => isset($data['salary_min']) ? (float) $data['salary_min'] : null,
+            'salary_max'      => isset($data['salary_max']) ? (float) $data['salary_max'] : null,
+            'salary_visible'  => (int) (bool) ($data['salary_visible'] ?? 0),
+            'headcount'       => max(1, (int) ($data['headcount'] ?? 1)),
+            'opened_at'       => $data['opened_at'] ?? null,
+            'closed_at'       => $data['closed_at'] ?? null,
+            'status'          => 'DRAFT',
+            'hiring_manager_id'=> ! empty($data['hiring_manager_id']) ? (int) $data['hiring_manager_id'] : null,
+            'notes'           => $data['notes'] ?? null,
+            'created_by'      => $this->userId(),
+            'updated_by'      => $this->userId(),
+            'created_at'      => $now, 'updated_at' => $now,
+        ];
+        $db = \Config\Database::connect();
+        $db->table('job_postings')->insert($insert);
+        $id = (int) $db->insertID();
+        Services::audit()->forModule('RECRUITMENT')->logCreate('job_posting', $id, $insert,
+            "Job posting baru: {$insert['reference_number']} - {$insert['title']}");
+        return $this->ok(['id' => $id, 'reference_number' => $insert['reference_number']], 'Created', 201);
+    }
+
+    public function updateJob($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadJobOrFail((int) $id);
+        if (! $row) return $this->response;
+        $data = $this->getJsonInput();
+        $update = array_intersect_key($data, array_flip([
+            'title','department_id','position_id','branch_id','employment_type',
+            'description','requirements','salary_min','salary_max','salary_visible',
+            'headcount','opened_at','closed_at','hiring_manager_id','notes',
+        ]));
+        if (isset($update['salary_visible'])) $update['salary_visible'] = (int) (bool) $update['salary_visible'];
+        if (isset($update['headcount'])) $update['headcount'] = max(1, (int) $update['headcount']);
+        $update['updated_by'] = $this->userId();
+        $update['updated_at'] = date('Y-m-d H:i:s');
+        \Config\Database::connect()->table('job_postings')->where('id', (int) $id)->update($update);
+        Services::audit()->forModule('RECRUITMENT')->logUpdate('job_posting', (int) $id, $row, $update);
+        return $this->ok(null, 'Updated');
+    }
+
+    public function deleteJob($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadJobOrFail((int) $id);
+        if (! $row) return $this->response;
+        \Config\Database::connect()->table('job_postings')->where('id', (int) $id)->update([
+            'deleted_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        Services::audit()->forModule('RECRUITMENT')->logDelete('job_posting', (int) $id, $row);
+        return $this->ok(null, 'Deleted');
+    }
+
+    public function openJob($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadJobOrFail((int) $id);
+        if (! $row) return $this->response;
+        if (! in_array($row['status'], ['DRAFT','PAUSED'], true)) {
+            return $this->fail("Hanya DRAFT/PAUSED yang bisa dibuka, sekarang {$row['status']}", 422);
+        }
+        \Config\Database::connect()->table('job_postings')->where('id', (int) $id)->update([
+            'status' => 'OPEN',
+            'opened_at' => $row['opened_at'] ?? date('Y-m-d'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'job.open', entity: 'job_posting', entityId: (int) $id,
+            description: "Buka posting {$row['reference_number']}", severity: 'NOTICE'
+        );
+        return $this->ok(null, 'Opened');
+    }
+
+    public function closeJob($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadJobOrFail((int) $id);
+        if (! $row) return $this->response;
+        if (! in_array($row['status'], ['OPEN','PAUSED','FILLED'], true)) {
+            return $this->fail("Tidak bisa close dari status {$row['status']}", 422);
+        }
+        \Config\Database::connect()->table('job_postings')->where('id', (int) $id)->update([
+            'status' => 'CLOSED',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'job.close', entity: 'job_posting', entityId: (int) $id,
+            description: "Tutup posting {$row['reference_number']}", severity: 'NOTICE'
+        );
+        return $this->ok(null, 'Closed');
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Candidates
+    // ────────────────────────────────────────────────────────────────
+
+    public function indexCandidates()
+    {
+        $db = \Config\Database::connect();
+        $page = max(1, (int) ($this->request->getGet('page') ?? 1));
+        $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
+        $q = trim((string) ($this->request->getGet('q') ?? ''));
+        $stage = strtoupper((string) ($this->request->getGet('stage') ?? ''));
+        $jobId = (int) ($this->request->getGet('job_posting_id') ?? 0);
+
+        $builder = $db->table('candidates c')
+            ->select('c.*, jp.title AS job_title, jp.reference_number AS job_ref')
+            ->join('job_postings jp', 'jp.id = c.job_posting_id')
+            ->where('c.deleted_at IS NULL');
+        $this->tenant()->applyScope($builder, 'c.company_id');
+
+        if ($q !== '') {
+            $builder->groupStart()
+                ->like('c.full_name', $q)
+                ->orLike('c.email', $q)
+                ->orLike('c.phone', $q)
+                ->orLike('c.current_position', $q)
+                ->groupEnd();
+        }
+        if ($stage !== '') $builder->where('c.current_stage', $stage);
+        if ($jobId) $builder->where('c.job_posting_id', $jobId);
+
+        $total = $builder->countAllResults(false);
+        $rows = $builder->orderBy('c.created_at', 'DESC')
+            ->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
+        return $this->paginated($rows, $total, $page, $perPage);
+    }
+
+    public function showCandidate($id = null)
+    {
+        $row = $this->loadCandidateOrFail((int) $id);
+        if (! $row) return $this->response;
+
+        $db = \Config\Database::connect();
+        $row['stages'] = $db->table('candidate_stages')
+            ->where('candidate_id', (int) $id)
+            ->orderBy('id', 'ASC')->get()->getResultArray();
+        $row['documents'] = $db->table('candidate_documents')
+            ->where('candidate_id', (int) $id)
+            ->orderBy('id', 'DESC')->get()->getResultArray();
+        $job = $db->table('job_postings')->where('id', (int) $row['job_posting_id'])->get()->getRowArray();
+        $row['job'] = $job;
+        return $this->ok($row);
+    }
+
+    public function createCandidate()
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'job_posting_id' => 'required|integer',
+            'full_name'      => 'required|max_length[200]',
+        ]);
+        if (! $valid) return null;
+
+        $db = \Config\Database::connect();
+        $job = $db->table('job_postings')->where('id', (int) $data['job_posting_id'])->get()->getRowArray();
+        if (! $job) return $this->fail('Job posting not found', 404);
+        $tenant = $this->tenant();
+        if (! $tenant->isSuperAdmin() && (int) $job['company_id'] !== $tenant->getCompanyId()) {
+            return $this->fail('Forbidden', 403);
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $insert = [
+            'company_id'      => (int) $job['company_id'],
+            'job_posting_id'  => (int) $data['job_posting_id'],
+            'full_name'       => $data['full_name'],
+            'email'           => $data['email'] ?? null,
+            'phone'           => $data['phone'] ?? null,
+            'birth_date'      => $data['birth_date'] ?? null,
+            'gender'          => isset($data['gender']) && in_array(strtoupper($data['gender']), ['M','F','O'], true) ? strtoupper($data['gender']) : null,
+            'address'         => $data['address'] ?? null,
+            'current_position'=> $data['current_position'] ?? null,
+            'current_company' => $data['current_company'] ?? null,
+            'years_experience'=> isset($data['years_experience']) ? (int) $data['years_experience'] : null,
+            'expected_salary' => isset($data['expected_salary']) ? (float) $data['expected_salary'] : null,
+            'available_from'  => $data['available_from'] ?? null,
+            'source'          => isset($data['source']) && in_array(strtoupper($data['source']), self::SOURCES, true) ? strtoupper($data['source']) : null,
+            'referral_employee_id' => ! empty($data['referral_employee_id']) ? (int) $data['referral_employee_id'] : null,
+            'current_stage'   => 'NEW',
+            'rating'          => isset($data['rating']) ? (int) $data['rating'] : null,
+            'notes'           => $data['notes'] ?? null,
+            'created_by'      => $this->userId(),
+            'created_at'      => $now, 'updated_at' => $now,
+        ];
+        $db->table('candidates')->insert($insert);
+        $id = (int) $db->insertID();
+
+        // Insert initial stage NEW
+        $db->table('candidate_stages')->insert([
+            'company_id' => (int) $job['company_id'],
+            'candidate_id' => $id,
+            'stage' => 'NEW',
+            'result' => 'PENDING',
+            'created_by' => $this->userId(),
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+
+        Services::audit()->forModule('RECRUITMENT')->logCreate('candidate', $id, $insert,
+            "Kandidat baru: {$insert['full_name']} untuk {$job['title']}");
+        return $this->ok(['id' => $id], 'Created', 201);
+    }
+
+    public function updateCandidate($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadCandidateOrFail((int) $id);
+        if (! $row) return $this->response;
+        $data = $this->getJsonInput();
+        $update = array_intersect_key($data, array_flip([
+            'full_name','email','phone','birth_date','gender','address',
+            'current_position','current_company','years_experience','expected_salary',
+            'available_from','source','referral_employee_id','rating','notes',
+        ]));
+        $update['updated_at'] = date('Y-m-d H:i:s');
+        \Config\Database::connect()->table('candidates')->where('id', (int) $id)->update($update);
+        Services::audit()->forModule('RECRUITMENT')->logUpdate('candidate', (int) $id, $row, $update);
+        return $this->ok(null, 'Updated');
+    }
+
+    public function deleteCandidate($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadCandidateOrFail((int) $id);
+        if (! $row) return $this->response;
+        if (! empty($row['converted_employee_id'])) {
+            return $this->fail('Candidate sudah jadi employee, tidak bisa dihapus', 422);
+        }
+        \Config\Database::connect()->table('candidates')->where('id', (int) $id)->update([
+            'deleted_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        Services::audit()->forModule('RECRUITMENT')->logDelete('candidate', (int) $id, $row);
+        return $this->ok(null, 'Deleted');
+    }
+
+    public function moveStage($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadCandidateOrFail((int) $id);
+        if (! $row) return $this->response;
+        $data = $this->getJsonInput();
+        $stage = strtoupper((string) ($data['stage'] ?? ''));
+        if (! in_array($stage, self::STAGES, true)) {
+            return $this->fail('Stage tidak valid', 422);
+        }
+        try {
+            $stageId = Services::recruitment()->moveStage((int) $id, $stage, [
+                'scheduled_at'  => $data['scheduled_at'] ?? null,
+                'interviewer_id'=> $data['interviewer_id'] ?? null,
+                'feedback'      => $data['feedback'] ?? null,
+                'rating'        => $data['rating'] ?? null,
+                'created_by'    => $this->userId(),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'candidate.move_stage', entity: 'candidate', entityId: (int) $id,
+            after: ['stage' => $stage], description: "{$row['full_name']} → {$stage}",
+            severity: 'NOTICE'
+        );
+        return $this->ok(['stage_id' => $stageId, 'new_stage' => $stage], 'Stage updated');
+    }
+
+    public function rejectCandidate($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadCandidateOrFail((int) $id);
+        if (! $row) return $this->response;
+        $data = $this->getJsonInput();
+        $reason = trim((string) ($data['reason'] ?? ''));
+        if (strlen($reason) < 5) return $this->fail('Alasan minimal 5 karakter', 422);
+        try {
+            Services::recruitment()->reject((int) $id, $reason, $this->userId());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'candidate.reject', entity: 'candidate', entityId: (int) $id,
+            after: ['reason' => $reason], description: "Reject {$row['full_name']}: {$reason}",
+            severity: 'WARNING'
+        );
+        return $this->ok(null, 'Rejected');
+    }
+
+    public function hireCandidate($id = null)
+    {
+        $tenant = $this->tenant();
+        if (! ($tenant->isSuperAdmin() || $tenant->hasPermission('recruitment.hire'))) {
+            return $this->fail('Forbidden: butuh permission recruitment.hire', 403);
+        }
+        $row = $this->loadCandidateOrFail((int) $id);
+        if (! $row) return $this->response;
+
+        $data = $this->getJsonInput();
+        $overrides = array_intersect_key($data, array_flip([
+            'employee_number','department_id','position_id','branch_id',
+            'employment_status','join_date','basic_salary',
+        ]));
+        try {
+            $employeeId = Services::recruitment()->convertToEmployee((int) $id, $overrides);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'candidate.hire', entity: 'candidate', entityId: (int) $id,
+            after: ['employee_id' => $employeeId],
+            description: "Convert {$row['full_name']} → employee #{$employeeId} + auto-trigger onboarding",
+            severity: 'CRITICAL'
+        );
+        return $this->ok(['employee_id' => $employeeId], 'Converted to employee', 201);
+    }
+
+    public function pipelineStats()
+    {
+        $tenant = $this->tenant();
+        $companyId = $tenant->getCompanyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+        $jobId = (int) ($this->request->getGet('job_posting_id') ?? 0);
+        $stats = Services::recruitment()->pipelineStats($companyId, $jobId ?: null);
+        return $this->ok($stats);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Helpers
+    // ────────────────────────────────────────────────────────────────
+
+    private function canManage(): bool
+    {
+        $t = $this->tenant();
+        return $t->isSuperAdmin() || $t->hasPermission('recruitment.manage');
+    }
+
+    private function loadJobOrFail(int $id): ?array
+    {
+        $db = \Config\Database::connect();
+        $row = $db->table('job_postings')->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $row) {
+            $this->response = $this->fail('Job posting not found', 404);
+            return null;
+        }
+        $tenant = $this->tenant();
+        if (! $tenant->isSuperAdmin() && (int) $row['company_id'] !== $tenant->getCompanyId()) {
+            $this->response = $this->fail('Forbidden', 403);
+            return null;
+        }
+        return $row;
+    }
+
+    private function loadCandidateOrFail(int $id): ?array
+    {
+        $db = \Config\Database::connect();
+        $row = $db->table('candidates')->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $row) {
+            $this->response = $this->fail('Candidate not found', 404);
+            return null;
+        }
+        $tenant = $this->tenant();
+        if (! $tenant->isSuperAdmin() && (int) $row['company_id'] !== $tenant->getCompanyId()) {
+            $this->response = $this->fail('Forbidden', 403);
+            return null;
+        }
+        return $row;
+    }
+}

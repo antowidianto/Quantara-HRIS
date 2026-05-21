@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.suo
+*.user
+
+# CodeIgniter
+backend/writable/cache/*
+backend/writable/logs/*
+backend/writable/session/*
+backend/writable/uploads/*
+backend/writable/debugbar/*
+!backend/writable/.gitignore
+backend/php_errors.log
+
+# OS
+.DS_Store
+
+# Tests
+phpunit.xml
+.phpunit.cache/
+coverage/
