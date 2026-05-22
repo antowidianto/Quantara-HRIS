@@ -10,6 +10,8 @@ import {
   CheckCircleIcon, ExclamationTriangleIcon, RocketLaunchIcon,
   PlusIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -47,12 +49,10 @@ async function fetchBoard() {
 
 async function fetchMaster() {
   try {
-    const [t, e] = await Promise.all([
-      api.get('/task-templates'),
-      canManage.value ? api.get('/employees', { params: { per_page: 200, is_active: 1 } }) : Promise.resolve({ data: { data: [] } }),
-    ])
+    // Karyawan TIDAK lagi di-load semua sekaligus — picker pakai
+    // EmployeeSearchSelect server-side untuk dataset besar.
+    const t = await api.get('/task-templates')
     templates.value = t.data.data || []
-    employees.value = e.data.data || []
   } catch (_) {}
 }
 
@@ -230,12 +230,11 @@ function isOverdue(task) {
         <div class="p-6 space-y-3">
           <div>
             <label class="label">Karyawan *</label>
-            <select v-model="genInput.employee_id" class="input">
-              <option value="">— Pilih —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">
-                {{ e.full_name }} ({{ e.employee_number }})
-              </option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="genInput.employee_id"
+              placeholder="— Pilih karyawan —"
+              :only-active="false"
+            />
           </div>
           <div>
             <label class="label">Tipe *</label>
@@ -246,11 +245,14 @@ function isOverdue(task) {
           </div>
           <div>
             <label class="label">Template (opsional, pakai default kalau kosong)</label>
-            <select v-model="genInput.template_id" class="input">
-              <option value="">— Pakai default —</option>
-              <option v-for="t in templates.filter(x => x.type === genInput.type)"
-                :key="t.id" :value="t.id">{{ t.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="genInput.template_id"
+              :items="templates.filter(x => x.type === genInput.type)"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="— Pakai default —"
+            />
           </div>
           <div>
             <label class="label">Anchor date (opsional)</label>

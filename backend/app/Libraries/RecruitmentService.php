@@ -162,9 +162,12 @@ class RecruitmentService
     /**
      * Convert candidate HIRED ke employees row baru.
      *
-     * @return int employee_id baru
+     * @return array{employee_id: int, user_id: ?int, user_email: ?string, temp_password: ?string, auto_completed_tasks: int}
+     *     employee_id baru, plus credential ONE-TIME (kalau auto-create
+     *     user akun berhasil) yang harus diteruskan ke HR untuk
+     *     dikomunikasikan ke karyawan baru.
      */
-    public function convertToEmployee(int $candidateId, array $employeeOverrides = []): int
+    public function convertToEmployee(int $candidateId, array $employeeOverrides = []): array
     {
         $db = \Config\Database::connect();
         $cand = $db->table('candidates')->where('id', $candidateId)->where('deleted_at IS NULL')->get()->getRowArray();
@@ -188,6 +191,7 @@ class RecruitmentService
         $lastName  = $parts[1] ?? '';
 
         $now = date('Y-m-d H:i:s');
+        // Field dasar — selalu dipakai
         $insert = [
             'company_id'        => (int) $cand['company_id'],
             'employee_number'   => $employeeOverrides['employee_number'] ?? $empNumber,
@@ -209,8 +213,57 @@ class RecruitmentService
             'created_at'        => $now,
             'updated_at'        => $now,
         ];
+
+        // Carry-over field standar HR Indonesia kalau tabel `employees`
+        // sudah punya kolomnya — pakai array_intersect_key supaya aman
+        // di environment yang belum migrate field-field tersebut.
+        $employeeCols = $db->getFieldNames('employees');
+        // Map candidate.marital_status (BELUM_KAWIN/KAWIN/...) → PTKP code
+        // (TK0/K0/...) yang dipakai tabel employees. Default 0 tanggungan;
+        // HR bisa edit di profil employee setelah hire.
+        $maritalToPtkp = [
+            'BELUM_KAWIN' => 'TK0',
+            'KAWIN'       => 'K0',
+            'CERAI_HIDUP' => 'TK0',
+            'CERAI_MATI'  => 'TK0',
+        ];
+        $candMarital = (string) ($cand['marital_status'] ?? '');
+        $ptkp = $maritalToPtkp[$candMarital] ?? null;
+
+        $idCarryover = [
+            'birth_place'    => $cand['birth_place']    ?? null,
+            'place_of_birth' => $cand['birth_place']    ?? null,
+            'religion'       => $cand['religion']       ?? null,
+            'marital_status' => $ptkp,
+            'nationality'    => $cand['nationality']    ?? null,
+            'nik'            => $cand['nik']            ?? null,
+            'ktp_number'     => $cand['nik']            ?? null,
+            'npwp'           => $cand['npwp']           ?? null,
+            'kk_number'      => $cand['kk_number']      ?? null,
+            'bpjs_kesehatan_no' => $cand['bpjs_kesehatan_no'] ?? null,
+            'bpjs_tk_no'     => $cand['bpjs_tk_no']     ?? null,
+            'city'           => $cand['city']           ?? null,
+            'province'       => $cand['province']       ?? null,
+            'last_education_level'       => $cand['last_education_level']       ?? null,
+            'last_education_institution' => $cand['last_education_institution'] ?? null,
+            'last_education_major'       => $cand['last_education_major']       ?? null,
+            'last_education_year'        => $cand['last_education_year']        ?? null,
+            'gpa'            => $cand['gpa']            ?? null,
+        ];
+        foreach ($idCarryover as $col => $val) {
+            if ($val !== null && in_array($col, $employeeCols, true) && ! isset($insert[$col])) {
+                $insert[$col] = $val;
+            }
+        }
+
         $db->table('employees')->insert($insert);
         $employeeId = (int) $db->insertID();
+
+        // Copy candidate_documents → employee_documents kalau tabel
+        // employee_documents ada (tidak semua schema include).
+        if ($db->tableExists('employee_documents')) {
+            $this->copyCandidateDocsToEmployee($candidateId, $employeeId, (int) $cand['company_id']);
+        }
 
         // Update candidate
         $db->table('candidates')->where('id', $candidateId)->update([
@@ -219,10 +272,17 @@ class RecruitmentService
             'updated_at'            => $now,
         ]);
 
-        // Trigger ONBOARD_DEFAULT
+        // Trigger ONBOARD_DEFAULT + auto-complete tasks yang datanya sudah
+        // lengkap dari Career Portal application (SUBMIT_DOCS, NPWP_VERIFY,
+        // BPJS_REGISTER, SETUP_HRIS dengan auto-create user account).
+        $autoResult = ['auto_completed' => 0, 'user_created' => null, 'user_email' => null, 'temp_password' => null];
         try {
             $anchor = $insert['join_date'];
-            Services::onboarding()->applyTemplate($employeeId, null, 'ONBOARD', $anchor);
+            $onboarding = Services::onboarding();
+            $onboarding->applyTemplate($employeeId, null, 'ONBOARD', $anchor);
+            // Pakai data candidate (bukan re-fetch) supaya tidak ada race
+            // dengan update converted_employee_id di bawah.
+            $autoResult = $onboarding->autoCompleteFromCandidate($employeeId, $cand);
         } catch (\Throwable $e) {
             log_message('warning', "Onboarding apply failed for employee #{$employeeId}: " . $e->getMessage());
         }
@@ -240,7 +300,13 @@ class RecruitmentService
             ]);
         }
 
-        return $employeeId;
+        return [
+            'employee_id'          => $employeeId,
+            'user_id'              => $autoResult['user_created'] ?? null,
+            'user_email'           => $autoResult['user_email']   ?? null,
+            'temp_password'        => $autoResult['temp_password'] ?? null,
+            'auto_completed_tasks' => (int) ($autoResult['auto_completed'] ?? 0),
+        ];
     }
 
     /**
@@ -268,6 +334,51 @@ class RecruitmentService
             $candidate = $prefix . $seq;
         }
         return $candidate;
+    }
+
+    /**
+     * Copy candidate_documents → employee_documents saat hire.
+     * Best-effort: kalau schema employee_documents tidak match, log dan skip.
+     */
+    private function copyCandidateDocsToEmployee(int $candidateId, int $employeeId, int $companyId): void
+    {
+        $db = \Config\Database::connect();
+        $docs = $db->table('candidate_documents')
+            ->where('candidate_id', $candidateId)
+            ->get()->getResultArray();
+        if (empty($docs)) return;
+
+        $empDocFields = $db->getFieldNames('employee_documents');
+        $now = date('Y-m-d H:i:s');
+        foreach ($docs as $d) {
+            // Sediakan superset semua nama kolom yang mungkin ada di
+            // berbagai schema employee_documents (legacy `doc_type` vs
+            // baru `document_type`, `file_mime` vs `mime_type`).
+            $insert = [
+                'employee_id'   => $employeeId,
+                'company_id'    => $companyId,
+                'doc_type'      => $d['document_type'] ?? 'OTHER',
+                'document_type' => $d['document_type'] ?? 'OTHER',
+                'title'         => $d['file_name']     ?? 'Document',
+                'file_name'     => $d['file_name']     ?? null,
+                'file_path'     => $d['file_path']     ?? null,
+                'file_mime'     => $d['mime_type']     ?? 'application/octet-stream',
+                'mime_type'     => $d['mime_type']     ?? null,
+                'file_size'     => (int) ($d['file_size'] ?? 0),
+                'notes'         => $d['notes']         ?? 'Copied dari kandidat saat hire',
+                'uploaded_by'   => $d['uploaded_by']   ?? null,
+                'created_at'    => $now,
+                'updated_at'    => $now,
+            ];
+            // Hanya kolom yang benar-benar ada di tabel target
+            $insert = array_intersect_key($insert, array_flip($empDocFields));
+            if (empty($insert['file_path'])) continue;
+            try {
+                $db->table('employee_documents')->insert($insert);
+            } catch (\Throwable $e) {
+                log_message('warning', "Copy candidate doc failed: " . $e->getMessage());
+            }
+        }
     }
 
     /**

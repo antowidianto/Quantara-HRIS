@@ -296,21 +296,27 @@ class NotificationService
 
     private function dispatch(array $row): void
     {
+        // Resolve config: per-company DB setting (encrypted password) →
+        // env fallback. Setting di DB di-set lewat
+        // `EmailSettingsController::update` (UI Admin → Email Settings).
+        $cfg = $this->resolveSmtpConfig($row['company_id'] ? (int) $row['company_id'] : null);
+
         $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
         $mailer->isSMTP();
-        $mailer->Host       = (string) env('mail.host', 'smtp.gmail.com');
-        $mailer->Port       = (int) env('mail.port', 587);
-        $mailer->SMTPAuth   = true;
-        $mailer->Username   = (string) env('mail.username', '');
-        $mailer->Password   = (string) env('mail.password', '');
-        $smtpEnc = (string) env('mail.encryption', 'tls');
-        if ($smtpEnc === 'ssl') {
+        $mailer->Host       = $cfg['host'];
+        $mailer->Port       = $cfg['port'];
+        $mailer->SMTPAuth   = $cfg['username'] !== '';
+        if ($mailer->SMTPAuth) {
+            $mailer->Username = $cfg['username'];
+            $mailer->Password = $cfg['password'];
+        }
+        if ($cfg['encryption'] === 'ssl') {
             $mailer->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
-        } elseif ($smtpEnc === 'tls') {
+        } elseif ($cfg['encryption'] === 'tls') {
             $mailer->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
         }
         $mailer->CharSet = 'UTF-8';
-        $mailer->setFrom((string) env('mail.fromAddress', 'noreply@hris.local'), (string) env('mail.fromName', 'HRIS'));
+        $mailer->setFrom($cfg['from_address'], $cfg['from_name']);
         $mailer->addAddress($row['to_email'], $row['to_name'] ?? '');
         $mailer->Subject = $row['subject'];
         $mailer->isHTML(true);
@@ -326,6 +332,64 @@ class NotificationService
             }
         }
         $mailer->send();
+    }
+
+    /**
+     * Resolve SMTP config: per-company DB setting (paling spesifik) →
+     * env fallback. Password di DB di-encrypt at-rest pakai
+     * `Services::encryption()`; di-decrypt baru saat send.
+     *
+     * Field di tabel `settings` (key prefix `email.`):
+     *   - email.host
+     *   - email.port
+     *   - email.username
+     *   - email.password_enc  (encrypted)
+     *   - email.encryption    (tls|ssl|none)
+     *   - email.from_address
+     *   - email.from_name
+     *
+     * Setting di-edit dari frontend Admin → Email Settings.
+     */
+    private function resolveSmtpConfig(?int $companyId): array
+    {
+        $cfg = [
+            'host'         => (string) env('mail.host', 'smtp.gmail.com'),
+            'port'         => (int) env('mail.port', 587),
+            'username'     => (string) env('mail.username', ''),
+            'password'     => (string) env('mail.password', ''),
+            'encryption'   => strtolower((string) env('mail.encryption', 'tls')),
+            'from_address' => (string) env('mail.fromAddress', 'noreply@hris.local'),
+            'from_name'    => (string) env('mail.fromName', 'HRIS'),
+        ];
+        if (! $companyId) return $cfg;
+
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('settings')) return $cfg;
+        $rows = $db->table('settings')
+            ->where('company_id', $companyId)
+            ->whereIn('key', [
+                'email.host','email.port','email.username','email.password_enc',
+                'email.encryption','email.from_address','email.from_name',
+            ])
+            ->get()->getResultArray();
+        $kv = array_column($rows, 'value', 'key');
+
+        if (isset($kv['email.host'])         && $kv['email.host']         !== '') $cfg['host']         = $kv['email.host'];
+        if (isset($kv['email.port'])         && $kv['email.port']         !== '') $cfg['port']         = (int) $kv['email.port'];
+        if (isset($kv['email.username'])     && $kv['email.username']     !== '') $cfg['username']     = $kv['email.username'];
+        if (isset($kv['email.encryption'])   && $kv['email.encryption']   !== '') $cfg['encryption']   = strtolower($kv['email.encryption']);
+        if (isset($kv['email.from_address']) && $kv['email.from_address'] !== '') $cfg['from_address'] = $kv['email.from_address'];
+        if (isset($kv['email.from_name'])    && $kv['email.from_name']    !== '') $cfg['from_name']    = $kv['email.from_name'];
+
+        // Password decrypt — kalau gagal, fallback ke env supaya email
+        // tidak tiba-tiba mati gara-gara key rotation issue.
+        if (! empty($kv['email.password_enc'])) {
+            $plain = Services::encryption()->decrypt($kv['email.password_enc']);
+            if ($plain !== null && $plain !== '') {
+                $cfg['password'] = $plain;
+            }
+        }
+        return $cfg;
     }
 
     private function renderEmailHtml(string $title, string $message, ?string $linkUrl): string

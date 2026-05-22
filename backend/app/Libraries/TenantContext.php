@@ -125,11 +125,21 @@ class TenantContext
 
     /**
      * Apply tenant scoping to a query builder.
-     * Super admin bypasses scoping.
+     *
+     * Aturan scoping:
+     *   - Super admin TANPA company aktif (companyId === 0) → tidak ada filter
+     *     (lihat data lintas tenant; biasanya hanya untuk halaman global
+     *     seperti list company itu sendiri).
+     *   - Super admin DENGAN company aktif (header X-Company-Id terkirim)
+     *     → filter ke companyId tersebut. Ini penting supaya saat super
+     *     admin memilih perusahaan dari dropdown topbar, semua list (master
+     *     data, karyawan, kehadiran, dst.) langsung berubah mengikuti
+     *     perusahaan yang dipilih, bukan menampilkan campuran.
+     *   - User non-super-admin → selalu filter ke companyId mereka.
      */
     public function applyScope($builder, string $column = 'company_id')
     {
-        if ($this->isSuperAdmin) {
+        if ($this->isSuperAdmin && $this->companyId === 0) {
             return $builder;
         }
         return $builder->where($column, $this->companyId);
@@ -150,10 +160,17 @@ class TenantContext
         string $companyColumn = 'company_id',
         string $branchColumn  = 'branch_id'
     ) {
-        if ($this->isSuperAdmin) {
+        // Super admin tanpa company aktif: tidak filter (akses lintas tenant).
+        if ($this->isSuperAdmin && $this->companyId === 0) {
             return $builder;
         }
         $builder->where($companyColumn, $this->companyId);
+
+        // Super admin dengan company aktif: tetap lintas-cabang dalam company itu.
+        if ($this->isSuperAdmin) {
+            return $builder;
+        }
+
         if (! $this->hasPermission('attendance.view_all_branches')) {
             // Force branch isolation. Kalau user belum punya branch_id,
             // kondisi ini akan match 0 row — itu memang yang diinginkan
@@ -170,7 +187,10 @@ class TenantContext
     public function canAccessBranch(?int $companyId, ?int $branchId): bool
     {
         if ($this->isSuperAdmin) {
-            return true;
+            // Super admin tanpa pilih company: bebas. Kalau sudah pilih
+            // company, batasi ke company itu — konsisten dengan applyScope.
+            if ($this->companyId === 0) return true;
+            return (int) $companyId === $this->companyId;
         }
         if ((int) $companyId !== $this->companyId) {
             return false;

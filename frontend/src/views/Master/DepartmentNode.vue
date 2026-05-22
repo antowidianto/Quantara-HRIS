@@ -1,189 +1,169 @@
 <script setup>
 /*
- * Recursive tree node untuk halaman OrgStructure.
+ * DepartmentNode — kartu department di bagan.
  *
- * Di-pisah ke file SFC sendiri supaya bisa self-reference: Vue 3 SFC dengan
- * `<script setup>` mendaftarkan komponen sendiri berdasarkan nama file,
- * jadi template di bawah boleh memakai `<DepartmentNode>` tanpa perlu
- * import eksplisit.
- *
- * Posisi diberi warna baris + badge berdasarkan tier (MANAGER /
- * ASST_MANAGER / SUPERVISOR / STAFF) supaya hirarki dalam satu
- * department mudah dibaca dengan cepat.
+ * Disederhanakan: kartu cuma menampilkan info kunci (nama, manager,
+ * jumlah karyawan, jumlah MPP aktif). Aksi utama satu tombol besar
+ * "Lihat & Atur" yang membuka modal detail. Aksi lain (edit, hapus,
+ * tambah sub-dept) disembunyikan di menu tiga-titik supaya kartu
+ * tidak ramai. Drag-and-drop tetap bekerja untuk power user.
  */
+import { ref } from 'vue'
 import {
-  ChevronRightIcon, ChevronDownIcon, BuildingOffice2Icon,
-  BriefcaseIcon, UserGroupIcon, PlusIcon, PencilIcon, TrashIcon,
+  BuildingOffice2Icon, UserGroupIcon, UserCircleIcon,
+  ClipboardDocumentListIcon, EllipsisVerticalIcon,
+  PencilIcon, TrashIcon, PlusIcon, ChevronDownIcon, ChevronUpIcon,
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps({
   node:        { type: Object, required: true },
   level:       { type: Number, default: 0 },
-  expandedIds: { type: Set,    required: true },
+  collapsedIds:{ type: Set,    required: true },
   dragOverId:  { type: Number, default: null },
 })
 
 const emit = defineEmits([
   'toggle', 'drop-on', 'drag-over', 'drag-leave', 'drag-start',
-  'edit', 'delete', 'add-child', 'add-position', 'delete-position', 'edit-position',
+  'edit', 'delete', 'add-child', 'view-detail',
 ])
 
-function isExpanded() {
-  return props.expandedIds.has(props.node.id)
+const menuOpen = ref(false)
+function toggleMenu(e) { e.stopPropagation(); menuOpen.value = ! menuOpen.value }
+function pick(action) {
+  menuOpen.value = false
+  if (action === 'edit')      emit('edit', props.node)
+  if (action === 'delete')    emit('delete', props.node)
+  if (action === 'add-child') emit('add-child', props.node.id)
 }
 
-// Mapping tier → klas Tailwind. Kontras lembut supaya nyaman dibaca
-// pada banyak baris dan tidak menyilaukan saat HR bekerja lama.
-const TIER_BADGE = {
-  MANAGER:      'bg-rose-100 text-rose-700',
-  ASST_MANAGER: 'bg-amber-100 text-amber-700',
-  SUPERVISOR:   'bg-blue-100 text-blue-700',
-  STAFF:        'bg-gray-100 text-gray-600',
-}
-const TIER_ROW = {
-  MANAGER:      'bg-rose-50/60 hover:bg-rose-50',
-  ASST_MANAGER: 'bg-amber-50/60 hover:bg-amber-50',
-  SUPERVISOR:   'bg-blue-50/60 hover:bg-blue-50',
-  STAFF:        'bg-emerald-50/40 hover:bg-emerald-50',
-}
-const TIER_ICON = {
-  MANAGER:      'text-rose-600',
-  ASST_MANAGER: 'text-amber-600',
-  SUPERVISOR:   'text-blue-600',
-  STAFF:        'text-emerald-600',
-}
-const TIER_SHORT = {
-  MANAGER:      'MGR',
-  ASST_MANAGER: 'ASST',
-  SUPERVISOR:   'SPV',
-  STAFF:        'STAFF',
-}
-function tierBadgeClass(t) { return TIER_BADGE[t] || TIER_BADGE.STAFF }
-function tierRowClass(t)   { return TIER_ROW[t]   || TIER_ROW.STAFF }
-function tierIconClass(t)  { return TIER_ICON[t]  || TIER_ICON.STAFF }
-function tierShort(t)      { return TIER_SHORT[t] || 'STAFF' }
+const isCollapsed = () => props.collapsedIds.has(props.node.id)
+const hasChildren = () => (props.node.children?.length ?? 0) > 0
 </script>
 
 <template>
-  <li>
+  <div class="org-node flex flex-col items-center">
+    <!-- Kartu department: minimalis. Klik = buka detail. -->
     <div
-      class="group flex items-center gap-2 px-2 py-1.5 rounded-md border transition-colors cursor-move"
+      class="org-card group relative w-60 rounded-xl border bg-white shadow-sm transition-all overflow-visible"
       :class="dragOverId === node.id
-        ? 'border-primary-500 bg-primary-50'
-        : 'border-transparent hover:border-gray-200 hover:bg-gray-50'"
-      :style="{ marginLeft: (level * 20) + 'px' }"
+        ? 'border-primary-500 ring-2 ring-primary-200 shadow-lg'
+        : 'border-slate-200 hover:border-primary-400 hover:shadow-md'"
       draggable="true"
       @dragstart.stop="emit('drag-start', $event, 'department', node.id)"
       @dragover.stop="emit('drag-over', $event, node.id)"
       @dragleave.stop="emit('drag-leave')"
       @drop.stop="emit('drop-on', $event, node.id)"
+      @dblclick.stop="emit('view-detail', node)"
     >
-      <button
-        v-if="(node.children && node.children.length) || (node.positions && node.positions.length)"
-        class="text-gray-400 hover:text-gray-700 flex-shrink-0"
-        @click.stop="emit('toggle', node.id)"
-      >
-        <ChevronDownIcon v-if="isExpanded()" class="w-4 h-4" />
-        <ChevronRightIcon v-else class="w-4 h-4" />
-      </button>
-      <span v-else class="w-4"></span>
-
-      <BuildingOffice2Icon class="w-5 h-5 text-blue-600 flex-shrink-0" />
-
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="font-medium text-sm text-gray-800 truncate">{{ node.name }}</span>
-          <span class="text-xs text-gray-400">{{ node.code }}</span>
-          <span v-if="! node.is_active"
-            class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
-            Non-aktif
-          </span>
+      <!-- Header -->
+      <div class="flex items-start gap-2 px-3 pt-3">
+        <div class="w-9 h-9 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center flex-shrink-0">
+          <BuildingOffice2Icon class="w-5 h-5" />
         </div>
-        <div class="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
-          <span v-if="node.manager_name" class="flex items-center gap-1">
-            <UserGroupIcon class="w-3.5 h-3.5" /> {{ node.manager_name }}
-          </span>
-          <span v-else class="italic text-gray-400">Tanpa manager</span>
-          <span class="flex items-center gap-1">
-            <UserGroupIcon class="w-3.5 h-3.5" /> {{ node.employee_count }} karyawan
-          </span>
-          <span v-if="(node.positions || []).length" class="flex items-center gap-1">
-            <BriefcaseIcon class="w-3.5 h-3.5" /> {{ node.positions.length }} posisi
-          </span>
+        <div class="flex-1 min-w-0">
+          <h3 class="font-semibold text-sm text-slate-900 truncate leading-tight">{{ node.name }}</h3>
+          <div class="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+            <UserCircleIcon class="w-3.5 h-3.5 flex-shrink-0" />
+            <span v-if="node.manager_name" class="truncate">{{ node.manager_name }}</span>
+            <span v-else class="italic text-slate-400">Belum ada manager</span>
+          </div>
+        </div>
+        <!-- Menu 3 titik untuk aksi sekunder -->
+        <button
+          class="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 opacity-0 group-hover:opacity-100"
+          @click.stop="toggleMenu($event)"
+          title="Aksi lain"
+        >
+          <EllipsisVerticalIcon class="w-4 h-4" />
+        </button>
+        <!-- Dropdown menu -->
+        <div v-if="menuOpen"
+          class="absolute right-2 top-10 z-20 w-44 bg-white rounded-md border shadow-lg py-1 text-sm"
+          @click.stop>
+          <button class="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2"
+            @click="pick('edit')">
+            <PencilIcon class="w-4 h-4 text-slate-500" /> Edit nama / manager
+          </button>
+          <button class="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2"
+            @click="pick('add-child')">
+            <PlusIcon class="w-4 h-4 text-emerald-600" /> Tambah sub-department
+          </button>
+          <button class="w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-600 flex items-center gap-2"
+            @click="pick('delete')">
+            <TrashIcon class="w-4 h-4" /> Hapus department
+          </button>
         </div>
       </div>
 
-      <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 flex-shrink-0">
-        <button class="p-1 text-gray-400 hover:text-emerald-600"
-          @click.stop="emit('add-child', node.id)" title="Tambah sub-department">
-          <PlusIcon class="w-4 h-4" />
+      <!-- Stats inline -->
+      <div class="flex items-center gap-3 px-3 mt-2 text-[11px] text-slate-600">
+        <span class="flex items-center gap-1">
+          <UserGroupIcon class="w-3.5 h-3.5 text-slate-400" />
+          <span class="font-semibold text-slate-800">{{ node.employee_count || 0 }}</span> orang
+        </span>
+        <span v-if="(node.open_mpps || []).length"
+          class="flex items-center gap-1 text-amber-700">
+          <ClipboardDocumentListIcon class="w-3.5 h-3.5" />
+          <span class="font-semibold">{{ node.open_mpps.length }}</span> lowongan
+        </span>
+      </div>
+
+      <!-- Tombol aksi utama -->
+      <div class="px-3 pb-3 pt-2 flex items-center gap-2">
+        <button
+          class="flex-1 px-3 py-1.5 rounded-md bg-primary-50 text-primary-700 text-xs font-medium border border-primary-200 hover:bg-primary-100 transition-colors"
+          @click.stop="emit('view-detail', node)"
+        >
+          Lihat & Atur Karyawan
         </button>
-        <button class="p-1 text-gray-400 hover:text-blue-600"
-          @click.stop="emit('add-position', node.id)" title="Tambah posisi">
-          <BriefcaseIcon class="w-4 h-4" />
+        <button v-if="hasChildren()"
+          class="px-2 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-500"
+          @click.stop="emit('toggle', node.id)"
+          :title="isCollapsed() ? 'Buka anak' : 'Tutup anak'">
+          <ChevronDownIcon v-if="isCollapsed()" class="w-3.5 h-3.5" />
+          <ChevronUpIcon v-else class="w-3.5 h-3.5" />
         </button>
-        <button class="p-1 text-gray-400 hover:text-primary-600"
-          @click.stop="emit('edit', node)" title="Edit">
-          <PencilIcon class="w-4 h-4" />
-        </button>
-        <button class="p-1 text-gray-400 hover:text-red-600"
-          @click.stop="emit('delete', node)" title="Hapus">
-          <TrashIcon class="w-4 h-4" />
-        </button>
+      </div>
+
+      <!-- Sub-dept count badge (kecil di bawah kartu) -->
+      <div v-if="hasChildren()" class="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded-full border">
+        {{ (node.children || []).length }} sub-dept
       </div>
     </div>
 
-    <ul v-if="isExpanded()" class="mt-1 space-y-1">
-      <!-- Posisi — warna kiri sesuai tier supaya hirarki kebaca cepat -->
-      <li v-for="p in (node.positions || [])" :key="'p-' + p.id"
-        class="flex items-center gap-2 px-2 py-1 rounded text-xs cursor-move group/pos"
-        :class="tierRowClass(p.tier)"
-        :style="{ marginLeft: ((level + 1) * 20 + 16) + 'px' }"
-        draggable="true"
-        @dragstart.stop="emit('drag-start', $event, 'position', p.id)"
-      >
-        <BriefcaseIcon class="w-3.5 h-3.5 flex-shrink-0" :class="tierIconClass(p.tier)" />
-        <span class="flex-1 truncate">{{ p.name }}</span>
-        <span
-          class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0"
-          :class="tierBadgeClass(p.tier)">
-          {{ tierShort(p.tier) }}
-        </span>
-        <span class="text-[10px] text-gray-400">{{ p.code }}</span>
-        <button class="text-gray-400 hover:text-primary-600 opacity-0 group-hover/pos:opacity-100"
-          @click.stop="emit('edit-position', p)" title="Edit posisi (ubah tier dll.)">
-          <PencilIcon class="w-3.5 h-3.5" />
-        </button>
-        <button class="text-gray-400 hover:text-red-600 opacity-0 group-hover/pos:opacity-100"
-          @click.stop="emit('delete-position', p)" title="Hapus posisi">
-          <TrashIcon class="w-3.5 h-3.5" />
-        </button>
-      </li>
-
-      <!-- Sub-departments — self-reference via filename (Vue auto-registers SFC name) -->
-      <DepartmentNode
-        v-for="c in (node.children || [])"
-        :key="c.id"
-        :node="c"
-        :level="level + 1"
-        :expanded-ids="expandedIds"
-        :drag-over-id="dragOverId"
-        @toggle="(id) => emit('toggle', id)"
-        @drop-on="(e, id) => emit('drop-on', e, id)"
-        @drag-over="(e, id) => emit('drag-over', e, id)"
-        @drag-leave="() => emit('drag-leave')"
-        @drag-start="(e, t, id) => emit('drag-start', e, t, id)"
-        @edit="(d) => emit('edit', d)"
-        @delete="(d) => emit('delete', d)"
-        @add-child="(id) => emit('add-child', id)"
-        @add-position="(id) => emit('add-position', id)"
-        @delete-position="(p) => emit('delete-position', p)"
-        @edit-position="(p) => emit('edit-position', p)"
-      />
-    </ul>
-  </li>
+    <!-- Connector + children -->
+    <template v-if="! isCollapsed() && hasChildren()">
+      <div class="w-px h-7 bg-slate-300"></div>
+      <div class="org-children flex items-start gap-6 relative">
+        <div
+          v-if="(node.children || []).length > 1"
+          class="absolute top-0 h-px bg-slate-300"
+          :style="{ left: '7.5rem', right: '7.5rem' }"
+        ></div>
+        <div v-for="c in (node.children || [])" :key="c.id" class="flex flex-col items-center">
+          <div class="w-px h-7 bg-slate-300"></div>
+          <DepartmentNode
+            :node="c"
+            :level="level + 1"
+            :collapsed-ids="collapsedIds"
+            :drag-over-id="dragOverId"
+            @toggle="(id) => emit('toggle', id)"
+            @drop-on="(e, id) => emit('drop-on', e, id)"
+            @drag-over="(e, id) => emit('drag-over', e, id)"
+            @drag-leave="() => emit('drag-leave')"
+            @drag-start="(e, t, id) => emit('drag-start', e, t, id)"
+            @edit="(d) => emit('edit', d)"
+            @delete="(d) => emit('delete', d)"
+            @add-child="(id) => emit('add-child', id)"
+            @view-detail="(d) => emit('view-detail', d)"
+          />
+        </div>
+      </div>
+    </template>
+  </div>
 </template>
 
 <style scoped>
+.org-card { flex-shrink: 0; }
 [draggable="true"]:active { cursor: grabbing; }
 </style>

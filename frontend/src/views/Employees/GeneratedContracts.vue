@@ -7,6 +7,7 @@ import {
   DocumentTextIcon, EyeIcon, TrashIcon, PaperAirplaneIcon,
   CheckBadgeIcon, NoSymbolIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 /**
  * Halaman daftar kontrak yang sudah digenerate.
@@ -44,16 +45,10 @@ async function fetchData() {
   }
 }
 
-async function loadEmployees() {
-  try {
-    const res = await api.get('/employees', { params: { per_page: 200 } })
-    employees.value = res.data.data || []
-  } catch (_) { /* silent */ }
-}
-
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
 onMounted(() => {
   fetchData()
-  loadEmployees()
 })
 
 watch(() => [params.status, params.employee_id], () => {
@@ -136,12 +131,13 @@ function fmtDate(d) {
           <option value="SIGNED">Ditandatangani</option>
           <option value="REVOKED">Dicabut</option>
         </select>
-        <select v-model="params.employee_id" class="input w-full md:w-72">
-          <option value="">— Semua Karyawan —</option>
-          <option v-for="e in employees" :key="e.id" :value="e.id">
-            {{ e.employee_number }} — {{ e.full_name }}
-          </option>
-        </select>
+        <div class="w-full md:w-72">
+          <EmployeeSearchSelect
+            v-model="params.employee_id"
+            placeholder="— Semua Karyawan —"
+            :only-active="false"
+          />
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="table">

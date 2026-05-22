@@ -7,6 +7,7 @@ import {
   PlusIcon, PencilIcon, TrashIcon, EyeIcon, XMarkIcon,
   DocumentTextIcon, BoltIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 /**
  * Halaman editor Template Kontrak.
@@ -385,12 +386,11 @@ const placeholderHints = {
               <div class="flex flex-wrap gap-3 items-end">
                 <div class="flex-1 min-w-[260px]">
                   <label class="label">Karyawan untuk preview</label>
-                  <select v-model="previewEmpId" class="input">
-                    <option value="">— Pilih Karyawan —</option>
-                    <option v-for="e in employees" :key="e.id" :value="e.id">
-                      {{ e.employee_number }} — {{ e.full_name }}
-                    </option>
-                  </select>
+                  <EmployeeSearchSelect
+                    v-model="previewEmpId"
+                    placeholder="— Pilih Karyawan —"
+                    :only-active="true"
+                  />
                 </div>
                 <button class="btn-secondary" @click="doPreview" :disabled="previewLoading">
                   <EyeIcon class="w-4 h-4" /> {{ previewLoading ? 'Memuat...' : 'Preview' }}

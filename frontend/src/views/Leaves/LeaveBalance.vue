@@ -8,6 +8,7 @@ import {
   CalendarDaysIcon, ArrowPathIcon,
   InformationCircleIcon, ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 /**
  * Halaman saldo cuti karyawan dengan breakdown:
@@ -34,13 +35,9 @@ const loading = ref(false)
 
 const isHr = computed(() => auth.can('leave_balance.view') || auth.can('leave.view') || auth.isSuperAdmin)
 
-async function loadEmployees() {
-  if (! isHr.value) return
-  try {
-    const res = await api.get('/employees', { params: { per_page: 500, is_active: 1 } })
-    employees.value = res.data.data || []
-  } catch (_) { /* silent */ }
-}
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
+async function loadEmployees() { /* deprecated: server-side search */ }
 
 async function fetchBalance() {
   const empId = filters.employee_id || auth.user?.employee_id
@@ -114,12 +111,12 @@ const totals = computed(() => {
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div v-if="isHr" class="md:col-span-2">
           <label class="label">Karyawan</label>
-          <select v-model="filters.employee_id" class="input" @change="fetchBalance">
-            <option value="">— Saya sendiri —</option>
-            <option v-for="e in employees" :key="e.id" :value="e.id">
-              {{ e.employee_number }} — {{ e.full_name }}
-            </option>
-          </select>
+          <EmployeeSearchSelect
+            v-model="filters.employee_id"
+            placeholder="— Saya sendiri —"
+            :only-active="false"
+            @change="fetchBalance"
+          />
         </div>
         <div>
           <label class="label">Tahun</label>

@@ -5,6 +5,8 @@ import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const props = defineProps({
   /** ID karyawan yang dibuka. Null = mode tambah baru. */
@@ -455,9 +457,29 @@ function fmtDateOrDash(v) {
         <!-- ── IDENTITAS ───────────────────────────────────────── -->
         <div v-else-if="activeTab === 'general'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="label">NIP</label>
-            <input v-if="isEditing" v-model="form.employee_number" :disabled="!isCreating" class="input" />
+            <label class="label">
+              NIK / NIP
+              <span class="text-xs text-gray-500 font-normal">(dipakai untuk login)</span>
+            </label>
+            <!--
+              NIK adalah identifier login (lihat AuthController::login).
+              Saat create: bebas diisi (selama unik di company).
+              Saat edit: hanya super admin yang boleh me-rename, supaya
+              perubahan NIK tetap terkontrol & traceable. HR biasa hanya
+              bisa melihat. Backend juga mem-enforce ini di
+              EmployeeController::update.
+            -->
+            <input v-if="isEditing" v-model="form.employee_number"
+              :disabled="!isCreating && !auth.isSuperAdmin"
+              class="input" maxlength="32"
+              placeholder="Contoh: EMP-0001" />
             <div v-else class="font-mono">{{ employee?.employee_number || '-' }}</div>
+            <p v-if="isEditing && !isCreating && !auth.isSuperAdmin" class="text-xs text-gray-500 mt-1">
+              Hanya Super Admin yang dapat mengubah NIK setelah karyawan dibuat.
+            </p>
+            <p v-else-if="isEditing && !isCreating && auth.isSuperAdmin" class="text-xs text-amber-600 mt-1">
+              Mengubah NIK akan mengubah cara karyawan login. Pastikan NIK baru sudah dikomunikasikan.
+            </p>
           </div>
           <div></div>
           <div>
@@ -667,64 +689,96 @@ function fmtDateOrDash(v) {
         <div v-else-if="activeTab === 'employment'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="label">Cabang</label>
-            <select v-if="isEditing" v-model="form.branch_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in branches" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect v-if="isEditing"
+              v-model="form.branch_id"
+              :items="branches"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code','city']"
+              placeholder="- Pilih -"
+            />
             <div v-else>{{ branches.find(b => b.id === employee?.branch_id)?.name || '-' }}</div>
           </div>
           <div>
             <label class="label">Lokasi Kerja</label>
-            <select v-if="isEditing" v-model="form.work_location_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in workLocations" :key="o.id" :value="o.id">
-                {{ o.name }} ({{ o.type }})
-              </option>
-            </select>
+            <SearchableSelect v-if="isEditing"
+              v-model="form.work_location_id"
+              :items="workLocations"
+              value-key="id"
+              label-key="name"
+              sub-label-key="type"
+              :search-keys="['name','type','address']"
+              placeholder="- Pilih -"
+            >
+              <template #item="{ item }">
+                <span class="block text-sm truncate">{{ item.name }} ({{ item.type }})</span>
+              </template>
+              <template #selected="{ item }">
+                <span class="block truncate font-medium">{{ item.name }} ({{ item.type }})</span>
+              </template>
+            </SearchableSelect>
             <div v-else>{{ workLocations.find(w => w.id === employee?.work_location_id)?.name || '-' }}</div>
           </div>
           <div>
             <label class="label">Departemen</label>
-            <select v-if="isEditing" v-model="form.department_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in departments" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect v-if="isEditing"
+              v-model="form.department_id"
+              :items="departments"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="- Pilih -"
+            />
             <div v-else>{{ departments.find(d => d.id === employee?.department_id)?.name || '-' }}</div>
           </div>
           <div>
             <label class="label">Jabatan</label>
-            <select v-if="isEditing" v-model="form.position_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in positions" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect v-if="isEditing"
+              v-model="form.position_id"
+              :items="positions"
+              value-key="id"
+              label-key="name"
+              sub-label-key="department_name"
+              :search-keys="['name','code','tier','department_name']"
+              placeholder="- Pilih -"
+            />
             <div v-else>{{ positions.find(p => p.id === employee?.position_id)?.name || '-' }}</div>
           </div>
           <div>
             <label class="label">Job Grade</label>
-            <select v-if="isEditing" v-model="form.job_grade_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in jobGrades" :key="o.id" :value="o.id">{{ o.name }} (Lvl {{ o.level }})</option>
-            </select>
+            <SearchableSelect v-if="isEditing"
+              v-model="form.job_grade_id"
+              :items="jobGrades"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="- Pilih -"
+            >
+              <template #item="{ item }">
+                <span class="block text-sm truncate">{{ item.name }} <span class="text-xs text-gray-500">(Lvl {{ item.level }})</span></span>
+              </template>
+              <template #selected="{ item }">
+                <span class="block truncate font-medium">{{ item.name }} <span class="text-xs text-gray-500">(Lvl {{ item.level }})</span></span>
+              </template>
+            </SearchableSelect>
             <div v-else>{{ jobGrades.find(g => g.id === employee?.job_grade_id)?.name || '-' }}</div>
           </div>
           <div>
             <label class="label">Atasan Langsung (untuk approval)</label>
-            <select v-if="isEditing" v-model="form.supervisor_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in employeesList" :key="o.id" :value="o.id" :disabled="o.id === Number(props.employeeId)">
-                {{ o.full_name }} ({{ o.employee_number }})
-              </option>
-            </select>
+            <EmployeeSearchSelect v-if="isEditing"
+              v-model="form.supervisor_id"
+              placeholder="- Pilih atasan -"
+              :only-active="true"
+            />
             <div v-else>{{ employeesList.find(e => e.id === employee?.supervisor_id)?.full_name || '-' }}</div>
           </div>
           <div>
             <label class="label">Manager</label>
-            <select v-if="isEditing" v-model="form.manager_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in employeesList" :key="o.id" :value="o.id" :disabled="o.id === Number(props.employeeId)">
-                {{ o.full_name }} ({{ o.employee_number }})
-              </option>
-            </select>
+            <EmployeeSearchSelect v-if="isEditing"
+              v-model="form.manager_id"
+              placeholder="- Pilih manager -"
+              :only-active="true"
+            />
             <div v-else>{{ employeesList.find(e => e.id === employee?.manager_id)?.full_name || '-' }}</div>
           </div>
           <div>

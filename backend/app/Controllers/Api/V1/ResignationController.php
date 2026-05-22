@@ -338,12 +338,30 @@ class ResignationController extends ApiController
             // Set resign_date di employees + reason — ini yang membuat
             // payroll dan modul lain tahu karyawan akan resign.
             $reasonLabel = self::REASON_CATEGORIES[$row['reason_category']] ?? $row['reason_category'];
+            $effectiveDateForReplacement = $row['effective_date'] ?? $row['last_working_date'];
             $db->table('employees')->where('id', (int) $row['employee_id'])->update([
-                'resign_date'   => $row['effective_date'] ?? $row['last_working_date'],
+                'resign_date'   => $effectiveDateForReplacement,
                 'resign_reason' => 'RESIGN_VOLUNTARY: ' . $reasonLabel
                     . (! empty($row['reason_text']) ? ' — ' . mb_substr($row['reason_text'], 0, 200) : ''),
                 'updated_at'    => $now,
             ]);
+
+            // Auto-create MPP DRAFT untuk pengganti, target_start_date =
+            // tanggal efektif berhenti. HRD tinggal review & submit, atau
+            // bisa di-cancel kalau memang posisi mau dirombak/ditiadakan.
+            // Best-effort: kegagalan tidak boleh membatalkan resignation.
+            $autoMppId = null;
+            try {
+                $autoMppId = Services::manpower()->autoCreateForResignation(
+                    (int) $row['company_id'],
+                    (int) $row['employee_id'],
+                    $userId,
+                    (string) $effectiveDateForReplacement,
+                    $emp,
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', '[Resignation] Auto-create MPP failed: ' . $e->getMessage());
+            }
 
             // Notify karyawan: resignation diterima.
             if (! empty($emp['user_id'])) {
@@ -365,16 +383,26 @@ class ResignationController extends ApiController
                 entity: 'resignation_requests',
                 entityId: (int) $row['id'],
                 description: "HR menyetujui resignation #{$row['id']} — set resign_date "
-                    . $update['updated_at'] . ", generate {$tasksCreated} offboarding tasks.",
+                    . $effectiveDateForReplacement . ", generate {$tasksCreated} offboarding tasks"
+                    . ($autoMppId ? ", auto-create MPP draft #{$autoMppId} untuk pengganti" : ''),
                 severity: 'WARNING',
-                metadata: ['tasks_created' => $tasksCreated, 'template_id' => $offboardingTemplateId],
+                metadata: [
+                    'tasks_created'     => $tasksCreated,
+                    'template_id'       => $offboardingTemplateId,
+                    'mpp_auto_created'  => $autoMppId,
+                ],
             );
+
+            $msg = 'Resignation disetujui.';
+            if ($tasksCreated > 0) $msg .= " {$tasksCreated} task offboarding ter-generate.";
+            if ($autoMppId)        $msg .= " MPP pengganti dibuat sebagai draft (#{$autoMppId}).";
 
             return $this->ok([
                 'status'                => 'APPROVED',
                 'tasks_generated_count' => $tasksCreated,
+                'mpp_auto_created'      => $autoMppId,
                 'note'                  => $generationNote,
-            ], 'Resignation disetujui. ' . ($tasksCreated > 0 ? "{$tasksCreated} task offboarding telah ter-generate." : ''));
+            ], $msg);
         }
 
         return $this->fail('Status saat ini tidak bisa di-approve: ' . $row['status'], 409, 'INVALID_STATE');

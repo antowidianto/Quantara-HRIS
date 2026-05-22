@@ -10,6 +10,7 @@ import {
   CheckCircleIcon, XCircleIcon, PaperAirplaneIcon as SubmitIcon,
   PlayIcon, FlagIcon, BanknotesIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -62,15 +63,11 @@ async function fetchData() {
     loading.value = false
   }
 }
-async function fetchEmployees() {
-  if (! canManage.value && ! canApprove.value) return
-  try {
-    const res = await api.get('/employees', { params: { per_page: 200, is_active: 1 } })
-    employees.value = res.data.data || []
-  } catch (_) {}
-}
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
+async function fetchEmployees() { /* deprecated: server-side search */ }
 
-onMounted(() => { fetchEmployees(); fetchData() })
+onMounted(() => { fetchData() })
 
 function openCreate() {
   editing.value = {
@@ -291,10 +288,12 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </select></div>
         <div v-if="canManage || canApprove">
           <label class="label">Karyawan</label>
-          <select v-model="filters.employee_id" class="input">
-            <option value="">Semua</option>
-            <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
-          </select></div>
+          <EmployeeSearchSelect
+            v-model="filters.employee_id"
+            placeholder="Semua"
+            :only-active="false"
+          />
+        </div>
         <div class="flex items-end gap-2">
           <label class="flex items-center gap-2 text-sm whitespace-nowrap">
             <input type="checkbox" v-model="filters.mine" :true-value="1" :false-value="0" />
@@ -408,10 +407,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div v-if="canManage" class="md:col-span-2">
             <label class="label">Karyawan (kosong = saya sendiri)</label>
-            <select v-model="editing.employee_id" class="input">
-              <option value="">— Saya sendiri —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }} ({{ e.employee_number }})</option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="editing.employee_id"
+              placeholder="— Saya sendiri —"
+              :only-active="true"
+            />
           </div>
           <div class="md:col-span-2">
             <label class="label">Maksud / Tujuan Perjalanan *</label>

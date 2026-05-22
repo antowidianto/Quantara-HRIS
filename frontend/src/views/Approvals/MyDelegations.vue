@@ -8,6 +8,7 @@ import {
   PlusIcon, PencilIcon, TrashIcon, XMarkIcon, ShieldCheckIcon,
   ArrowsRightLeftIcon, CheckCircleIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 /**
  * Halaman delegasi approval — user mengatur siapa yang menggantikan dia
@@ -201,10 +202,16 @@ function isCurrentlyActive(d) {
         Semua Delegasi
       </button>
 
-      <div class="ml-auto py-1 pr-1">
-        <select v-model="filterModule" class="input text-sm" @change="fetchData">
-          <option v-for="m in moduleOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
-        </select>
+      <div class="ml-auto py-1 pr-1 w-56">
+        <SearchableSelect
+          v-model="filterModule"
+          :items="moduleOptions"
+          value-key="value"
+          label-key="label"
+          placeholder="Semua Modul"
+          size="sm"
+          @change="fetchData"
+        />
       </div>
     </div>
 
@@ -299,22 +306,28 @@ function isCurrentlyActive(d) {
         <form @submit.prevent="save" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div v-if="canManageOthers" class="md:col-span-2">
             <label class="label">Pendelegasi</label>
-            <select v-model="form.user_id" class="input">
-              <option value="">Saya sendiri ({{ auth.user?.name }})</option>
-              <option v-for="u in users" :key="u.id" :value="u.id">
-                {{ u.name }} — {{ u.email }}
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="form.user_id"
+              :items="users"
+              value-key="id"
+              label-key="name"
+              sub-label-key="email"
+              :search-keys="['name','email']"
+              :placeholder="`Saya sendiri (${auth.user?.name || ''})`"
+            />
           </div>
 
           <div class="md:col-span-2">
             <label class="label">Pengganti *</label>
-            <select v-model="form.delegate_to_user_id" class="input" required>
-              <option value="">— Pilih user pengganti —</option>
-              <option v-for="u in users" :key="u.id" :value="u.id">
-                {{ u.name }} — {{ u.email }}
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="form.delegate_to_user_id"
+              :items="users"
+              value-key="id"
+              label-key="name"
+              sub-label-key="email"
+              :search-keys="['name','email']"
+              placeholder="— Pilih user pengganti —"
+            />
           </div>
 
           <div>
@@ -328,12 +341,13 @@ function isCurrentlyActive(d) {
 
           <div class="md:col-span-2">
             <label class="label">Modul</label>
-            <select v-model="form.module" class="input">
-              <option value="">Semua modul</option>
-              <option v-for="m in moduleOptions.filter(mo => mo.value)" :key="m.value" :value="m.value">
-                {{ m.label }}
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="form.module"
+              :items="moduleOptions.filter(mo => mo.value)"
+              value-key="value"
+              label-key="label"
+              placeholder="Semua modul"
+            />
             <div class="text-xs text-gray-500 mt-1">
               Kosongkan untuk delegasi semua modul (LEAVE, OVERTIME, dll).
             </div>

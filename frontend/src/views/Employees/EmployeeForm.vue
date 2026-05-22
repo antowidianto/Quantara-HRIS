@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -187,31 +188,48 @@ async function submit() {
         <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="label">Cabang</label>
-            <select v-model="form.branch_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in branches" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.branch_id"
+              :items="branches"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code','city']"
+              placeholder="- Pilih -"
+            />
           </div>
           <div>
             <label class="label">Departemen</label>
-            <select v-model="form.department_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in departments" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.department_id"
+              :items="departments"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="- Pilih -"
+            />
           </div>
           <div>
             <label class="label">Jabatan</label>
-            <select v-model="form.position_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in positions" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.position_id"
+              :items="positions"
+              value-key="id"
+              label-key="name"
+              sub-label-key="department_name"
+              :search-keys="['name','code','tier','department_name']"
+              placeholder="- Pilih -"
+            />
           </div>
           <div>
             <label class="label">Job Grade</label>
-            <select v-model="form.job_grade_id" class="input">
-              <option :value="null">- Pilih -</option>
-              <option v-for="o in jobGrades" :key="o.id" :value="o.id">{{ o.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.job_grade_id"
+              :items="jobGrades"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="- Pilih -"
+            />
           </div>
           <div>
             <label class="label">Status Kepegawaian *</label>

@@ -6,6 +6,22 @@ const routes = [
   { path: '/forgot-password', name: 'forgot-password', component: () => import('@/views/ForgotPassword.vue'), meta: { guest: true } },
   { path: '/reset-password', name: 'reset-password', component: () => import('@/views/ResetPassword.vue'), meta: { guest: true } },
 
+  // ─── Public Career Portal (no auth) ─────────────────────────
+  // Lihat docs/CAREER_PORTAL.md. Pelamar mengakses tanpa login.
+  {
+    path: '/careers/:slug',
+    component: () => import('@/layouts/CareerPublicLayout.vue'),
+    meta: { public: true },
+    children: [
+      { path: '',                            name: 'career-home',     component: () => import('@/views/Career/CareerHome.vue') },
+      { path: 'jobs/:jobSlug',               name: 'career-job',      component: () => import('@/views/Career/CareerJobDetail.vue') },
+      { path: 'jobs/:jobSlug/apply',         name: 'career-apply',    component: () => import('@/views/Career/CareerApply.vue') },
+      { path: 'success',                     name: 'career-success',  component: () => import('@/views/Career/CareerSuccess.vue') },
+      { path: 'track',                       name: 'career-track',    component: () => import('@/views/Career/CareerTrack.vue') },
+      { path: 'track/:token',                name: 'career-track-token', component: () => import('@/views/Career/CareerTrack.vue') },
+    ],
+  },
+
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
@@ -28,6 +44,8 @@ const routes = [
 
       // Org Structure (Organization Development) — drag & drop tree
       { path: 'master/org-structure', name: 'org-structure', component: () => import('@/views/Master/OrgStructure.vue') },
+      // Master Jabatan Kunci — assign penjabat HR Manager, Direktur, dst
+      { path: 'master/organization-roles', name: 'organization-roles', component: () => import('@/views/Master/OrganizationRoles.vue') },
 
       // Master Data
       { path: 'master/branches', name: 'branches', component: () => import('@/views/Master/Branches.vue') },
@@ -54,6 +72,12 @@ const routes = [
 
       // Disciplinary (Surat Peringatan)
       { path: 'hr/disciplinary', name: 'disciplinary', component: () => import('@/views/HR/Disciplinary.vue') },
+      // Job Information Change (Promosi/Demosi/Mutasi) — lihat docs/JIC.md
+      { path: 'hr/jic', name: 'jic', component: () => import('@/views/HR/JobInformationChange.vue') },
+      // Employee Transfer (Mutasi sederhana antar branch/dept/posisi) — lihat docs/EMPLOYEE_TRANSFER.md
+      { path: 'hr/transfers', name: 'employee-transfers', component: () => import('@/views/HR/EmployeeTransfers.vue') },
+      // Self-service: karyawan lihat & approve/reject mutasi atas nama mereka sendiri
+      { path: 'hr/my-transfers', name: 'my-transfers', component: () => import('@/views/HR/MyTransfers.vue') },
       // Severance (Pesangon / PHK)
       { path: 'hr/severance', name: 'severance', component: () => import('@/views/HR/Severance.vue') },
       // Onboarding & Offboarding
@@ -67,8 +91,12 @@ const routes = [
       // Business Trip / SPPD
       { path: 'travel', name: 'business-trips', component: () => import('@/views/Travel/TripList.vue') },
       // Recruitment / ATS
+      // Manpower Planning (MPP) — pengajuan kebutuhan SDM dari N+1
+      { path: 'recruitment/mpp', name: 'recruitment-mpp', component: () => import('@/views/Recruitment/MppList.vue') },
       { path: 'recruitment/jobs', name: 'recruitment-jobs', component: () => import('@/views/Recruitment/JobList.vue') },
       { path: 'recruitment/jobs/:id', name: 'recruitment-pipeline', component: () => import('@/views/Recruitment/PipelineBoard.vue') },
+      // Career Portal — admin settings
+      { path: 'recruitment/career-settings', name: 'career-settings', component: () => import('@/views/Career/CareerSettings.vue') },
       // HR Helpdesk / Tickets
       { path: 'helpdesk/tickets', name: 'helpdesk-tickets', component: () => import('@/views/Helpdesk/TicketList.vue') },
       { path: 'helpdesk/tickets/:id', name: 'helpdesk-ticket-detail', component: () => import('@/views/Helpdesk/TicketDetail.vue') },
@@ -127,6 +155,7 @@ const routes = [
       { path: 'admin/audit-logs', name: 'audit-logs', component: () => import('@/views/Admin/AuditLogs.vue') },
       { path: 'admin/companies', name: 'companies', component: () => import('@/views/Admin/Companies.vue') },
       { path: 'admin/settings', name: 'settings', component: () => import('@/views/Admin/Settings.vue') },
+      { path: 'admin/email-settings', name: 'email-settings', component: () => import('@/views/Admin/EmailSettings.vue') },
 
       // Profile
       { path: 'profile', name: 'profile', component: () => import('@/views/Profile.vue') },

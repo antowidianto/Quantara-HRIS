@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { fmtCurrency } from '@/composables/useResource'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -269,10 +270,17 @@ async function recomputeAll() {
     <!-- ── RATES ─────────────────────────────────────────── -->
     <div v-else class="card">
       <div class="card-header justify-between gap-3">
-        <select v-model="filterTypeId" @change="fetchRates" class="input w-64">
-          <option value="">Semua tipe</option>
-          <option v-for="t in types" :key="t.id" :value="t.id">{{ t.name }}</option>
-        </select>
+        <div class="w-64">
+          <SearchableSelect
+            v-model="filterTypeId"
+            :items="types"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code','category']"
+            placeholder="Semua tipe"
+            @change="fetchRates"
+          />
+        </div>
         <button v-if="canManage" class="btn-primary" @click="openCreateRate" :disabled="types.length === 0">
           <PlusIcon class="w-4 h-4" /> Tambah Tarif
         </button>
@@ -362,24 +370,52 @@ async function recomputeAll() {
         <form @submit.prevent="saveRate" class="p-5 space-y-3 text-sm">
           <div>
             <label class="label">Tipe Tunjangan *</label>
-            <select v-model="rateForm.allowance_type_id" class="input" required>
-              <option v-for="t in types" :key="t.id" :value="t.id">{{ t.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="rateForm.allowance_type_id"
+              :items="types"
+              value-key="id"
+              label-key="name"
+              sub-label-key="category"
+              :search-keys="['name','code','category']"
+              placeholder="— Pilih tipe —"
+              :clearable="false"
+            />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="label">Cabang</label>
-              <select v-model="rateForm.branch_id" class="input">
-                <option :value="null">— Semua cabang —</option>
-                <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-              </select>
+              <SearchableSelect
+                v-model="rateForm.branch_id"
+                :items="branches"
+                value-key="id"
+                label-key="name"
+                :search-keys="['name','code','city']"
+                placeholder="— Semua cabang —"
+              />
             </div>
             <div>
               <label class="label">Job Grade</label>
-              <select v-model="rateForm.job_grade_id" class="input">
-                <option :value="null">— Semua grade —</option>
-                <option v-for="g in grades" :key="g.id" :value="g.id">{{ g.name }} (Lvl {{ g.level }})</option>
-              </select>
+              <SearchableSelect
+                v-model="rateForm.job_grade_id"
+                :items="grades"
+                value-key="id"
+                label-key="name"
+                :search-keys="['name','code']"
+                placeholder="— Semua grade —"
+              >
+                <template #item="{ item }">
+                  <span class="block text-sm truncate">
+                    {{ item.name }}
+                    <span class="text-xs text-gray-500">(Lvl {{ item.level }})</span>
+                  </span>
+                </template>
+                <template #selected="{ item }">
+                  <span class="block truncate font-medium">
+                    {{ item.name }}
+                    <span class="text-xs text-gray-500">(Lvl {{ item.level }})</span>
+                  </span>
+                </template>
+              </SearchableSelect>
             </div>
           </div>
           <div>

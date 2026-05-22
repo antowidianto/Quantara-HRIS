@@ -8,7 +8,8 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import {
   ArrowLeftIcon, PlusIcon, ArrowRightIcon, XCircleIcon, CheckBadgeIcon,
-  StarIcon, TrashIcon,
+  StarIcon, TrashIcon, ClipboardDocumentIcon, CheckIcon, KeyIcon,
+  DocumentIcon, EyeIcon, ArrowDownTrayIcon, PhotoIcon, DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
@@ -40,6 +41,27 @@ const hireForm = reactive({
   basic_salary: 0, join_date: '',
 })
 
+// Credential modal — tampil sekali setelah hire berhasil bila auto-create
+// user akun untuk karyawan baru. HR wajib catat / kirim ke karyawan; setelah
+// modal ditutup credential hilang dari client (tidak disimpan).
+const credentialResult = ref(null)
+const copiedField = ref(null)
+async function copyToClipboard(text, field) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedField.value = field
+    setTimeout(() => { if (copiedField.value === field) copiedField.value = null }, 1500)
+  } catch (e) {
+    toast.error('Gagal copy ke clipboard')
+  }
+}
+function copyAllCredentials() {
+  if (! credentialResult.value) return
+  const r = credentialResult.value
+  const text = `Akun HRIS — ${r.employee_name}\nEmail: ${r.user_email}\nPassword sementara: ${r.temp_password}\nLink login: ${window.location.origin}/login\n(Wajib ganti password saat login pertama)`
+  copyToClipboard(text, 'all')
+}
+
 const STAGES = [
   { code: 'NEW',            label: '🆕 Baru',         color: 'bg-gray-100' },
   { code: 'SCREENING',      label: '📋 Screening',    color: 'bg-blue-50' },
@@ -57,10 +79,12 @@ const canHire = computed(() => auth.can('recruitment.hire'))
 const candidatesByStage = computed(() => {
   const map = {}
   STAGES.forEach(s => map[s.code] = [])
+  // Distribusikan ke kolom sesuai current_stage. REJECTED & WITHDRAWN
+  // otomatis terpisah karena bukan key valid di map (lihat counter
+  // rejectedCount untuk badge "X ditolak"). HIRED tetap muncul di
+  // kolomnya supaya HR bisa lihat siapa saja yang sudah jadi karyawan.
   candidates.value.forEach(c => {
-    if (! TERMINAL.includes(c.current_stage)) {
-      if (map[c.current_stage]) map[c.current_stage].push(c)
-    }
+    if (map[c.current_stage]) map[c.current_stage].push(c)
   })
   return map
 })
@@ -150,13 +174,28 @@ function openHireModal(c) {
 async function doHire() {
   if (! canHire.value) { toast.error('Butuh permission recruitment.hire'); return }
   try {
+    const candidateName = showHireModal.value.full_name
     // Move to HIRED dulu kalau belum
     if (showHireModal.value.current_stage !== 'HIRED') {
       await api.post(`/candidates/${showHireModal.value.id}/move-stage`, { stage: 'HIRED' })
     }
     const res = await api.post(`/candidates/${showHireModal.value.id}/hire`, hireForm)
-    toast.success(`Kandidat di-hire sebagai employee #${res.data.data.employee_id}. Onboarding tasks otomatis dibuat.`)
+    const data = res.data.data || {}
     showHireModal.value = null
+    // Kalau auto-create user account berhasil, tampilkan credential modal
+    // (one-time view) sebelum data hilang dari memori.
+    if (data.user_id && data.temp_password) {
+      credentialResult.value = {
+        employee_id: data.employee_id,
+        employee_name: candidateName,
+        user_id: data.user_id,
+        user_email: data.user_email,
+        temp_password: data.temp_password,
+        auto_completed_tasks: data.auto_completed_tasks || 0,
+      }
+    } else {
+      toast.success(`Kandidat di-hire sebagai employee #${data.employee_id}. Onboarding tasks otomatis dibuat.`)
+    }
     fetchAll()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
 }
@@ -177,6 +216,73 @@ function nextStage(currentStage) {
   const idx = STAGES.findIndex(s => s.code === currentStage)
   if (idx === -1 || idx === STAGES.length - 1) return null
   return STAGES[idx + 1].code
+}
+
+// Gabungan dokumen: prioritas `documents` dari candidate_documents,
+// fallback ke `legacy_documents` (cv_path/photo_path/dst di candidates).
+// Backend sudah include signed URL untuk semua-nya.
+const allDocuments = computed(() => {
+  if (! detailData.value) return []
+  const docs = []
+  for (const d of detailData.value.documents || []) {
+    docs.push({
+      type: d.document_type || 'OTHER',
+      label: docTypeLabel(d.document_type),
+      file_name: d.file_name || d.file_path?.split('/').pop() || 'document',
+      file_path: d.file_path,
+      view_url: d.view_url,
+      mime_hint: guessMimeFromPath(d.file_path || ''),
+    })
+  }
+  // Hanya tambahkan legacy kalau tipe-nya belum ada di documents (avoid duplicate)
+  const seenTypes = new Set(docs.map(d => d.type))
+  for (const d of detailData.value.legacy_documents || []) {
+    if (seenTypes.has(d.document_type)) continue
+    docs.push({
+      type: d.document_type,
+      label: d.label || docTypeLabel(d.document_type),
+      file_name: d.file_name || 'document',
+      file_path: d.file_path,
+      view_url: d.view_url,
+      mime_hint: guessMimeFromPath(d.file_path || ''),
+    })
+  }
+  return docs
+})
+
+function docTypeLabel(type) {
+  const map = {
+    CV: 'CV / Resume',
+    KTP: 'KTP',
+    IJAZAH: 'Ijazah',
+    TRANSKRIP: 'Transkrip Nilai',
+    SERTIFIKAT: 'Sertifikat',
+    PORTFOLIO: 'Portfolio',
+    OTHER: 'Dokumen Lain',
+  }
+  return map[type] || type
+}
+function guessMimeFromPath(path) {
+  const ext = (path.split('.').pop() || '').toLowerCase()
+  if (['jpg','jpeg','png','webp','gif'].includes(ext)) return 'image'
+  if (ext === 'pdf') return 'pdf'
+  if (['doc','docx'].includes(ext)) return 'doc'
+  return 'other'
+}
+function downloadDoc(doc) {
+  if (! doc.view_url) {
+    toast.error('URL tidak tersedia. Coba refresh halaman.')
+    return
+  }
+  // Force-download via temporary <a download>. Browser akan tetap bisa
+  // pakai signed URL yang sama untuk PDF/image preview.
+  const a = document.createElement('a')
+  a.href = doc.view_url
+  a.download = doc.file_name || 'document'
+  a.target = '_blank'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 </script>
 
@@ -302,6 +408,54 @@ function nextStage(currentStage) {
             <div v-if="detailData.available_from"><div class="text-xs text-gray-500">Available From</div>{{ fmtDate(detailData.available_from) }}</div>
           </div>
 
+          <!-- Dokumen pelamar (CV, KTP, ijazah, foto, dst) -->
+          <div v-if="allDocuments.length > 0">
+            <h3 class="font-semibold mb-2 text-sm flex items-center gap-1.5">
+              <DocumentIcon class="w-4 h-4" />
+              Dokumen Pelamar ({{ allDocuments.length }})
+            </h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div v-for="(doc, idx) in allDocuments" :key="idx"
+                class="flex items-center gap-2 border border-gray-200 rounded-md p-2 hover:bg-gray-50">
+                <div class="w-9 h-9 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
+                  <PhotoIcon v-if="doc.mime_hint === 'image'" class="w-5 h-5 text-blue-600" />
+                  <DocumentTextIcon v-else class="w-5 h-5 text-blue-600" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium text-gray-700 truncate" :title="doc.file_name">
+                    {{ doc.label }}
+                  </div>
+                  <div class="text-[11px] text-gray-500 truncate" :title="doc.file_name">
+                    {{ doc.file_name }}
+                  </div>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <a v-if="doc.view_url" :href="doc.view_url" target="_blank" rel="noopener"
+                    class="p-1.5 text-gray-500 hover:text-primary-600 hover:bg-blue-50 rounded"
+                    title="Buka di tab baru">
+                    <EyeIcon class="w-4 h-4" />
+                  </a>
+                  <button v-if="doc.view_url" type="button" @click="downloadDoc(doc)"
+                    class="p-1.5 text-gray-500 hover:text-primary-600 hover:bg-blue-50 rounded"
+                    title="Unduh file">
+                    <ArrowDownTrayIcon class="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p class="text-[11px] text-gray-400 mt-1.5">
+              Link berlaku 5 menit untuk keamanan; tutup-buka modal untuk refresh.
+            </p>
+          </div>
+
+          <!-- Cover letter & extra answers (kalau via Career Portal) -->
+          <div v-if="detailData.cover_letter">
+            <h3 class="font-semibold mb-2 text-sm">Cover Letter</h3>
+            <div class="text-sm text-gray-700 bg-gray-50 rounded p-3 whitespace-pre-line border border-gray-200">
+              {{ detailData.cover_letter }}
+            </div>
+          </div>
+
           <div>
             <h3 class="font-semibold mb-2 text-sm">Riwayat Stage</h3>
             <div class="space-y-1">
@@ -365,6 +519,89 @@ function nextStage(currentStage) {
         <div class="px-6 py-3 border-t flex justify-end gap-2">
           <button class="btn-secondary" @click="showRejectModal = null">Batal</button>
           <button class="btn-danger" @click="doReject">Tolak</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Credential one-time view modal (setelah hire) -->
+    <div v-if="credentialResult" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+        <div class="px-6 py-3 border-b flex items-center justify-between bg-emerald-50">
+          <h2 class="font-semibold text-emerald-800 flex items-center gap-2">
+            <CheckBadgeIcon class="w-5 h-5" /> Hire berhasil — Credential HRIS
+          </h2>
+        </div>
+        <div class="p-6 space-y-4">
+          <div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-900">
+            <div class="flex items-start gap-2">
+              <CheckBadgeIcon class="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Email otomatis dikirim ke <span class="font-mono">{{ credentialResult.user_email }}</span>.</strong>
+                Karyawan akan menerima credential lengkap dengan link login langsung di kotak masuk email.
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-900">
+            <div class="flex items-start gap-2">
+              <KeyIcon class="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Backup credential:</strong> kalau email tidak sampai (mis. masuk spam atau karyawan belum cek),
+                Anda juga bisa berikan password sementara di bawah secara manual.
+                Password ini <strong>hanya tampil sekali</strong>. Kalau hilang sebelum karyawan login, reset password manual via Admin → Users.
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-xs text-gray-500 mb-1">Karyawan</div>
+            <div class="font-medium">{{ credentialResult.employee_name }} (Employee #{{ credentialResult.employee_id }})</div>
+          </div>
+
+          <div>
+            <div class="text-xs text-gray-500 mb-1">Email login</div>
+            <div class="flex items-center gap-2 bg-gray-50 rounded border border-gray-200 px-3 py-2 font-mono text-sm">
+              <span class="flex-1 break-all">{{ credentialResult.user_email }}</span>
+              <button class="text-gray-500 hover:text-primary-600 flex-shrink-0"
+                :title="copiedField === 'email' ? 'Tersalin!' : 'Salin email'"
+                @click="copyToClipboard(credentialResult.user_email, 'email')">
+                <CheckIcon v-if="copiedField === 'email'" class="w-4 h-4 text-emerald-600" />
+                <ClipboardDocumentIcon v-else class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-xs text-gray-500 mb-1">Password sementara</div>
+            <div class="flex items-center gap-2 bg-gray-50 rounded border border-gray-200 px-3 py-2 font-mono text-sm">
+              <span class="flex-1 break-all tracking-wider select-all">{{ credentialResult.temp_password }}</span>
+              <button class="text-gray-500 hover:text-primary-600 flex-shrink-0"
+                :title="copiedField === 'password' ? 'Tersalin!' : 'Salin password'"
+                @click="copyToClipboard(credentialResult.temp_password, 'password')">
+                <CheckIcon v-if="copiedField === 'password'" class="w-4 h-4 text-emerald-600" />
+                <ClipboardDocumentIcon v-else class="w-4 h-4" />
+              </button>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Karyawan wajib ganti password saat login pertama (must_change_password=1).</p>
+          </div>
+
+          <div v-if="credentialResult.auto_completed_tasks > 0"
+            class="text-sm bg-blue-50 border border-blue-200 rounded p-3 text-blue-900">
+            <strong>{{ credentialResult.auto_completed_tasks }} onboarding task auto-completed</strong>
+            karena datanya sudah dikumpulkan saat lamaran (dokumen, NPWP, BPJS, akun HRIS).
+            Cek HR → Onboarding untuk lihat task yang masih perlu dikerjakan manual (kontrak, induksi, dst).
+          </div>
+        </div>
+        <div class="px-6 py-3 border-t flex justify-between gap-2 bg-gray-50">
+          <button class="text-sm text-gray-600 hover:text-primary-600 flex items-center gap-1"
+            @click="copyAllCredentials">
+            <CheckIcon v-if="copiedField === 'all'" class="w-4 h-4 text-emerald-600" />
+            <ClipboardDocumentIcon v-else class="w-4 h-4" />
+            {{ copiedField === 'all' ? 'Tersalin!' : 'Salin semua' }}
+          </button>
+          <button class="btn-primary" @click="credentialResult = null">
+            Saya sudah catat — Tutup
+          </button>
         </div>
       </div>
     </div>

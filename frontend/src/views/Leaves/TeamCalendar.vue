@@ -6,6 +6,7 @@ import {
   CalendarDaysIcon, ArrowPathIcon,
   ChevronLeftIcon, ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 /**
  * Kalender cuti tim — visualisasi siapa cuti di rentang tanggal.
@@ -168,17 +169,27 @@ function tooltip(leave) {
         </div>
         <div>
           <label class="label">Cabang</label>
-          <select v-model="filters.branch_id" class="input" @change="fetchData">
-            <option value="">— Semua —</option>
-            <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.branch_id"
+            :items="branches"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code','city']"
+            placeholder="— Semua —"
+            @change="fetchData"
+          />
         </div>
         <div>
           <label class="label">Departemen</label>
-          <select v-model="filters.department_id" class="input" @change="fetchData">
-            <option value="">— Semua —</option>
-            <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.department_id"
+            :items="departments"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code']"
+            placeholder="— Semua —"
+            @change="fetchData"
+          />
         </div>
       </div>
     </div>

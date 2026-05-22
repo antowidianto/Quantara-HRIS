@@ -12,14 +12,28 @@ class EmployeeController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $search = trim((string) $this->request->getGet('search'));
-        $deptId = (int) ($this->request->getGet('department_id') ?? 0);
-        $status = trim((string) $this->request->getGet('status'));
+
+        // Filter dasar
+        $deptId       = (int) ($this->request->getGet('department_id') ?? 0);
+        $branchId     = (int) ($this->request->getGet('branch_id') ?? 0);
+        $positionId   = (int) ($this->request->getGet('position_id') ?? 0);
+        $jobGradeId   = (int) ($this->request->getGet('job_grade_id') ?? 0);
+        $status       = trim((string) $this->request->getGet('status'));
+        $employmentStatus = trim((string) $this->request->getGet('employment_status'));
+        $employmentType   = trim((string) $this->request->getGet('employment_type'));
+        $gender       = trim((string) $this->request->getGet('gender'));
 
         $builder = $db->table('employees e')
-            ->select('e.id, e.employee_number, e.full_name, e.email, e.phone, e.gender, e.employment_status, e.is_active, e.join_date, e.resign_date, e.basic_salary, e.avatar_path, e.department_id, e.position_id, e.branch_id, d.name AS department_name, p.name AS position_name, b.name AS branch_name')
+            ->select('e.id, e.employee_number, e.full_name, e.email, e.phone, e.gender,
+                e.employment_status, e.employment_type, e.is_active,
+                e.join_date, e.resign_date, e.basic_salary, e.avatar_path,
+                e.department_id, e.position_id, e.branch_id, e.job_grade_id,
+                d.name AS department_name, p.name AS position_name,
+                b.name AS branch_name, jg.name AS job_grade_name, jg.code AS job_grade_code')
             ->join('departments d', 'd.id = e.department_id', 'left')
             ->join('positions p', 'p.id = e.position_id', 'left')
             ->join('branches b', 'b.id = e.branch_id', 'left')
+            ->join('job_grades jg', 'jg.id = e.job_grade_id', 'left')
             ->where('e.deleted_at IS NULL');
 
         $this->tenant()->applyScope($builder, 'e.company_id');
@@ -31,9 +45,23 @@ class EmployeeController extends ApiController
                 ->orLike('e.email', $search)
                 ->groupEnd();
         }
-        if ($deptId) $builder->where('e.department_id', $deptId);
-        if ($status === 'active') $builder->where('e.is_active', 1);
+        if ($deptId)     $builder->where('e.department_id', $deptId);
+        if ($branchId)   $builder->where('e.branch_id', $branchId);
+        if ($positionId) $builder->where('e.position_id', $positionId);
+        if ($jobGradeId) $builder->where('e.job_grade_id', $jobGradeId);
+        if ($status === 'active')   $builder->where('e.is_active', 1);
         if ($status === 'inactive') $builder->where('e.is_active', 0);
+        if ($employmentStatus !== '' &&
+            in_array($employmentStatus, ['PKWT','PKWTT','PROBATION','HARIAN','MAGANG','OUTSOURCING'], true)) {
+            $builder->where('e.employment_status', $employmentStatus);
+        }
+        if ($employmentType !== '' &&
+            in_array($employmentType, ['FULL_TIME','PART_TIME','CONTRACT','INTERN'], true)) {
+            $builder->where('e.employment_type', $employmentType);
+        }
+        if ($gender !== '' && in_array($gender, ['M','F'], true)) {
+            $builder->where('e.gender', $gender);
+        }
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('e.full_name', 'ASC')
@@ -332,6 +360,46 @@ class EmployeeController extends ApiController
             // Override approval chain
             'approval_chain_leave_id','approval_chain_overtime_id','approval_chain_attendance_id'];
         $update = array_intersect_key($data, array_flip($updatable));
+
+        // NIK (employee_number) hanya boleh di-rename oleh super admin.
+        // NIK ini dipakai sebagai login identifier (lihat AuthController::login),
+        // jadi perubahan harus diaudit & dijamin unik per perusahaan.
+        if (array_key_exists('employee_number', $data)) {
+            if (! $this->tenant()->isSuperAdmin()) {
+                return $this->fail(
+                    'Hanya Super Admin yang dapat mengubah NIK karyawan',
+                    403,
+                    'NIK_CHANGE_FORBIDDEN'
+                );
+            }
+            $newNik = trim((string) $data['employee_number']);
+            if ($newNik === '') {
+                return $this->fail('NIK tidak boleh kosong', 422, 'INVALID_NIK');
+            }
+            if (! preg_match('/^[A-Za-z0-9_\-]{1,32}$/', $newNik)) {
+                return $this->fail(
+                    'Format NIK tidak valid (huruf, angka, "-" atau "_", maks 32 karakter)',
+                    422,
+                    'INVALID_NIK_FORMAT'
+                );
+            }
+            if ($newNik !== $existing['employee_number']) {
+                $dup = $db->table('employees')
+                    ->where('company_id', (int) $existing['company_id'])
+                    ->where('employee_number', $newNik)
+                    ->where('id !=', $id)
+                    ->where('deleted_at IS NULL')
+                    ->countAllResults();
+                if ($dup > 0) {
+                    return $this->fail(
+                        "NIK \"{$newNik}\" sudah dipakai karyawan lain",
+                        422,
+                        'DUPLICATE_EMPLOYEE_NUMBER'
+                    );
+                }
+                $update['employee_number'] = $newNik;
+            }
+        }
         // Normalize coords
         foreach (['home_lat','home_lng'] as $k) {
             if (array_key_exists($k, $update) && ($update[$k] === '' || $update[$k] === null)) {

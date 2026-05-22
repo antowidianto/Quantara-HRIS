@@ -7,6 +7,7 @@ import {
   PlusIcon, PencilIcon, TrashIcon, XMarkIcon,
   ArrowPathIcon, BeakerIcon, CalendarDaysIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 /**
  * Pola Shift (Shift Patterns).
@@ -307,11 +308,26 @@ function shiftLabel(slot) {
               :style="{ borderLeft: '4px solid ' + shiftColor(slot) }"
             >
               <div class="text-xs font-medium text-gray-500 mb-2">Hari {{ i + 1 }}</div>
-              <select v-model="slot.shift_id" class="input text-sm mb-2"
-                :disabled="slot.is_off || slot.is_holiday">
-                <option :value="null">— Pilih shift —</option>
-                <option v-for="s in shifts" :key="s.id" :value="s.id">{{ s.name }}</option>
-              </select>
+              <SearchableSelect
+                v-model="slot.shift_id"
+                :items="shifts"
+                value-key="id"
+                label-key="name"
+                :search-keys="['name','code']"
+                placeholder="— Pilih shift —"
+                :disabled="slot.is_off || slot.is_holiday"
+                size="sm"
+                class="mb-2"
+              >
+                <template #item="{ item }">
+                  <span class="block text-sm truncate">
+                    {{ item.name }}
+                    <span class="text-xs text-gray-500">
+                      ({{ String(item.start_time).slice(0,5) }}–{{ String(item.end_time).slice(0,5) }})
+                    </span>
+                  </span>
+                </template>
+              </SearchableSelect>
               <div class="flex flex-col gap-1 text-xs">
                 <label class="flex items-center gap-1">
                   <input v-model="slot.is_off" type="checkbox"

@@ -22,6 +22,8 @@ import {
   CalculatorIcon, DocumentArrowDownIcon, CheckCircleIcon, BanknotesIcon,
   NoSymbolIcon, PlusIcon, ArrowPathIcon, UserCircleIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -81,12 +83,10 @@ async function fetchData() {
 
 async function fetchMaster() {
   try {
-    const [r, e] = await Promise.all([
-      api.get('/severance/reasons'),
-      canManage.value ? api.get('/employees', { params: { per_page: 200, is_active: 1 } }) : Promise.resolve({ data: { data: [] } }),
-    ])
+    // Karyawan TIDAK lagi di-load semua sekaligus — picker pakai
+    // EmployeeSearchSelect server-side untuk dataset besar.
+    const r = await api.get('/severance/reasons')
     reasons.value = r.data.data || []
-    employees.value = e.data.data || []
   } catch (_) { /* */ }
 }
 
@@ -301,10 +301,11 @@ watch(() => [
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div>
           <label class="label">Karyawan</label>
-          <select v-model="filters.employee_id" class="input">
-            <option value="">— Semua —</option>
-            <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
-          </select>
+          <EmployeeSearchSelect
+            v-model="filters.employee_id"
+            placeholder="— Semua —"
+            :only-active="false"
+          />
         </div>
         <div>
           <label class="label">Status</label>
@@ -396,12 +397,11 @@ watch(() => [
           <div class="space-y-3">
             <div>
               <label class="label">Karyawan *</label>
-              <select v-model="calcInput.employee_id" class="input">
-                <option value="">— Pilih —</option>
-                <option v-for="e in employees" :key="e.id" :value="e.id">
-                  {{ e.full_name }} ({{ e.employee_number }})
-                </option>
-              </select>
+              <EmployeeSearchSelect
+                v-model="calcInput.employee_id"
+                placeholder="— Pilih karyawan —"
+                :only-active="true"
+              />
               <p v-if="! calcInput.employee_id" class="text-xs text-gray-500 mt-1">
                 Setelah pilih karyawan, data gaji, masa kerja, dan sisa cuti akan dimuat otomatis.
               </p>

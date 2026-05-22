@@ -9,6 +9,8 @@ import {
   ExclamationTriangleIcon, DocumentArrowDownIcon, PencilIcon,
   TrashIcon, CheckBadgeIcon, NoSymbolIcon, PlusIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -71,12 +73,10 @@ async function fetchData() {
 
 async function fetchMaster() {
   try {
-    const [cats, emps] = await Promise.all([
-      api.get('/disciplinary-records/categories'),
-      canViewAll.value ? api.get('/employees', { params: { per_page: 200, is_active: 1 } }) : Promise.resolve({ data: { data: [] } }),
-    ])
+    // Karyawan TIDAK lagi di-load semua sekaligus — picker pakai
+    // EmployeeSearchSelect server-side untuk dataset besar.
+    const cats = await api.get('/disciplinary-records/categories')
     categories.value = cats.data.data || []
-    employees.value = emps.data.data || []
   } catch (e) { /* silent */ }
 }
 
@@ -226,17 +226,23 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         </div>
         <div>
           <label class="label">Level</label>
-          <select v-model="filters.level" class="input">
-            <option value="">Semua</option>
-            <option v-for="l in LEVELS" :key="l.value" :value="l.value">{{ l.label }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.level"
+            :items="LEVELS"
+            value-key="value"
+            label-key="label"
+            placeholder="Semua"
+          />
         </div>
         <div>
           <label class="label">Status</label>
-          <select v-model="filters.status" class="input">
-            <option value="">Semua</option>
-            <option v-for="s in STATUSES" :key="s.value" :value="s.value">{{ s.label }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.status"
+            :items="STATUSES"
+            value-key="value"
+            label-key="label"
+            placeholder="Semua"
+          />
         </div>
         <div class="flex items-end">
           <button class="btn-secondary w-full" @click="applyFilter">Filter</button>
@@ -337,28 +343,45 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="label">Karyawan *</label>
-              <select v-model="editing.employee_id" class="input" :disabled="!! editing.id">
-                <option value="">— Pilih —</option>
-                <option v-for="e in employees" :key="e.id" :value="e.id">
-                  {{ e.full_name }} ({{ e.employee_number }})
-                </option>
-              </select>
+              <EmployeeSearchSelect
+                v-model="editing.employee_id"
+                placeholder="— Pilih karyawan —"
+                :disabled="!! editing.id"
+                :only-active="false"
+              />
             </div>
             <div>
               <label class="label">Level *</label>
-              <select v-model="editing.level" class="input" @change="onLevelChange">
-                <option v-for="l in LEVELS" :key="l.value" :value="l.value">{{ l.label }}</option>
-              </select>
+              <SearchableSelect
+                v-model="editing.level"
+                :items="LEVELS"
+                value-key="value"
+                label-key="label"
+                :clearable="false"
+                @change="onLevelChange"
+              />
             </div>
           </div>
           <div>
             <label class="label">Kategori</label>
-            <select v-model="editing.category_id" class="input">
-              <option value="">— Pilih (opsional) —</option>
-              <option v-for="c in categories" :key="c.id" :value="c.id">
-                {{ c.name }} <span v-if="c.recommended_level">— rekomendasi: {{ c.recommended_level }}</span>
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="editing.category_id"
+              :items="categories"
+              value-key="id"
+              label-key="name"
+              sub-label-key="recommended_level"
+              :search-keys="['name','code','recommended_level']"
+              placeholder="— Pilih (opsional) —"
+            >
+              <template #item="{ item }">
+                <span class="block text-sm truncate">
+                  {{ item.name }}
+                  <span v-if="item.recommended_level" class="text-xs text-gray-500">
+                    — rekomendasi: {{ item.recommended_level }}
+                  </span>
+                </span>
+              </template>
+            </SearchableSelect>
           </div>
           <div>
             <label class="label">Hal / Judul *</label>

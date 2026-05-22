@@ -14,8 +14,9 @@ class UserController extends ApiController
         $search = trim((string) $this->request->getGet('search'));
 
         $builder = $db->table('users u')
-            ->select('u.id, u.email, u.name, u.is_active, u.role_id, u.company_id, u.employee_id, u.last_login_at, u.twofa_enabled, r.slug AS role_slug, r.name AS role_name')
+            ->select('u.id, u.email, u.name, u.is_active, u.role_id, u.company_id, u.employee_id, u.last_login_at, u.twofa_enabled, r.slug AS role_slug, r.name AS role_name, e.employee_number, e.full_name AS employee_full_name')
             ->join('roles r', 'r.id = u.role_id', 'left')
+            ->join('employees e', 'e.user_id = u.id AND e.deleted_at IS NULL', 'left')
             ->where('u.deleted_at IS NULL');
 
         if (! $this->tenant()->isSuperAdmin()) {

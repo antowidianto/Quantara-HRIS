@@ -8,7 +8,8 @@ import {
   Cog6ToothIcon, BellIcon, ArrowLeftStartOnRectangleIcon, ChartBarIcon,
   BuildingOffice2Icon, ShieldCheckIcon, ChevronDownIcon, Bars3Icon, XMarkIcon,
   CurrencyDollarIcon, ClipboardDocumentListIcon, UserCircleIcon,
-  SunIcon, MoonIcon, ComputerDesktopIcon, LanguageIcon,
+  SunIcon, MoonIcon, ComputerDesktopIcon, LanguageIcon, CheckIcon,
+  ArrowsRightLeftIcon,
 } from '@heroicons/vue/24/outline'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useI18n } from '@/locales'
@@ -28,8 +29,25 @@ const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
 const notifMenuOpen = ref(false)
 const langMenuOpen = ref(false)
+const companyMenuOpen = ref(false)
 const unreadCount = ref(0)
 const notifications = ref([])
+
+// Cari profil company yg sedang aktif untuk ditampilkan di tombol dropdown.
+// Dipakai super admin saja — user biasa tinggal lihat nama company-nya.
+const activeCompany = computed(() => {
+  if (! auth.activeCompanyId) return null
+  return auth.availableCompanies.find(c => Number(c.id) === Number(auth.activeCompanyId)) || null
+})
+
+function pickCompany(id) {
+  // Pilih perusahaan dari custom dropdown. Sama logic dgn select lama:
+  // simpan ke store + reload supaya semua list di halaman aktif refetch
+  // dengan header X-Company-Id baru.
+  auth.setActiveCompany(id || null)
+  companyMenuOpen.value = false
+  if (typeof window !== 'undefined') window.location.reload()
+}
 
 const groups = computed(() => {
   const can = auth.can
@@ -57,6 +75,10 @@ const groups = computed(() => {
         // backend yang block kalau user tidak terhubung ke record
         // employee atau sudah punya pengajuan aktif.
         { name: t('nav.items.my_resignation'),      to: '/hr/my-resignation',       icon: ArrowLeftStartOnRectangleIcon },
+        // Mutasi karyawan — self-service untuk lihat & approve/reject mutasi
+        // yang menyangkut diri sendiri (penting saat HR submit mutasi dengan
+        // requires_consent=1).
+        { name: 'Mutasi Saya',                       to: '/hr/my-transfers',         icon: ArrowsRightLeftIcon },
       ],
     },
     {
@@ -74,12 +96,16 @@ const groups = computed(() => {
         { name: t('nav.items.reimbursements'),      to: '/reimbursements',                             icon: BanknotesIcon,              perm: 'reimbursement.view' },
         { name: t('nav.items.loans'),               to: '/loans',                                      icon: BanknotesIcon,              perm: 'loan.view' },
         { name: t('nav.items.disciplinary'),        to: '/hr/disciplinary',                            icon: ClipboardDocumentListIcon,  perm: 'disciplinary.view' },
+        { name: 'Promosi / Demosi (JIC)',           to: '/hr/jic',                                     icon: ClipboardDocumentListIcon,  perm: 'jic.view' },
+        { name: 'Mutasi Karyawan',                  to: '/hr/transfers',                               icon: ArrowsRightLeftIcon,        perm: 'employee_transfer.view' },
         { name: t('nav.items.severance'),           to: '/hr/severance',                               icon: CurrencyDollarIcon,         perm: 'severance.view' },
         { name: t('nav.items.resignations'),        to: '/hr/resignations',                            icon: ArrowLeftStartOnRectangleIcon, perm: 'resignation.view' },
         { name: t('nav.items.onboarding'),          to: '/hr/onboarding',                              icon: ClipboardDocumentListIcon,  perm: 'onboarding.view' },
         { name: t('nav.items.assets'),              to: '/hr/assets',                                  icon: BuildingOffice2Icon,        perm: 'asset.view' },
         { name: t('nav.items.business_trips'),      to: '/travel',                                     icon: ClipboardDocumentListIcon,  perm: 'business_trip.view' },
+        { name: 'Manpower Planning (MPP)',          to: '/recruitment/mpp',                            icon: ClipboardDocumentListIcon,  perm: 'mpp.view' },
         { name: t('nav.items.recruitment'),         to: '/recruitment/jobs',                           icon: UsersIcon,                  perm: 'recruitment.view' },
+        { name: 'Career Portal',                    to: '/recruitment/career-settings',                icon: UsersIcon,                  perm: 'careers.manage' },
         { name: t('nav.items.helpdesk'),            to: '/helpdesk/tickets',                           icon: ClipboardDocumentListIcon,  perm: 'helpdesk.view' },
         { name: t('nav.items.training'),            to: '/training',                                   icon: ClipboardDocumentListIcon,  perm: 'training.view' },
         { name: t('nav.items.certificates'),        to: '/certificates',                               icon: ClipboardDocumentListIcon,  perm: 'certificate.view' },
@@ -97,6 +123,7 @@ const groups = computed(() => {
       title: t('nav.master_data'),
       items: [
         { name: t('nav.items.org_structure'),      to: '/master/org-structure',      icon: BuildingOffice2Icon,        perm: 'department.view' },
+        { name: 'Master Jabatan Kunci',            to: '/master/organization-roles', icon: ShieldCheckIcon,            perm: 'org_structure.view' },
         { name: t('nav.items.branches'),           to: '/master/branches',           icon: BuildingOffice2Icon,        perm: 'branch.view' },
         { name: t('nav.items.work_locations'),     to: '/master/work-locations',     icon: BuildingOffice2Icon,        perm: 'branch.view' },
         { name: t('nav.items.departments'),        to: '/master/departments',        icon: BuildingOffice2Icon,        perm: 'department.view' },
@@ -128,6 +155,7 @@ const groups = computed(() => {
         { name: t('nav.items.audit_logs'), to: '/admin/audit-logs', icon: ClipboardDocumentListIcon,  perm: 'audit.view' },
         { name: t('nav.items.companies'),  to: '/admin/companies',  icon: BuildingOffice2Icon,        superAdmin: true },
         { name: t('nav.items.settings'),   to: '/admin/settings',   icon: Cog6ToothIcon,              perm: 'settings.manage' },
+        { name: 'Email Settings',          to: '/admin/email-settings', icon: Cog6ToothIcon,          perm: 'settings.manage' },
       ].filter(i => (! i.perm || can(i.perm)) && (! i.superAdmin || auth.isSuperAdmin)),
     },
   ].filter(g => g.items.length > 0)
@@ -152,13 +180,6 @@ async function markAllRead() {
 async function logout() {
   await auth.logout()
   router.push('/login')
-}
-
-function onSwitchCompany(e) {
-  const id = e.target.value
-  auth.setActiveCompany(id || null)
-  // Refresh halaman supaya semua list mengikuti context baru
-  if (typeof window !== 'undefined') window.location.reload()
 }
 
 let pollTimer = null
@@ -218,27 +239,108 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
       <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sticky top-0 z-20">
         <div class="flex items-center gap-3">
           <button class="lg:hidden text-gray-600" @click="sidebarOpen = true"><Bars3Icon class="w-6 h-6" /></button>
-          <div class="hidden md:block">
-            <span v-if="! auth.isSuperAdmin" class="text-sm text-gray-500">{{ auth.company?.name || 'HRIS' }}</span>
-            <select
-              v-else
-              :value="auth.activeCompanyId || ''"
-              @change="onSwitchCompany($event)"
-              class="text-sm border-gray-200 rounded-md py-1 pl-2 pr-7 focus:ring-1 focus:ring-primary-500"
-              :class="auth.needsCompanyContext ? 'border-amber-400 bg-amber-50 text-amber-900' : ''"
+
+          <!-- Branding text untuk user non-super-admin -->
+          <div v-if="! auth.isSuperAdmin" class="hidden md:flex items-center gap-2">
+            <div class="w-8 h-8 rounded-md bg-primary-50 flex items-center justify-center text-primary-700">
+              <BuildingOffice2Icon class="w-4 h-4" />
+            </div>
+            <div class="text-sm">
+              <div class="font-medium text-gray-800 leading-tight">{{ auth.company?.name || 'HRIS' }}</div>
+              <div v-if="auth.branch?.name" class="text-xs text-gray-500 leading-tight">{{ auth.branch.name }}</div>
+            </div>
+          </div>
+
+          <!-- Company switcher khusus super admin — custom pretty dropdown -->
+          <div v-else class="hidden md:block relative">
+            <button
+              @click="companyMenuOpen = !companyMenuOpen; userMenuOpen = false; notifMenuOpen = false; langMenuOpen = false"
+              class="company-switch group inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 transition-colors min-w-[14rem]"
+              :class="auth.needsCompanyContext
+                ? 'border-amber-300 bg-amber-50 hover:bg-amber-50/80'
+                : 'border-gray-200'"
+              :title="t('nav.select_company')"
             >
-              <option value="">{{ t('nav.select_company') }}</option>
-              <option v-for="c in auth.availableCompanies" :key="c.id" :value="c.id">
-                {{ c.name }}
-              </option>
-            </select>
+              <span class="w-7 h-7 rounded-md flex items-center justify-center text-sm font-semibold flex-shrink-0"
+                :class="activeCompany
+                  ? 'bg-primary-100 text-primary-700'
+                  : 'bg-amber-100 text-amber-700'">
+                <span v-if="activeCompany">{{ (activeCompany.code || activeCompany.name)?.[0]?.toUpperCase() }}</span>
+                <BuildingOffice2Icon v-else class="w-4 h-4" />
+              </span>
+              <span class="flex-1 text-left min-w-0">
+                <span v-if="activeCompany" class="block text-xs text-gray-500 leading-tight">{{ t('nav.active_company') || 'Perusahaan aktif' }}</span>
+                <span v-else class="block text-xs text-amber-700 leading-tight">{{ t('nav.select_company') }}</span>
+                <span class="block text-sm font-medium truncate"
+                  :class="activeCompany ? 'text-gray-800' : 'text-amber-900'">
+                  {{ activeCompany?.name || '—' }}
+                </span>
+              </span>
+              <ChevronDownIcon class="w-4 h-4 text-gray-400 group-hover:text-gray-600 flex-shrink-0 transition-transform"
+                :class="companyMenuOpen ? 'rotate-180' : ''" />
+            </button>
+
+            <!-- Dropdown panel -->
+            <div v-if="companyMenuOpen"
+              class="absolute left-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-30">
+              <div class="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {{ t('nav.select_company') }}
+                </div>
+                <div class="text-[11px] text-gray-400 mt-0.5">
+                  Data master, karyawan, dan transaksi akan mengikuti perusahaan terpilih.
+                </div>
+              </div>
+              <div class="max-h-80 overflow-y-auto">
+                <button
+                  type="button"
+                  class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
+                  :class="!auth.activeCompanyId ? 'bg-primary-50/40' : ''"
+                  @click="pickCompany(null)"
+                >
+                  <span class="w-8 h-8 rounded-md flex items-center justify-center bg-gray-100 text-gray-500 flex-shrink-0">
+                    <BuildingOffice2Icon class="w-4 h-4" />
+                  </span>
+                  <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-medium text-gray-800">Semua perusahaan</span>
+                    <span class="block text-xs text-gray-500">Mode super admin global</span>
+                  </span>
+                  <CheckIcon v-if="!auth.activeCompanyId" class="w-4 h-4 text-primary-600 flex-shrink-0" />
+                </button>
+                <button
+                  v-for="c in auth.availableCompanies"
+                  :key="c.id"
+                  type="button"
+                  class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left border-t border-gray-50"
+                  :class="Number(auth.activeCompanyId) === Number(c.id) ? 'bg-primary-50/60' : ''"
+                  @click="pickCompany(c.id)"
+                >
+                  <span class="w-8 h-8 rounded-md flex items-center justify-center font-semibold text-sm flex-shrink-0"
+                    :class="Number(auth.activeCompanyId) === Number(c.id)
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-primary-50 text-primary-700'">
+                    {{ (c.code || c.name)?.[0]?.toUpperCase() }}
+                  </span>
+                  <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-medium text-gray-800 truncate">{{ c.name }}</span>
+                    <span class="block text-xs text-gray-500 truncate">
+                      <span v-if="c.code" class="font-mono">{{ c.code }}</span>
+                      <span v-if="c.code && c.city"> • </span>
+                      <span v-if="c.city">{{ c.city }}</span>
+                    </span>
+                  </span>
+                  <CheckIcon v-if="Number(auth.activeCompanyId) === Number(c.id)"
+                    class="w-4 h-4 text-primary-600 flex-shrink-0" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="flex items-center gap-3">
           <!-- Notifications -->
           <div class="relative">
-            <button @click="notifMenuOpen = !notifMenuOpen; userMenuOpen = false; langMenuOpen = false"
+            <button @click="notifMenuOpen = !notifMenuOpen; userMenuOpen = false; langMenuOpen = false; companyMenuOpen = false"
               class="relative p-2 text-gray-600 hover:text-primary-600 rounded-md hover:bg-gray-100">
               <BellIcon class="w-6 h-6" />
               <span v-if="unreadCount > 0" class="absolute -top-0.5 -right-0.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
@@ -265,7 +367,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
           <!-- Language switcher (i18n) -->
           <div class="relative">
             <button
-              @click="langMenuOpen = !langMenuOpen; userMenuOpen = false; notifMenuOpen = false"
+              @click="langMenuOpen = !langMenuOpen; userMenuOpen = false; notifMenuOpen = false; companyMenuOpen = false"
               class="p-2 rounded-md hover:bg-gray-100 text-gray-600 inline-flex items-center gap-1"
               :title="t('language.label')"
               aria-label="Switch language"
@@ -300,7 +402,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
           <!-- User menu -->
           <div class="relative">
-            <button @click="userMenuOpen = !userMenuOpen; notifMenuOpen = false; langMenuOpen = false"
+            <button @click="userMenuOpen = !userMenuOpen; notifMenuOpen = false; langMenuOpen = false; companyMenuOpen = false"
               class="flex items-center gap-2 p-1.5 rounded-md hover:bg-gray-100">
               <div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-700 font-semibold overflow-hidden">
                 <img v-if="auth.user?.avatar_url || auth.employee?.avatar_url"
