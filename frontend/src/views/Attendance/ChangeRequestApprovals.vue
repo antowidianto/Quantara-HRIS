@@ -4,6 +4,8 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
 import { fmtDate, fmtDateTime } from '@/composables/useResource'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -117,13 +119,25 @@ onMounted(async () => {
           <option value="REJECTED">Rejected</option>
           <option value="CANCELLED">Cancelled</option>
         </select>
-        <select v-if="canCrossBranch" v-model="filters.branch_id" class="input w-56">
-          <option value="">Semua cabang</option>
-          <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-        </select>
+        <div v-if="canCrossBranch" class="w-56">
+          <SearchableSelect
+            v-model="filters.branch_id"
+            :items="branches"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code','city']"
+            placeholder="Semua cabang"
+          />
+        </div>
         <input v-model="filters.start_date" type="date" class="input w-40" />
         <input v-model="filters.end_date" type="date" class="input w-40" />
-        <input v-model.number="filters.employee_id" type="number" placeholder="ID Karyawan" class="input w-36" />
+        <div class="w-56">
+          <EmployeeSearchSelect
+            v-model="filters.employee_id"
+            placeholder="Semua karyawan"
+            :only-active="false"
+          />
+        </div>
         <button class="btn-primary" @click="fetchData(1)" :disabled="loading">Filter</button>
       </div>
 

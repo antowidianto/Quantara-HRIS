@@ -7,6 +7,8 @@ import {
   PlusIcon, PencilIcon, TrashIcon, XMarkIcon, ArrowUpIcon, ArrowDownIcon,
   ShieldCheckIcon, AdjustmentsHorizontalIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 /**
  * Halaman konfigurasi Approval Chain.
@@ -294,10 +296,15 @@ function approverLabel(v) { return approverTypes.find(t => t.value === v)?.label
 
     <div class="card">
       <div class="card-header">
-        <select v-model="filterModule" class="input w-full md:w-64">
-          <option value="">— Semua Modul —</option>
-          <option v-for="m in moduleOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
-        </select>
+        <div class="w-full md:w-64">
+          <SearchableSelect
+            v-model="filterModule"
+            :items="moduleOptions"
+            value-key="value"
+            label-key="label"
+            placeholder="— Semua Modul —"
+          />
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="table">
@@ -363,15 +370,25 @@ function approverLabel(v) { return approverTypes.find(t => t.value === v)?.label
           </div>
           <div class="md:col-span-1">
             <label class="label">Modul</label>
-            <select v-model="form.module" class="input" required>
-              <option v-for="m in moduleOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.module"
+              :items="moduleOptions"
+              value-key="value"
+              label-key="label"
+              placeholder="— Pilih modul —"
+              :clearable="false"
+            />
           </div>
           <div class="md:col-span-1">
             <label class="label">Fallback</label>
-            <select v-model="form.fallback_strategy" class="input">
-              <option v-for="f in fallbackOptions" :key="f.value" :value="f.value">{{ f.label }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.fallback_strategy"
+              :items="fallbackOptions"
+              value-key="value"
+              label-key="label"
+              placeholder="— Pilih fallback —"
+              :clearable="false"
+            />
           </div>
           <div class="md:col-span-1 flex items-end gap-3">
             <label class="flex items-center gap-1 text-sm">
@@ -421,24 +438,36 @@ function approverLabel(v) { return approverTypes.find(t => t.value === v)?.label
                 </div>
                 <div>
                   <label class="label">Tipe Approver</label>
-                  <select v-model="s.approver_type" class="input">
-                    <option v-for="t in approverTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
-                  </select>
+                  <SearchableSelect
+                    v-model="s.approver_type"
+                    :items="approverTypes"
+                    value-key="value"
+                    label-key="label"
+                    :clearable="false"
+                  />
                 </div>
                 <div v-if="s.approver_type === 'ROLE'">
                   <label class="label">Pilih Role</label>
-                  <select v-model.number="s.approver_role_id" class="input">
-                    <option :value="null">— Pilih —</option>
-                    <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
-                  </select>
+                  <SearchableSelect
+                    v-model="s.approver_role_id"
+                    :items="roles"
+                    value-key="id"
+                    label-key="name"
+                    :search-keys="['name','description']"
+                    placeholder="— Pilih role —"
+                  />
                 </div>
                 <div v-if="s.approver_type === 'SPECIFIC_USER'">
                   <label class="label">User ID</label>
                   <input v-model.number="s.approver_user_id" type="number" class="input" placeholder="ID user" />
                 </div>
                 <div v-if="s.approver_type === 'SPECIFIC_EMPLOYEE'">
-                  <label class="label">Employee ID</label>
-                  <input v-model.number="s.approver_employee_id" type="number" class="input" placeholder="ID karyawan" />
+                  <label class="label">Karyawan</label>
+                  <EmployeeSearchSelect
+                    v-model="s.approver_employee_id"
+                    placeholder="Cari karyawan…"
+                    :only-active="false"
+                  />
                 </div>
                 <div>
                   <label class="label">SLA (jam)</label>
@@ -496,24 +525,36 @@ function approverLabel(v) { return approverTypes.find(t => t.value === v)?.label
               <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
                 <div>
                   <label class="label">Departemen</label>
-                  <select v-model="newAssignment.department_id" class="input">
-                    <option value="">Semua</option>
-                    <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-                  </select>
+                  <SearchableSelect
+                    v-model="newAssignment.department_id"
+                    :items="departments"
+                    value-key="id"
+                    label-key="name"
+                    :search-keys="['name','code']"
+                    placeholder="Semua"
+                  />
                 </div>
                 <div>
                   <label class="label">Cabang</label>
-                  <select v-model="newAssignment.branch_id" class="input">
-                    <option value="">Semua</option>
-                    <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-                  </select>
+                  <SearchableSelect
+                    v-model="newAssignment.branch_id"
+                    :items="branches"
+                    value-key="id"
+                    label-key="name"
+                    :search-keys="['name','code','city']"
+                    placeholder="Semua"
+                  />
                 </div>
                 <div>
                   <label class="label">Job Grade</label>
-                  <select v-model="newAssignment.job_grade_id" class="input">
-                    <option value="">Semua</option>
-                    <option v-for="g in jobGrades" :key="g.id" :value="g.id">{{ g.name }}</option>
-                  </select>
+                  <SearchableSelect
+                    v-model="newAssignment.job_grade_id"
+                    :items="jobGrades"
+                    value-key="id"
+                    label-key="name"
+                    :search-keys="['name','code']"
+                    placeholder="Semua"
+                  />
                 </div>
                 <div>
                   <label class="label">Prioritas</label>

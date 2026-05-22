@@ -8,7 +8,7 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import {
   BriefcaseIcon, PlusIcon, PencilIcon, TrashIcon, EyeIcon,
-  PlayIcon, XCircleIcon,
+  PlayIcon, XCircleIcon, GlobeAltIcon, ClipboardDocumentListIcon,
 } from '@heroicons/vue/24/outline'
 
 const auth = useAuthStore()
@@ -97,6 +97,43 @@ async function closeJob(row) {
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
 }
 
+async function publishCareer(row) {
+  const ok = await confirmDialog({
+    title: 'Publish ke Career Portal?',
+    message: `Posting "${row.title}" akan tampil di halaman karier publik perusahaan.`,
+    okText: 'Publish',
+  })
+  if (! ok) return
+  try {
+    const res = await api.post(`/job-postings/${row.id}/publish`)
+    toast.success('Dipublish ke career portal')
+    const url = res.data.data?.public_url
+    if (url) {
+      setTimeout(() => {
+        if (confirm('Buka halaman public di tab baru?\n\n' + url)) {
+          window.open(url, '_blank')
+        }
+      }, 200)
+    }
+    fetchData()
+  } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+}
+
+async function unpublishCareer(row) {
+  const ok = await confirmDialog({
+    title: 'Unpublish dari Career Portal?',
+    message: `Posting "${row.title}" tidak akan tampil di halaman karier publik. Pelamar baru tidak bisa apply.`,
+    okText: 'Unpublish',
+    variant: 'warning',
+  })
+  if (! ok) return
+  try {
+    await api.post(`/job-postings/${row.id}/unpublish`)
+    toast.success('Di-unpublish dari career portal')
+    fetchData()
+  } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+}
+
 async function remove(row) {
   const ok = await confirmDialog({
     title: 'Hapus posting?', message: row.title,
@@ -128,9 +165,15 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         </h1>
         <p class="text-sm text-gray-500">Kelola posting lowongan dan pipeline kandidat.</p>
       </div>
-      <button v-if="canManage" class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Posting Baru
-      </button>
+      <div class="flex items-center gap-2">
+        <RouterLink to="/recruitment/mpp" class="btn-secondary"
+          title="Lihat pengajuan kebutuhan SDM (MPP) yang menunggu untuk dibuatkan lowongan">
+          <ClipboardDocumentListIcon class="w-4 h-4" /> Manpower Planning
+        </RouterLink>
+        <button v-if="canManage" class="btn-primary" @click="openCreate">
+          <PlusIcon class="w-4 h-4" /> Posting Baru
+        </button>
+      </div>
     </div>
 
     <div class="card card-body mb-4">
@@ -173,6 +216,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                 <span class="px-2 py-0.5 rounded text-xs" :class="STATUS_BADGE[r.status]?.cls">
                   {{ STATUS_BADGE[r.status]?.label || r.status }}
                 </span>
+                <span v-if="r.is_published_to_career"
+                  class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-700 inline-block"
+                  title="Tampil di public Career Portal">
+                  🌐 Career
+                </span>
               </td>
               <td class="text-xs">{{ r.opened_at ? fmtDate(r.opened_at) : '-' }}</td>
               <td class="text-right" @click.stop>
@@ -187,6 +235,14 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                   <button v-if="canManage && ['OPEN','PAUSED','FILLED'].includes(r.status)"
                     class="text-gray-600 hover:text-gray-800 p-1" title="Tutup" @click="closeJob(r)">
                     <XCircleIcon class="w-4 h-4" />
+                  </button>
+                  <button v-if="canManage && r.status === 'OPEN' && ! r.is_published_to_career"
+                    class="text-indigo-600 hover:text-indigo-800 p-1" title="Publish ke Career Portal" @click="publishCareer(r)">
+                    <GlobeAltIcon class="w-4 h-4" />
+                  </button>
+                  <button v-else-if="canManage && r.is_published_to_career"
+                    class="text-emerald-600 hover:text-emerald-800 p-1" title="Sudah dipublish (klik untuk unpublish)" @click="unpublishCareer(r)">
+                    <GlobeAltIcon class="w-4 h-4" />
                   </button>
                   <button v-if="canManage" class="text-gray-600 hover:text-primary-600 p-1" title="Edit" @click="openEdit(r)">
                     <PencilIcon class="w-4 h-4" />

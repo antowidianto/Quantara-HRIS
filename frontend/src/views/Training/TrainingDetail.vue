@@ -171,13 +171,11 @@
         <form @submit.prevent="submitAdd" class="p-5 space-y-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Karyawan *</label>
-            <select v-model="addModal.employeeId" required
-              class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
-              <option value="">— pilih —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">
-                {{ e.employee_number }} — {{ e.full_name }}
-              </option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="addModal.employeeId"
+              placeholder="— pilih karyawan —"
+              :only-active="true"
+            />
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" @click="addModal.show = false" class="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">Batal</button>
@@ -195,6 +193,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -212,12 +211,9 @@ async function fetch() {
   training.value = r.data?.data
 }
 
-async function fetchEmployees() {
-  try {
-    const r = await api.get('/employees', { params: { per_page: 200 } })
-    employees.value = r.data?.data || []
-  } catch (e) { employees.value = [] }
-}
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
+async function fetchEmployees() { /* deprecated: server-side search */ }
 
 async function registerSelf() {
   if (! confirm('Daftarkan diri Anda ke training ini?')) return

@@ -9,30 +9,72 @@ class AuthController extends ApiController
     public function login()
     {
         $data = $this->getJsonInput();
-        $valid = $this->validateOrFail($data, [
-            'email'    => 'required|valid_email|max_length[191]',
-            'password' => 'required|min_length[6]|max_length[200]',
-        ]);
+
+        // Field `identifier` (baru): bisa email ATAU NIK karyawan.
+        // Backward-compat: kalau caller masih kirim `email`, dipakai
+        // sebagai identifier juga supaya legacy client (mobile, integrasi)
+        // tidak break.
+        $identifierRaw = (string) ($data['identifier'] ?? $data['email'] ?? '');
+        $valid = $this->validateOrFail(
+            ['identifier' => $identifierRaw, 'password' => $data['password'] ?? ''],
+            [
+                'identifier' => 'required|max_length[191]',
+                'password'   => 'required|min_length[6]|max_length[200]',
+            ],
+        );
         if (! $valid) return null;
 
-        $email = strtolower(trim($data['email']));
+        $identifier = trim($identifierRaw);
         $password = (string) $data['password'];
 
         $db = \Config\Database::connect();
-        $user = $db->table('users')->where('email', $email)->get()->getRowArray();
+
+        // Resolve user: dua jalur identifier
+        //   1. Format mengandung "@" → treat as email (legacy primary).
+        //   2. Else → treat as NIK karyawan (employee_number);
+        //      lookup users via employees.employee_number.
+        // Untuk audit, simpan baik email yang resolved (kalau ada) maupun
+        // NIK yang dicoba — supaya HR bisa diagnose login gagal lewat
+        // login_attempts log.
+        $user = null;
+        $resolvedVia = 'email';
+        $logIdentifier = strtolower($identifier); // untuk login_attempts.email
+        if (str_contains($identifier, '@')) {
+            $email = strtolower($identifier);
+            $user = $db->table('users')->where('email', $email)->get()->getRowArray();
+            $logIdentifier = $email;
+        } else {
+            // NIK lookup — case-sensitive di kebanyakan DB tapi pakai trim.
+            // Join via employees.user_id (kolom existing) — kalau NIK belum
+            // ter-link ke user, login akan dianggap "unknown_email" supaya
+            // pesan error generic (tidak bocorin apakah NIK exist atau tidak).
+            $row = $db->table('employees e')
+                ->select('u.*')
+                ->join('users u', 'u.id = e.user_id')
+                ->where('e.employee_number', $identifier)
+                ->where('e.deleted_at IS NULL')
+                ->get()->getRowArray();
+            if ($row) {
+                $user = $row;
+                $resolvedVia = 'nik';
+                $logIdentifier = strtolower((string) ($row['email'] ?? $identifier));
+            }
+        }
 
         $ip = $this->request->getIPAddress();
         $ua = substr((string) $this->request->getUserAgent(), 0, 255);
 
         if (! $user) {
             $db->table('login_attempts')->insert([
-                'email' => $email, 'ip_address' => $ip, 'success' => 0,
-                'reason' => 'unknown_email', 'user_agent' => $ua, 'created_at' => date('Y-m-d H:i:s'),
+                'email' => $logIdentifier, 'ip_address' => $ip, 'success' => 0,
+                'reason' => 'unknown_identifier', 'user_agent' => $ua, 'created_at' => date('Y-m-d H:i:s'),
             ]);
+            $msg = $resolvedVia === 'nik'
+                ? "Login gagal: NIK tidak terdaftar atau belum ter-link ke akun ({$identifier})"
+                : "Login gagal: email tidak terdaftar ({$logIdentifier})";
             Services::audit()
                 ->forModule('AUTH')
-                ->logFailure('auth.login', null, null, 'INVALID_CREDENTIALS',
-                    "Login gagal: email tidak terdaftar ({$email})");
+                ->logFailure('auth.login', null, null, 'INVALID_CREDENTIALS', $msg);
             return $this->fail('Invalid credentials', 401, 'INVALID_CREDENTIALS');
         }
 
@@ -56,16 +98,16 @@ class AuthController extends ApiController
             }
             $db->table('users')->where('id', $user['id'])->update($update);
             $db->table('login_attempts')->insert([
-                'email' => $email, 'ip_address' => $ip, 'success' => 0,
+                'email' => $logIdentifier, 'ip_address' => $ip, 'success' => 0,
                 'reason' => 'bad_password', 'user_agent' => $ua, 'created_at' => date('Y-m-d H:i:s'),
             ]);
             $audit = Services::audit()->forModule('AUTH');
             if ($locked) {
                 $audit->logCritical('auth.login.locked', 'user', (int) $user['id'],
-                    "Akun dikunci sementara setelah {$failed} percobaan gagal: {$email}");
+                    "Akun dikunci sementara setelah {$failed} percobaan gagal: {$logIdentifier}");
             } else {
                 $audit->logFailure('auth.login', 'user', (int) $user['id'], 'INVALID_CREDENTIALS',
-                    "Login gagal (password salah, percobaan ke-{$failed}): {$email}");
+                    "Login gagal (password salah, percobaan ke-{$failed}, via {$resolvedVia}): {$logIdentifier}");
             }
             return $this->fail('Invalid credentials', 401, 'INVALID_CREDENTIALS');
         }
@@ -96,7 +138,7 @@ class AuthController extends ApiController
             'last_login_ip'   => $ip,
         ]);
         $db->table('login_attempts')->insert([
-            'email' => $email, 'ip_address' => $ip, 'success' => 1,
+            'email' => $logIdentifier, 'ip_address' => $ip, 'success' => 1,
             'user_agent' => $ua, 'created_at' => date('Y-m-d H:i:s'),
         ]);
 
@@ -112,8 +154,8 @@ class AuthController extends ApiController
                 action: 'auth.login',
                 entity: 'user',
                 entityId: (int) $user['id'],
-                description: "Login berhasil: {$email}",
-                metadata: ['email' => $email, 'company_id' => $companyId]
+                description: "Login berhasil (via {$resolvedVia}): {$logIdentifier}",
+                metadata: ['email' => $logIdentifier, 'via' => $resolvedVia, 'company_id' => $companyId]
             );
 
         return $this->ok([

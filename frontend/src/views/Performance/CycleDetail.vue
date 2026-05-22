@@ -50,11 +50,14 @@
     <!-- Goals tab -->
     <div v-if="tab === 'goals'" class="space-y-3">
       <div class="flex items-center justify-between">
-        <select v-model="goalFilter.employee_id" @change="fetchGoals"
-          class="px-3 py-2 rounded border border-gray-300 text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
-          <option value="">Semua Karyawan</option>
-          <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
-        </select>
+        <div class="w-64">
+          <EmployeeSearchSelect
+            v-model="goalFilter.employee_id"
+            placeholder="Semua Karyawan"
+            :only-active="false"
+            @change="fetchGoals"
+          />
+        </div>
         <button v-if="canManage" @click="openGoalCreate"
           class="px-4 py-2 rounded bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium">
           + Goal
@@ -179,11 +182,11 @@
         <form @submit.prevent="saveGoal" class="p-5 space-y-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Karyawan *</label>
-            <select v-model="goalModal.form.employee_id" required
-              class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
-              <option value="">— pilih —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="goalModal.form.employee_id"
+              placeholder="— pilih karyawan —"
+              :only-active="true"
+            />
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Judul Goal *</label>
@@ -303,11 +306,11 @@
         <form @submit.prevent="saveReview" class="p-5 space-y-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Karyawan *</label>
-            <select v-model="reviewModal.employee_id" required
-              class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
-              <option value="">— pilih —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="reviewModal.employee_id"
+              placeholder="— pilih karyawan —"
+              :only-active="true"
+            />
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Tipe</label>
@@ -338,6 +341,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -382,12 +386,10 @@ async function fetchReviews() {
   reviews.value = r.data?.data || []
 }
 
-async function fetchEmployees() {
-  try {
-    const r = await api.get('/employees', { params: { per_page: 200 } })
-    employees.value = r.data?.data || []
-  } catch (e) { employees.value = [] }
-}
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side. `employees` dipertahankan kosong agar
+// kompatibel kalau ada code lain yang masih merefer-nya.
+async function fetchEmployees() { /* deprecated: server-side search */ }
 
 function openGoalCreate() {
   goalModal.value.form = blankGoalForm()

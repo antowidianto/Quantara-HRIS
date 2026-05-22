@@ -249,9 +249,58 @@ class RecruitmentController extends ApiController
         $row['stages'] = $db->table('candidate_stages')
             ->where('candidate_id', (int) $id)
             ->orderBy('id', 'ASC')->get()->getResultArray();
-        $row['documents'] = $db->table('candidate_documents')
+
+        // Dokumen pelamar (CV, KTP, ijazah, foto, dst). Tambah signed URL
+        // tiap dokumen supaya HR bisa preview/download via tombol di UI.
+        // URL expiry default 5 menit dari FileStorage::signedUrl().
+        $documents = $db->table('candidate_documents')
             ->where('candidate_id', (int) $id)
             ->orderBy('id', 'DESC')->get()->getResultArray();
+        // Signed URL (HMAC + expiry 5 menit). Frontend pakai untuk
+        // preview di tab baru atau force-download via <a download>.
+        $storage = Services::fileStorage();
+        foreach ($documents as &$d) {
+            if (! empty($d['file_path'])) {
+                try {
+                    $d['view_url'] = $storage->signedUrl($d['file_path'], 300);
+                } catch (\Throwable $e) {
+                    $d['view_url'] = null;
+                }
+            }
+        }
+        unset($d);
+        $row['documents'] = $documents;
+
+        // Sertakan juga signed URL untuk legacy column di candidates
+        // (cv_path, photo_path, ktp_path, ijazah_path) — pelamar lewat
+        // Career Portal biasanya isi via 4 kolom ini (sebelum
+        // candidate_documents normalize). UI fallback ke field ini kalau
+        // documents[] kosong.
+        $legacyDocs = [];
+        $legacyMap = [
+            'cv_path'     => ['type' => 'CV',     'label' => 'CV'],
+            'photo_path'  => ['type' => 'OTHER',  'label' => 'Pas Foto'],
+            'ktp_path'    => ['type' => 'KTP',    'label' => 'KTP'],
+            'ijazah_path' => ['type' => 'IJAZAH', 'label' => 'Ijazah'],
+        ];
+        foreach ($legacyMap as $col => $info) {
+            $path = $row[$col] ?? null;
+            if (! empty($path)) {
+                try {
+                    $legacyDocs[] = [
+                        'document_type' => $info['type'],
+                        'label'         => $info['label'],
+                        'file_name'     => basename($path),
+                        'file_path'     => $path,
+                        'view_url'      => $storage->signedUrl($path, 300),
+                    ];
+                } catch (\Throwable $e) {
+                    // ignore
+                }
+            }
+        }
+        $row['legacy_documents'] = $legacyDocs;
+
         $job = $db->table('job_postings')->where('id', (int) $row['job_posting_id'])->get()->getRowArray();
         $row['job'] = $job;
         return $this->ok($row);
@@ -414,17 +463,37 @@ class RecruitmentController extends ApiController
             'employment_status','join_date','basic_salary',
         ]));
         try {
-            $employeeId = Services::recruitment()->convertToEmployee((int) $id, $overrides);
+            $result = Services::recruitment()->convertToEmployee((int) $id, $overrides);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
+        $employeeId = $result['employee_id'];
         Services::audit()->forModule('RECRUITMENT')->log(
             action: 'candidate.hire', entity: 'candidate', entityId: (int) $id,
-            after: ['employee_id' => $employeeId],
-            description: "Convert {$row['full_name']} → employee #{$employeeId} + auto-trigger onboarding",
+            after: ['employee_id' => $employeeId, 'user_id' => $result['user_id']],
+            description: "Convert {$row['full_name']} → employee #{$employeeId} + auto-trigger onboarding"
+                . ($result['user_id'] ? " + auto-create user account #{$result['user_id']}" : ''),
             severity: 'CRITICAL'
         );
-        return $this->ok(['employee_id' => $employeeId], 'Converted to employee', 201);
+
+        // Sync MPP hired_count: kalau posting kandidat ini ditarik dari
+        // sebuah MPP, increment hired_count + auto-set FILLED bila qty
+        // terpenuhi. Best-effort, tidak blocking response hire.
+        try {
+            Services::manpower()->syncForJobPosting((int) $row['job_posting_id']);
+        } catch (\Throwable $e) {
+            log_message('warning', 'MPP sync after hire failed: ' . $e->getMessage());
+        }
+        // Response berisi credential ONE-TIME — frontend hire modal akan
+        // tampilkan sekali ke HR yang melakukan hire. Tidak disimpan
+        // plain text di DB; kalau hilang HR harus reset password manual.
+        return $this->ok([
+            'employee_id'          => $employeeId,
+            'user_id'              => $result['user_id'],
+            'user_email'           => $result['user_email'],
+            'temp_password'        => $result['temp_password'],
+            'auto_completed_tasks' => $result['auto_completed_tasks'],
+        ], 'Converted to employee', 201);
     }
 
     public function pipelineStats()

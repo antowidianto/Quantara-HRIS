@@ -11,7 +11,11 @@ const route = useRoute()
 const toast = useToast()
 const { t } = useI18n()
 
-const email = ref('')
+// `identifier` bisa diisi email ATAU NIK (Nomor Induk Karyawan).
+// Nama variabel di-keep `email` di store/API supaya backward compatible
+// dengan caller lain; backend AuthController accept keduanya via field
+// `identifier` (preferred) atau `email` (legacy).
+const identifier = ref('')
 const password = ref('')
 const loading = ref(false)
 const showPassword = ref(false)
@@ -23,7 +27,7 @@ const otpCode = ref('')
 async function submit() {
   loading.value = true
   try {
-    const result = await auth.login({ email: email.value, password: password.value })
+    const result = await auth.login({ identifier: identifier.value, password: password.value })
     if (result?.requires_2fa) {
       requires2fa.value = true
       challenge.value = result.challenge
@@ -70,9 +74,10 @@ async function submitOtp() {
         <div class="card-body">
           <form v-if="!requires2fa" @submit.prevent="submit" class="space-y-4">
             <div>
-              <label class="label" for="email">{{ t('auth.email') }}</label>
-              <input id="email" v-model="email" type="email" required autocomplete="email"
-                class="input" :placeholder="t('auth.email_placeholder')" />
+              <label class="label" for="identifier">{{ t('auth.identifier') }}</label>
+              <input id="identifier" v-model="identifier" type="text" required autocomplete="username"
+                class="input" :placeholder="t('auth.identifier_placeholder')" />
+              <p class="text-xs text-gray-500 mt-1">{{ t('auth.identifier_help') }}</p>
             </div>
             <div>
               <label class="label" for="password">{{ t('auth.password') }}</label>

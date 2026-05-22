@@ -7,6 +7,7 @@ import {
   CalendarDaysIcon, MagnifyingGlassIcon, ArrowPathIcon,
   PaintBrushIcon, ChevronLeftIcon, ChevronRightIcon, TrashIcon, BoltIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 /**
  * Roster — matriks Employee × Tanggal.
@@ -295,24 +296,39 @@ const visibleEmployeeCount = computed(() => matrix.value.rows.length)
         </div>
         <div>
           <label class="label">Cabang</label>
-          <select v-model="filters.branch_id" class="input" @change="fetchData">
-            <option value="">— Semua —</option>
-            <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.branch_id"
+            :items="branches"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code','city']"
+            placeholder="— Semua —"
+            @change="fetchData"
+          />
         </div>
         <div>
           <label class="label">Departemen</label>
-          <select v-model="filters.department_id" class="input" @change="fetchData">
-            <option value="">— Semua —</option>
-            <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.department_id"
+            :items="departments"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code']"
+            placeholder="— Semua —"
+            @change="fetchData"
+          />
         </div>
         <div>
           <label class="label">Lokasi Kerja</label>
-          <select v-model="filters.work_location_id" class="input" @change="fetchData">
-            <option value="">— Semua —</option>
-            <option v-for="w in workLocations" :key="w.id" :value="w.id">{{ w.name }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filters.work_location_id"
+            :items="workLocations"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code','address']"
+            placeholder="— Semua —"
+            @change="fetchData"
+          />
         </div>
         <div>
           <label class="label">Cari Karyawan</label>
@@ -422,13 +438,32 @@ const visibleEmployeeCount = computed(() => matrix.value.rows.length)
           </div>
           <div>
             <label class="label">Shift</label>
-            <select v-model="editingCell.shift_id" class="input"
-              :disabled="editingCell.is_off || editingCell.is_holiday">
-              <option :value="null">— Pilih shift —</option>
-              <option v-for="s in shifts" :key="s.id" :value="s.id">
-                {{ s.name }} ({{ String(s.start_time).slice(0,5) }}–{{ String(s.end_time).slice(0,5) }})
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="editingCell.shift_id"
+              :items="shifts"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="— Pilih shift —"
+              :disabled="editingCell.is_off || editingCell.is_holiday"
+            >
+              <template #item="{ item }">
+                <span class="block text-sm truncate">
+                  {{ item.name }}
+                  <span class="text-xs text-gray-500">
+                    ({{ String(item.start_time).slice(0,5) }}–{{ String(item.end_time).slice(0,5) }})
+                  </span>
+                </span>
+              </template>
+              <template #selected="{ item }">
+                <span class="block truncate font-medium">
+                  {{ item.name }}
+                  <span class="text-xs text-gray-500">
+                    ({{ String(item.start_time).slice(0,5) }}–{{ String(item.end_time).slice(0,5) }})
+                  </span>
+                </span>
+              </template>
+            </SearchableSelect>
           </div>
           <label class="flex items-center gap-2 text-sm">
             <input v-model="editingCell.is_off" type="checkbox" />
@@ -459,12 +494,27 @@ const visibleEmployeeCount = computed(() => matrix.value.rows.length)
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="md:col-span-2">
             <label class="label">Pilih Pola</label>
-            <select v-model="generateForm.pattern_id" class="input">
-              <option value="">— Pilih pola —</option>
-              <option v-for="p in patterns" :key="p.id" :value="p.id">
-                {{ p.name }} (siklus {{ p.cycle_days }} hari)
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="generateForm.pattern_id"
+              :items="patterns"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="— Pilih pola —"
+            >
+              <template #item="{ item }">
+                <span class="block text-sm truncate">
+                  {{ item.name }}
+                  <span class="text-xs text-gray-500">(siklus {{ item.cycle_days }} hari)</span>
+                </span>
+              </template>
+              <template #selected="{ item }">
+                <span class="block truncate font-medium">
+                  {{ item.name }}
+                  <span class="text-xs text-gray-500">(siklus {{ item.cycle_days }} hari)</span>
+                </span>
+              </template>
+            </SearchableSelect>
           </div>
           <div>
             <label class="label">Mulai</label>

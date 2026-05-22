@@ -89,13 +89,11 @@
         <form @submit.prevent="save" class="p-5 space-y-3">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Karyawan *</label>
-            <select v-model="form.employee_id" required
-              class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
-              <option value="">— pilih —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">
-                {{ e.employee_number }} — {{ e.full_name }}
-              </option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="form.employee_id"
+              placeholder="— pilih karyawan —"
+              :only-active="true"
+            />
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Nama Sertifikat *</label>
@@ -174,6 +172,7 @@ import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import FileUploader from '@/components/FileUploader.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const auth = useAuthStore()
 const canManage = computed(() => auth.can('certificate.manage'))
@@ -223,12 +222,9 @@ async function fetchExpiringCount() {
   } catch (e) { expiringCount.value = 0 }
 }
 
-async function fetchEmployees() {
-  try {
-    const r = await api.get('/employees', { params: { per_page: 200 } })
-    employees.value = r.data?.data || []
-  } catch (e) { employees.value = [] }
-}
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
+async function fetchEmployees() { /* deprecated: server-side search */ }
 
 function openCreate() {
   form.value = blankForm()

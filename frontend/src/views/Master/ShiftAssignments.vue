@@ -4,6 +4,8 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, TrashIcon, ClockIcon, BeakerIcon } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 /**
  * Aturan Shift per Scope.
@@ -66,20 +68,20 @@ async function fetchData() {
 
 async function loadMasters() {
   try {
-    const [s, b, d, w, g, e] = await Promise.all([
+    // Karyawan TIDAK lagi di-load semua sekaligus — picker preview pakai
+    // EmployeeSearchSelect server-side untuk dataset besar.
+    const [s, b, d, w, g] = await Promise.all([
       api.get('/shifts', { params: { per_page: 200 } }).catch(() => null),
       api.get('/branches', { params: { per_page: 200 } }).catch(() => null),
       api.get('/departments', { params: { per_page: 200 } }).catch(() => null),
       api.get('/work-locations', { params: { per_page: 200 } }).catch(() => null),
       api.get('/job-grades', { params: { per_page: 200 } }).catch(() => null),
-      api.get('/employees', { params: { per_page: 200, is_active: 1 } }).catch(() => null),
     ])
     shifts.value = s?.data?.data || []
     branches.value = b?.data?.data || []
     departments.value = d?.data?.data || []
     workLocations.value = w?.data?.data || []
     jobGrades.value = g?.data?.data || []
-    employees.value = e?.data?.data || []
   } catch (_) { /* silent */ }
 }
 
@@ -191,12 +193,11 @@ function sourceLabel(s) {
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3">
         <div>
           <label class="label">Karyawan</label>
-          <select v-model="preview.employee_id" class="input">
-            <option value="">— Pilih karyawan —</option>
-            <option v-for="e in employees" :key="e.id" :value="e.id">
-              {{ e.employee_number }} — {{ e.full_name }}
-            </option>
-          </select>
+          <EmployeeSearchSelect
+            v-model="preview.employee_id"
+            placeholder="— Pilih karyawan —"
+            :only-active="true"
+          />
         </div>
         <div>
           <label class="label">Tanggal</label>
@@ -227,18 +228,33 @@ function sourceLabel(s) {
     <!-- Filter + List -->
     <div class="card">
       <div class="card-header grid grid-cols-1 md:grid-cols-4 gap-3 w-full">
-        <select v-model="filters.shift_id" class="input" @change="fetchData">
-          <option value="">— Semua Shift —</option>
-          <option v-for="s in shifts" :key="s.id" :value="s.id">{{ s.name }}</option>
-        </select>
-        <select v-model="filters.branch_id" class="input" @change="fetchData">
-          <option value="">— Semua Cabang —</option>
-          <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-        </select>
-        <select v-model="filters.department_id" class="input" @change="fetchData">
-          <option value="">— Semua Departemen —</option>
-          <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-        </select>
+        <SearchableSelect
+          v-model="filters.shift_id"
+          :items="shifts"
+          value-key="id"
+          label-key="name"
+          :search-keys="['name','code']"
+          placeholder="— Semua Shift —"
+          @change="fetchData"
+        />
+        <SearchableSelect
+          v-model="filters.branch_id"
+          :items="branches"
+          value-key="id"
+          label-key="name"
+          :search-keys="['name','code','city']"
+          placeholder="— Semua Cabang —"
+          @change="fetchData"
+        />
+        <SearchableSelect
+          v-model="filters.department_id"
+          :items="departments"
+          value-key="id"
+          label-key="name"
+          :search-keys="['name','code']"
+          placeholder="— Semua Departemen —"
+          @change="fetchData"
+        />
         <select v-model="filters.is_active" class="input" @change="fetchData">
           <option value="">— Status —</option>
           <option value="1">Aktif</option>
@@ -301,41 +317,76 @@ function sourceLabel(s) {
         <form @submit.prevent="save" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="md:col-span-2">
             <label class="label">Shift *</label>
-            <select v-model="form.shift_id" class="input" required>
-              <option value="">— Pilih shift —</option>
-              <option v-for="s in shifts" :key="s.id" :value="s.id">
-                {{ s.name }} ({{ String(s.start_time).slice(0,5) }}–{{ String(s.end_time).slice(0,5) }})
-              </option>
-            </select>
+            <SearchableSelect
+              v-model="form.shift_id"
+              :items="shifts"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="— Pilih shift —"
+            >
+              <template #item="{ item }">
+                <span class="block text-sm truncate">
+                  {{ item.name }}
+                  <span class="text-xs text-gray-500">
+                    ({{ String(item.start_time).slice(0,5) }}–{{ String(item.end_time).slice(0,5) }})
+                  </span>
+                </span>
+              </template>
+              <template #selected="{ item }">
+                <span class="block truncate font-medium">
+                  {{ item.name }}
+                  <span class="text-xs text-gray-500">
+                    ({{ String(item.start_time).slice(0,5) }}–{{ String(item.end_time).slice(0,5) }})
+                  </span>
+                </span>
+              </template>
+            </SearchableSelect>
           </div>
 
           <div>
             <label class="label">Cabang</label>
-            <select v-model="form.branch_id" class="input">
-              <option value="">— Tidak dibatasi —</option>
-              <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.branch_id"
+              :items="branches"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code','city']"
+              placeholder="— Tidak dibatasi —"
+            />
           </div>
           <div>
             <label class="label">Lokasi Kerja</label>
-            <select v-model="form.work_location_id" class="input">
-              <option value="">— Tidak dibatasi —</option>
-              <option v-for="w in workLocations" :key="w.id" :value="w.id">{{ w.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.work_location_id"
+              :items="workLocations"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code','address']"
+              placeholder="— Tidak dibatasi —"
+            />
           </div>
           <div>
             <label class="label">Departemen</label>
-            <select v-model="form.department_id" class="input">
-              <option value="">— Tidak dibatasi —</option>
-              <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.department_id"
+              :items="departments"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="— Tidak dibatasi —"
+            />
           </div>
           <div>
             <label class="label">Job Grade</label>
-            <select v-model="form.job_grade_id" class="input">
-              <option value="">— Tidak dibatasi —</option>
-              <option v-for="g in jobGrades" :key="g.id" :value="g.id">{{ g.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="form.job_grade_id"
+              :items="jobGrades"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="— Tidak dibatasi —"
+            />
           </div>
 
           <div>

@@ -40,6 +40,18 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     // Token HMAC + expiry pendek (lihat FileStorage::signedUrl) cover akses.
     $routes->get('files/serve', 'FileServeController::serve');
 
+    // ─── Career Portal (PUBLIC, no auth) ───────────────────────────
+    // Lihat docs/CAREER_PORTAL.md. Endpoint dipisah dari group ber-JWT
+    // karena pelamar tidak login. Throttle:api global filter sudah cover
+    // basic abuse, dan CareerService punya rate-limit per IP per jam.
+    $routes->post('careers/upload',                          'CareerPublicController::upload');
+    $routes->get('careers/track/(:segment)',                 'CareerPublicController::track/$1');
+    // Detail & apply pakai 2 segmen slug
+    $routes->post('careers/(:segment)/jobs/(:segment)/apply', 'CareerPublicController::apply/$1/$2');
+    $routes->get('careers/(:segment)/jobs/(:segment)',        'CareerPublicController::jobDetail/$1/$2');
+    $routes->get('careers/(:segment)/jobs',                   'CareerPublicController::listJobs/$1');
+    $routes->get('careers/(:segment)',                        'CareerPublicController::landing/$1');
+
     // ─── Authenticated routes ────────────────────────────────────────
     $routes->group('', ['filter' => 'jwt'], static function ($routes) {
 
@@ -192,14 +204,35 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('settings', 'SettingController::index');
         $routes->put('settings', 'SettingController::update');
 
+        // Email / SMTP settings (per company) — disimpan di tabel `settings`
+        // dengan key prefix `email.*`. Password di-encrypt at-rest.
+        $routes->get('email-settings',       'EmailSettingsController::index');
+        $routes->put('email-settings',       'EmailSettingsController::update');
+        $routes->post('email-settings/test', 'EmailSettingsController::test');
+
         // Organization Development — Easy Setting (drag-and-drop org structure)
         // Lihat docs/ORG_STRUCTURE.md untuk pola pemakaian.
         $routes->get('org-structure',                       'OrgStructureController::index');
+        $routes->get('org-structure/department/(:num)',     'OrgStructureController::departmentDetail/$1');
         $routes->post('org-structure/move-department',      'OrgStructureController::moveDepartment');
         $routes->post('org-structure/move-position',        'OrgStructureController::movePosition');
+        $routes->post('org-structure/move-mpp',             'OrgStructureController::moveMpp');
+        $routes->post('org-structure/move-employee',        'OrgStructureController::moveEmployee');
         $routes->post('org-structure/set-manager',          'OrgStructureController::setManager');
         $routes->post('org-structure/bulk-reorder',         'OrgStructureController::bulkReorder');
         $routes->post('org-structure/recompute-reports',    'OrgStructureController::recomputeReports');
+
+        // Organization Roles — master jabatan kunci untuk lookup approver.
+        // Endpoint khusus didefinisikan SEBELUM CRUD agar /picker & /organogram
+        // tidak ke-trap sebagai resource id.
+        $routes->get('organization-roles/picker',           'OrganizationRoleController::picker');
+        $routes->get('organization-roles/organogram',       'OrganizationRoleController::organogram');
+        $routes->get('organization-roles',                  'OrganizationRoleController::index');
+        $routes->post('organization-roles',                 'OrganizationRoleController::create');
+        $routes->get('organization-roles/(:num)',           'OrganizationRoleController::show/$1');
+        $routes->put('organization-roles/(:num)',           'OrganizationRoleController::update/$1');
+        $routes->delete('organization-roles/(:num)',        'OrganizationRoleController::delete/$1');
+        $routes->post('organization-roles/(:num)/assign',   'OrganizationRoleController::assign/$1');
 
         // Allowance mapping (per cabang & grade)
         $routes->get('allowance-types',          'AllowanceController::listTypes');
@@ -299,6 +332,23 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('helpdesk/tickets/(:num)/reopen',      'HelpdeskController::reopen/$1');
         $routes->post('helpdesk/tickets/(:num)/comments',    'HelpdeskController::addComment/$1');
 
+        // ─── Manpower Planning (MPP) ───────────────────────────────
+        // Endpoint khusus didefinisikan SEBELUM resource pattern supaya
+        // path /manpower-requests/stats & /inbox tidak nyangkut sebagai id.
+        $routes->get('manpower-requests/stats',                  'ManpowerController::stats');
+        $routes->get('manpower-requests/inbox',                  'ManpowerController::inbox');
+        $routes->get('manpower-requests',                        'ManpowerController::index');
+        $routes->post('manpower-requests',                       'ManpowerController::create');
+        $routes->get('manpower-requests/(:num)',                 'ManpowerController::show/$1');
+        $routes->put('manpower-requests/(:num)',                 'ManpowerController::update/$1');
+        $routes->delete('manpower-requests/(:num)',              'ManpowerController::delete/$1');
+        $routes->post('manpower-requests/(:num)/submit',         'ManpowerController::submit/$1');
+        $routes->post('manpower-requests/(:num)/approve',        'ManpowerController::approve/$1');
+        $routes->post('manpower-requests/(:num)/reject',         'ManpowerController::reject/$1');
+        $routes->post('manpower-requests/(:num)/cancel',         'ManpowerController::cancel/$1');
+        $routes->post('manpower-requests/(:num)/create-posting', 'ManpowerController::createPosting/$1');
+        $routes->post('manpower-requests/(:num)/close',          'ManpowerController::close/$1');
+
         // ─── Recruitment / ATS ─────────────────────────────────────
         $routes->get('recruitment/pipeline-stats',  'RecruitmentController::pipelineStats');
         $routes->get('job-postings',                'RecruitmentController::indexJobs');
@@ -308,6 +358,13 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->delete('job-postings/(:num)',      'RecruitmentController::deleteJob/$1');
         $routes->post('job-postings/(:num)/open',   'RecruitmentController::openJob/$1');
         $routes->post('job-postings/(:num)/close',  'RecruitmentController::closeJob/$1');
+        // Career portal — publish/unpublish posting + settings
+        $routes->post('job-postings/(:num)/publish',   'CareerController::publishJob/$1');
+        $routes->post('job-postings/(:num)/unpublish', 'CareerController::unpublishJob/$1');
+        $routes->get('career-page',                       'CareerController::show');
+        $routes->put('career-page',                       'CareerController::update');
+        $routes->post('career-page/regenerate-slug',      'CareerController::regenerateSlug');
+        $routes->get('career-applicants',                 'CareerController::applicants');
         $routes->get('candidates',                          'RecruitmentController::indexCandidates');
         $routes->post('candidates',                         'RecruitmentController::createCandidate');
         $routes->get('candidates/(:num)',                   'RecruitmentController::showCandidate/$1');
@@ -460,6 +517,48 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('resignations/(:num)/approve',  'ResignationController::approve/$1');
         $routes->post('resignations/(:num)/reject',   'ResignationController::reject/$1');
         $routes->post('resignations/(:num)/cancel',   'ResignationController::cancel/$1');
+
+        // ─── Job Information Change (Promosi/Demosi/Mutasi) ────────
+        // Workflow: Supervisor → Dept Head → HR → BOD (kondisional) →
+        // Employee Consent (kondisional, hanya DEMOTION non-disipliner) →
+        // APPROVED → IMPLEMENTED. Lihat docs/JIC.md.
+        // Endpoint khusus harus didefinisikan SEBELUM /jic/(:num)
+        // supaya path /jic/options tidak nyangkut sebagai id.
+        $routes->get('jic/options',                  'JicController::options');
+        $routes->get('jic',                          'JicController::index');
+        $routes->post('jic',                         'JicController::create');
+        $routes->get('jic/(:num)',                   'JicController::show/$1');
+        $routes->put('jic/(:num)',                   'JicController::update/$1');
+        $routes->delete('jic/(:num)',                'JicController::delete/$1');
+        $routes->post('jic/(:num)/submit',           'JicController::submit/$1');
+        $routes->post('jic/(:num)/approve',          'JicController::approve/$1');
+        $routes->post('jic/(:num)/reject',           'JicController::reject/$1');
+        $routes->post('jic/(:num)/consent',          'JicController::consent/$1');
+        $routes->post('jic/(:num)/cancel',           'JicController::cancel/$1');
+        $routes->post('jic/(:num)/implement',        'JicController::implement/$1');
+
+        // Employee Transfer (Mutasi) — pemindahan karyawan antar
+        // branch/department/posisi/work_location dengan workflow ringan
+        // 1-tier HR approval. Beda dengan JIC: tidak menyentuh grade/upah.
+        // Lihat docs/EMPLOYEE_TRANSFER.md.
+        // Static routes harus didefinisikan SEBELUM /(:num) supaya
+        // path /options tidak nyangkut sebagai id.
+        $routes->get('employee-transfers/options',           'EmployeeTransferController::options');
+        // Endpoint khusus karyawan: lihat mutasi yang menyangkut diri sendiri
+        // (sebagai subjek). Tidak butuh permission view — auto scope ke
+        // tenant.employee_id. Sama pola dengan /leaves/my, /payslips/my, dst.
+        $routes->get('employee-transfers/my',                'EmployeeTransferController::my');
+        $routes->get('employee-transfers',                   'EmployeeTransferController::index');
+        $routes->post('employee-transfers',                  'EmployeeTransferController::create');
+        $routes->get('employee-transfers/(:num)',            'EmployeeTransferController::show/$1');
+        $routes->put('employee-transfers/(:num)',            'EmployeeTransferController::update/$1');
+        $routes->delete('employee-transfers/(:num)',         'EmployeeTransferController::delete/$1');
+        $routes->post('employee-transfers/(:num)/submit',    'EmployeeTransferController::submit/$1');
+        $routes->post('employee-transfers/(:num)/approve',   'EmployeeTransferController::approve/$1');
+        $routes->post('employee-transfers/(:num)/reject',    'EmployeeTransferController::reject/$1');
+        $routes->post('employee-transfers/(:num)/cancel',    'EmployeeTransferController::cancel/$1');
+        $routes->post('employee-transfers/(:num)/implement', 'EmployeeTransferController::implement/$1');
+        $routes->post('employee-transfers/(:num)/consent',   'EmployeeTransferController::consent/$1');
 
         // ─── Generated Contracts ───────────────────────────────────
         $routes->get('generated-contracts',                  'GeneratedContractController::index');

@@ -201,6 +201,50 @@ class Services extends BaseService
         return new \App\Libraries\RecruitmentService();
     }
 
+    /**
+     * ManpowerService — Manpower Planning (MPP) request workflow.
+     * Pengajuan kebutuhan SDM oleh line manager (N+1) → approval HRD/Direksi
+     * → Talent Acquisition buatkan job_postings → tracking sampai
+     * candidate HIRED + onboarding. Lihat docs/MPP.md.
+     */
+    public static function manpower(bool $getShared = true): \App\Libraries\ManpowerService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('manpower');
+        }
+
+        return new \App\Libraries\ManpowerService();
+    }
+
+    /**
+     * OrganizationStructureService — master jabatan kunci HR Indonesia
+     * (BOD, GM, HR Manager, dst). Single source of truth untuk lookup
+     * approver per role_key. Dipakai oleh ManpowerService untuk routing
+     * approval & frontend untuk dropdown picker.
+     * Lihat docs/ORG_STRUCTURE.md.
+     */
+    public static function orgStructure(bool $getShared = true): \App\Libraries\OrganizationStructureService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('orgStructure');
+        }
+
+        return new \App\Libraries\OrganizationStructureService();
+    }
+
+    /**
+     * CareerService — public-facing job board yang terhubung ke
+     * RecruitmentService & OnboardingService. Lihat docs/CAREER_PORTAL.md.
+     */
+    public static function career(bool $getShared = true): \App\Libraries\CareerService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('career');
+        }
+
+        return new \App\Libraries\CareerService();
+    }
+
     public static function antiCheat(bool $getShared = true): \App\Libraries\AntiCheatService
     {
         if ($getShared) {
@@ -257,5 +301,35 @@ class Services extends BaseService
         }
 
         return new \App\Libraries\Encryption();
+    }
+
+    /**
+     * JicService — Job Information Change (Promosi/Demosi/Mutasi).
+     * Workflow approval Supervisor → Dept Head → HR → BOD (kondisional)
+     * → Employee Consent (kondisional) → APPROVED → IMPLEMENTED.
+     * Lihat docs/JIC.md.
+     */
+    public static function jic(bool $getShared = true): \App\Libraries\JicService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('jic');
+        }
+
+        return new \App\Libraries\JicService();
+    }
+
+    /**
+     * EmployeeTransferService — Mutasi karyawan antar branch / department /
+     * posisi / work_location dengan workflow ringan (HR-only approval).
+     * Beda dengan JIC: tidak menyentuh grade/gaji, fokus ke perpindahan
+     * lokasi/dept lateral. Lihat docs/EMPLOYEE_TRANSFER.md.
+     */
+    public static function employeeTransfer(bool $getShared = true): \App\Libraries\EmployeeTransferService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('employeeTransfer');
+        }
+
+        return new \App\Libraries\EmployeeTransferService();
     }
 }

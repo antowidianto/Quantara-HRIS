@@ -65,10 +65,28 @@ async function remove(id) {
       <button class="btn-primary" @click="openCreate">+ Tambah Pengguna</button>
     </div>
     <div class="card">
+      <p class="px-4 pt-3 text-xs text-gray-500">
+        Karyawan login menggunakan <strong>NIK</strong> (Nomor Induk Karyawan) yang ditautkan ke akun. NIK diatur di menu
+        <em>Karyawan → Edit</em> oleh Super Admin. Email tetap dapat dipakai oleh akun super admin yang tidak memiliki record karyawan.
+      </p>
       <table class="table">
-        <thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Status</th><th>Login Terakhir</th><th class="text-right">Aksi</th></tr></thead>
+        <thead>
+          <tr>
+            <th>NIK (Login)</th>
+            <th>Email</th>
+            <th>Nama</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Login Terakhir</th>
+            <th class="text-right">Aksi</th>
+          </tr>
+        </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-for="u in items" :key="u.id">
+            <td>
+              <span v-if="u.employee_number" class="font-mono">{{ u.employee_number }}</span>
+              <span v-else class="text-xs text-gray-400 italic">— belum ditautkan —</span>
+            </td>
             <td>{{ u.email }}</td>
             <td>{{ u.name }}</td>
             <td>{{ u.role_name }}</td>

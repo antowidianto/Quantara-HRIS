@@ -9,6 +9,8 @@ import {
   ComputerDesktopIcon, PlusIcon, ArrowUpTrayIcon, ArrowDownTrayIcon,
   DocumentArrowDownIcon, PencilIcon, TrashIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -59,14 +61,11 @@ async function fetchData() {
   }
 }
 
-async function fetchEmployees() {
-  try {
-    const res = await api.get('/employees', { params: { per_page: 200, is_active: 1 } })
-    employees.value = res.data.data || []
-  } catch (_) {}
-}
+// Karyawan tidak lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
+async function fetchEmployees() { /* deprecated: server-side search */ }
 
-onMounted(() => { fetchEmployees(); fetchData() })
+onMounted(() => { fetchData() })
 
 function openCreate() {
   editing.value = {
@@ -209,20 +208,27 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           <input v-model="filters.q" class="input" placeholder="No, nama, brand, SN..."
             @keydown.enter="applyFilter" /></div>
         <div><label class="label">Kategori</label>
-          <select v-model="filters.category" class="input">
-            <option value="">Semua</option>
-            <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
-          </select></div>
+          <SearchableSelect
+            v-model="filters.category"
+            :items="CATEGORIES.map(c => ({ value: c, label: c }))"
+            value-key="value"
+            label-key="label"
+            placeholder="Semua"
+          />
+        </div>
         <div><label class="label">Status</label>
           <select v-model="filters.status" class="input">
             <option value="">Semua</option>
             <option v-for="(b, k) in STATUS_BADGE" :key="k" :value="k">{{ b.label }}</option>
-          </select></div>
+          </select>
+        </div>
         <div><label class="label">Karyawan</label>
-          <select v-model="filters.employee_id" class="input">
-            <option value="">Semua</option>
-            <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
-          </select></div>
+          <EmployeeSearchSelect
+            v-model="filters.employee_id"
+            placeholder="Semua"
+            :only-active="false"
+          />
+        </div>
         <div class="flex items-end"><button class="btn-secondary w-full" @click="applyFilter">Filter</button></div>
       </div>
     </div>
@@ -350,10 +356,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         <div class="p-6 space-y-3">
           <div>
             <label class="label">Karyawan *</label>
-            <select v-model="formAssign.employee_id" class="input">
-              <option value="">— Pilih —</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }} ({{ e.employee_number }})</option>
-            </select>
+            <EmployeeSearchSelect
+              v-model="formAssign.employee_id"
+              placeholder="— Pilih karyawan —"
+              :only-active="true"
+            />
           </div>
           <div>
             <label class="label">Kondisi saat penyerahan</label>

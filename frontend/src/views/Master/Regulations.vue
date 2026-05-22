@@ -6,6 +6,7 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   PlusIcon, MagnifyingGlassIcon, PencilIcon, TrashIcon, EyeIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 /**
  * Halaman editor Peraturan Perusahaan.
@@ -168,10 +169,15 @@ function go(page) { params.page = page; fetchData() }
           <MagnifyingGlassIcon class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input v-model="params.search" placeholder="Cari klausul..." class="input pl-9" />
         </div>
-        <select v-model="params.category" class="input w-full md:w-56">
-          <option value="">— Semua Kategori —</option>
-          <option v-for="c in categories" :key="c.value" :value="c.value">{{ c.label }}</option>
-        </select>
+        <div class="w-full md:w-56">
+          <SearchableSelect
+            v-model="params.category"
+            :items="categories"
+            value-key="value"
+            label-key="label"
+            placeholder="— Semua Kategori —"
+          />
+        </div>
         <button v-if="params.category" class="btn-secondary" @click="preview(params.category)">
           Preview Kategori
         </button>
@@ -244,9 +250,13 @@ function go(page) { params.page = page; fetchData() }
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div class="md:col-span-1">
               <label class="label">Kategori *</label>
-              <select v-model="form.category" class="input" required>
-                <option v-for="c in categories" :key="c.value" :value="c.value">{{ c.label }}</option>
-              </select>
+              <SearchableSelect
+                v-model="form.category"
+                :items="categories"
+                value-key="value"
+                label-key="label"
+                :clearable="false"
+              />
             </div>
             <div class="md:col-span-1">
               <label class="label">Kode</label>

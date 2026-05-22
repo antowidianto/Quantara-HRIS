@@ -55,8 +55,11 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    async login({ email, password }) {
-      const res = await api.post('/auth/login', { email, password })
+    async login({ identifier, email, password }) {
+      // Backward-compat: caller lama mungkin masih pass `email`. Backend
+      // sekarang accept `identifier` (bisa email ATAU NIK karyawan).
+      const id = identifier ?? email
+      const res = await api.post('/auth/login', { identifier: id, password })
       const data = res.data.data || {}
 
       // 2FA challenge case

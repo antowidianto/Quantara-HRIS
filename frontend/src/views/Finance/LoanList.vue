@@ -9,6 +9,7 @@ import {
   PlusIcon, CheckCircleIcon, XCircleIcon, BanknotesIcon, ClockIcon,
   ArrowPathIcon, InformationCircleIcon,
 } from '@heroicons/vue/24/outline'
+import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
 /**
  * Halaman Kasbon / Pinjaman.
@@ -57,15 +58,9 @@ async function fetchData() {
   }
 }
 
-async function fetchEmployees() {
-  if (! canCreateForOthers.value) return
-  try {
-    const res = await api.get('/employees', { params: { per_page: 500 } })
-    employees.value = res.data.data || []
-  } catch (_) { /* silent */ }
-}
-
-onMounted(() => { fetchData(); fetchEmployees() })
+// Karyawan TIDAK lagi di-load semua sekaligus — picker pakai
+// EmployeeSearchSelect server-side untuk dataset besar.
+onMounted(() => { fetchData() })
 
 function openForm() {
   form.value = {
@@ -326,12 +321,11 @@ function go(page) { filters.page = page; fetchData() }
 
         <div v-if="canCreateForOthers">
           <label class="label">Karyawan</label>
-          <select v-model.number="form.employee_id" class="input" required>
-            <option :value="null">— pilih karyawan —</option>
-            <option v-for="e in employees" :key="e.id" :value="e.id">
-              {{ e.full_name }} ({{ e.employee_number }})
-            </option>
-          </select>
+          <EmployeeSearchSelect
+            v-model="form.employee_id"
+            placeholder="— pilih karyawan —"
+            :only-active="true"
+          />
         </div>
 
         <div>

@@ -152,10 +152,12 @@ check('Total stages mengandung 8 keys', count($stats) === 8);
 
 // 8. Convert HIRED → employee
 echo "\n8. convertToEmployee()\n";
-$employeeId = $svc->convertToEmployee($candId, [
+$hireResult = $svc->convertToEmployee($candId, [
     'basic_salary' => 10000000,
     'join_date' => date('Y-m-d', strtotime('+14 days')),
 ]);
+$employeeId = $hireResult['employee_id'];
+check('convertToEmployee return shape (employee_id key)', is_int($employeeId) && $employeeId > 0);
 check('Employee dibuat (id ' . $employeeId . ')', $employeeId > 0);
 $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
 check('Employee.full_name dari candidate', $emp['full_name'] === 'Test Hire Candidate');

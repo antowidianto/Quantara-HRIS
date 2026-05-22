@@ -4,6 +4,7 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
 import { fmtDate, fmtDateTime } from '@/composables/useResource'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -96,14 +97,26 @@ onMounted(async () => {
       <div class="card-header gap-3 flex-wrap">
         <input v-model="filters.start_date" type="date" class="input w-44" />
         <input v-model="filters.end_date" type="date" class="input w-44" />
-        <select v-if="canCrossBranch" v-model="filters.branch_id" class="input w-56">
-          <option value="">Semua cabang</option>
-          <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-        </select>
-        <select v-model="filters.department_id" class="input w-56">
-          <option value="">Semua departemen</option>
-          <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-        </select>
+        <div v-if="canCrossBranch" class="w-56">
+          <SearchableSelect
+            v-model="filters.branch_id"
+            :items="branches"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code','city']"
+            placeholder="Semua cabang"
+          />
+        </div>
+        <div class="w-56">
+          <SearchableSelect
+            v-model="filters.department_id"
+            :items="departments"
+            value-key="id"
+            label-key="name"
+            :search-keys="['name','code']"
+            placeholder="Semua departemen"
+          />
+        </div>
         <select v-model="filters.status" class="input w-44">
           <option value="">Semua status</option>
           <option value="PRESENT">Hadir</option>

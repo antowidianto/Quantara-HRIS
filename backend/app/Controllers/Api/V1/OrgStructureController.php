@@ -113,6 +113,30 @@ class OrgStructureController extends ApiController
             }
         }
 
+        // Open MPP per department — pengajuan kebutuhan SDM yang masih
+        // aktif (DRAFT/SUBMITTED/APPROVED/HIRING). Ditampilkan sebagai
+        // "slot kosong" supaya manager tahu ada posisi yang sedang dicari.
+        // Skip table belum migrate (early-bird company tanpa MPP migration
+        // — tetap aman karena array default kosong).
+        $openMppByDept = [];
+        $unassignedMpp = [];
+        if ($db->tableExists('manpower_requests')) {
+            $mppBuilder = $db->table('manpower_requests')
+                ->select('id, department_id, reference_number, proposed_title, request_type, reason, headcount, hired_count, status, target_start_date, position_id')
+                ->whereIn('status', ['DRAFT', 'SUBMITTED', 'APPROVED', 'HIRING'])
+                ->where('deleted_at IS NULL');
+            $this->tenant()->applyScope($mppBuilder);
+            $openMpps = $mppBuilder->orderBy('created_at', 'DESC')->get()->getResultArray();
+            foreach ($openMpps as $m) {
+                $did = $m['department_id'] !== null ? (int) $m['department_id'] : 0;
+                if ($did === 0) {
+                    $unassignedMpp[] = $m;
+                } else {
+                    $openMppByDept[$did][] = $m;
+                }
+            }
+        }
+
         // Build tree (self-referencing parent_id)
         $byId = [];
         foreach ($departments as $d) {
@@ -130,6 +154,7 @@ class OrgStructureController extends ApiController
                 'is_active'           => (int) $d['is_active'],
                 'employee_count'      => $countMap[$id] ?? 0,
                 'positions'           => $positionsByDept[$id] ?? [],
+                'open_mpps'           => $openMppByDept[$id] ?? [],
                 'children'            => [],
             ];
         }
@@ -149,13 +174,20 @@ class OrgStructureController extends ApiController
         $totalEmployees = 0;
         foreach ($countMap as $c) $totalEmployees += $c;
 
+        // Total open MPP (lintas department) untuk dashboard summary.
+        $totalOpenMpp = 0;
+        foreach ($openMppByDept as $list) $totalOpenMpp += count($list);
+        $totalOpenMpp += count($unassignedMpp);
+
         return $this->ok([
             'departments'          => $roots,
             'unassigned_positions' => $unassignedPositions,
+            'unassigned_mpps'      => $unassignedMpp,
             'stats'                => [
                 'total_departments' => count($departments),
                 'total_positions'   => count($positions),
                 'total_employees'   => $totalEmployees,
+                'total_open_mpps'   => $totalOpenMpp,
             ],
             'tiers'                => [
                 ['value' => 'MANAGER',      'label' => 'Manager'],
@@ -164,6 +196,278 @@ class OrgStructureController extends ApiController
                 ['value' => 'STAFF',        'label' => 'Staff'],
             ],
         ]);
+    }
+
+    /**
+     * GET /org-structure/department/(:num)
+     *
+     * Detail department untuk modal "view inside": informasi dept,
+     * manager, daftar posisi + karyawan yang menempati, sub-dept
+     * sekilas, dan slot MPP terbuka. Setiap karyawan dilengkapi
+     * field minimal yang dibutuhkan UI: id, full_name, employee_number,
+     * position_id/name, job_grade_name, manager_id, avatar.
+     *
+     * Endpoint ini sengaja query-heavy sekali (dipanggil saat user
+     * buka modal) supaya frontend tidak perlu round-trip per posisi.
+     */
+    public function departmentDetail($id = null)
+    {
+        $deptId = (int) $id;
+        if ($deptId <= 0) return $this->fail('department_id wajib diisi', 422);
+
+        $db = Database::connect();
+        $dept = $db->table('departments')
+            ->where('id', $deptId)
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $dept) return $this->fail('Department tidak ditemukan', 404);
+        if (! $this->tenant()->isSuperAdmin() && (int) $dept['company_id'] !== $this->companyId()) {
+            return $this->fail('Forbidden', 403);
+        }
+        $companyId = (int) $dept['company_id'];
+
+        // Manager nama
+        $managerName = null;
+        if (! empty($dept['manager_employee_id'])) {
+            $row = $db->table('employees')->select('full_name')
+                ->where('id', (int) $dept['manager_employee_id'])->get()->getRowArray();
+            $managerName = $row['full_name'] ?? null;
+        }
+
+        // Parent name (untuk breadcrumb)
+        $parentName = null;
+        if (! empty($dept['parent_id'])) {
+            $row = $db->table('departments')->select('name')
+                ->where('id', (int) $dept['parent_id'])->get()->getRowArray();
+            $parentName = $row['name'] ?? null;
+        }
+
+        // Sub-departments langsung (untuk navigasi cepat)
+        $subDepts = $db->table('departments')
+            ->select('id, code, name')
+            ->where('parent_id', $deptId)
+            ->where('deleted_at IS NULL')
+            ->orderBy('name', 'ASC')
+            ->get()->getResultArray();
+
+        // Sub-dept employee count untuk display
+        if (! empty($subDepts)) {
+            $subIds = array_map(fn($d) => (int) $d['id'], $subDepts);
+            $countRows = $db->table('employees')
+                ->select('department_id, COUNT(*) AS cnt')
+                ->whereIn('department_id', $subIds)
+                ->where('deleted_at IS NULL')
+                ->groupBy('department_id')
+                ->get()->getResultArray();
+            $countMap = [];
+            foreach ($countRows as $r) $countMap[(int) $r['department_id']] = (int) $r['cnt'];
+            foreach ($subDepts as &$s) $s['employee_count'] = $countMap[(int) $s['id']] ?? 0;
+            unset($s);
+        }
+
+        // Positions di department ini
+        $positions = $db->table('positions')
+            ->select('id, code, name, tier, job_grade_id')
+            ->where('department_id', $deptId)
+            ->where('deleted_at IS NULL')
+            ->orderBy("CASE tier WHEN 'MANAGER' THEN 1 WHEN 'ASST_MANAGER' THEN 2 "
+                . "WHEN 'SUPERVISOR' THEN 3 WHEN 'STAFF' THEN 4 ELSE 5 END", '', false)
+            ->orderBy('name', 'ASC')
+            ->get()->getResultArray();
+
+        // Employees di department ini, lengkap dengan position + grade name
+        $employees = $db->table('employees e')
+            ->select('e.id, e.full_name, e.employee_number, e.email, e.phone, e.gender,'
+                . ' e.is_active, e.position_id, e.manager_id, e.job_grade_id, e.avatar_path,'
+                . ' p.name AS position_name, p.tier AS position_tier,'
+                . ' jg.name AS job_grade_name, jg.code AS job_grade_code,'
+                . ' m.full_name AS manager_name')
+            ->join('positions p',  'p.id = e.position_id',  'left')
+            ->join('job_grades jg','jg.id = e.job_grade_id','left')
+            ->join('employees m',  'm.id = e.manager_id',   'left')
+            ->where('e.department_id', $deptId)
+            ->where('e.deleted_at IS NULL')
+            ->orderBy("CASE p.tier WHEN 'MANAGER' THEN 1 WHEN 'ASST_MANAGER' THEN 2 "
+                . "WHEN 'SUPERVISOR' THEN 3 WHEN 'STAFF' THEN 4 ELSE 5 END", '', false)
+            ->orderBy('e.full_name', 'ASC')
+            ->get()->getResultArray();
+
+        // Open MPP di department ini
+        $openMpps = [];
+        if ($db->tableExists('manpower_requests')) {
+            $openMpps = $db->table('manpower_requests')
+                ->select('id, reference_number, proposed_title, request_type, reason, '
+                    . 'headcount, hired_count, status, target_start_date, position_id')
+                ->where('department_id', $deptId)
+                ->whereIn('status', ['DRAFT', 'SUBMITTED', 'APPROVED', 'HIRING'])
+                ->where('deleted_at IS NULL')
+                ->orderBy('created_at', 'DESC')
+                ->get()->getResultArray();
+        }
+
+        return $this->ok([
+            'department' => [
+                'id'                  => $deptId,
+                'code'                => $dept['code'],
+                'name'                => $dept['name'],
+                'description'         => $dept['description'],
+                'parent_id'           => $dept['parent_id'] !== null ? (int) $dept['parent_id'] : null,
+                'parent_name'         => $parentName,
+                'manager_employee_id' => $dept['manager_employee_id'] !== null ? (int) $dept['manager_employee_id'] : null,
+                'manager_name'        => $managerName,
+                'is_active'           => (int) $dept['is_active'],
+                'employee_count'      => count($employees),
+            ],
+            'sub_departments' => $subDepts,
+            'positions'       => $positions,
+            'employees'       => $employees,
+            'open_mpps'       => $openMpps,
+        ]);
+    }
+
+    /**
+     * POST /org-structure/move-employee
+     *
+     * Body:
+     *   {
+     *     "employee_id": 12,
+     *     "new_department_id": 3 | null,
+     *     "new_position_id": 18 | null  // optional
+     *   }
+     *
+     * Pindahkan employee ke department lain (drag-and-drop di modal
+     * detail department). Optional: sekaligus set position baru bila
+     * UI menyertakan field-nya. Setelah perubahan, hitung ulang manager
+     * di subtree supaya direct report konsisten.
+     */
+    public function moveEmployee()
+    {
+        $data = $this->getJsonInput();
+        $empId = (int) ($data['employee_id'] ?? 0);
+        $newDeptId = isset($data['new_department_id']) && $data['new_department_id'] !== null && $data['new_department_id'] !== ''
+            ? (int) $data['new_department_id']
+            : null;
+        $newPosId = isset($data['new_position_id']) && $data['new_position_id'] !== null && $data['new_position_id'] !== ''
+            ? (int) $data['new_position_id']
+            : null;
+
+        if ($empId <= 0) return $this->fail('employee_id wajib diisi', 422, 'VALIDATION_ERROR');
+
+        $db = Database::connect();
+        $emp = $db->table('employees')->where('id', $empId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
+        if (! $this->tenant()->isSuperAdmin() && (int) $emp['company_id'] !== $this->companyId()) {
+            return $this->fail('Forbidden', 403);
+        }
+
+        // Validasi department tujuan
+        if ($newDeptId !== null) {
+            $dept = $db->table('departments')->where('id', $newDeptId)->where('deleted_at IS NULL')->get()->getRowArray();
+            if (! $dept) return $this->fail('Department tujuan tidak ditemukan', 404);
+            if ((int) $dept['company_id'] !== (int) $emp['company_id']) {
+                return $this->fail('Department tujuan harus dalam perusahaan yang sama', 422, 'CROSS_TENANT');
+            }
+        }
+
+        // Validasi posisi (kalau dipilih, harus exist + scope sama)
+        if ($newPosId !== null) {
+            $pos = $db->table('positions')->where('id', $newPosId)->where('deleted_at IS NULL')->get()->getRowArray();
+            if (! $pos) return $this->fail('Posisi tidak ditemukan', 404);
+            if ((int) $pos['company_id'] !== (int) $emp['company_id']) {
+                return $this->fail('Posisi harus dalam perusahaan yang sama', 422, 'CROSS_TENANT');
+            }
+            // Saran ringan: posisi harusnya nempel di department yang sama
+            // dengan tujuan; tapi kita tidak hard-block — bolehkan kalau
+            // posisi tsb cross-dept (mis. shared role), dengan catatan di
+            // audit log.
+        }
+
+        $oldDeptId = $emp['department_id'] !== null ? (int) $emp['department_id'] : null;
+        $oldPosId  = $emp['position_id']   !== null ? (int) $emp['position_id']   : null;
+
+        if ($oldDeptId === $newDeptId && $oldPosId === ($newPosId ?? $oldPosId)) {
+            return $this->ok(['unchanged' => true], 'Tidak ada perubahan');
+        }
+
+        $update = [
+            'department_id' => $newDeptId,
+            'updated_at'    => date('Y-m-d H:i:s'),
+        ];
+        if ($newPosId !== null) $update['position_id'] = $newPosId;
+
+        $db->table('employees')->where('id', $empId)->update($update);
+
+        Services::audit()
+            ->forModule('MASTER')
+            ->logUpdate(
+                'employee',
+                $empId,
+                ['department_id' => $oldDeptId, 'position_id' => $oldPosId],
+                ['department_id' => $newDeptId, 'position_id' => $newPosId ?? $oldPosId],
+                "Pindahkan {$emp['full_name']} antar department/posisi"
+            );
+
+        // Manager_id otomatis disesuaikan via subtree recompute. Pakai
+        // department lama sebagai anchor — recompute akan menyentuh dept
+        // lama (untuk update mantan rekan yang manager-nya berubah).
+        $report = (new ReportingChainService())->recomputeForCompany((int) $emp['company_id']);
+
+        return $this->ok([
+            'employee_id'    => $empId,
+            'department_id'  => $newDeptId,
+            'position_id'    => $newPosId ?? $oldPosId,
+            'reports_synced' => $report,
+        ], 'Karyawan berhasil dipindahkan, direct report disesuaikan');
+    }
+
+    /**
+     * POST /org-structure/move-mpp
+     *
+     * Body:
+     *   { "manpower_request_id": 5, "new_department_id": 2 | null }
+     *
+     * Drag-and-drop MPP slot ke department lain. Hanya berlaku untuk MPP
+     * yang masih DRAFT/SUBMITTED/APPROVED (sebelum ditarik ke job_postings).
+     */
+    public function moveMpp()
+    {
+        $data = $this->getJsonInput();
+        $mppId = (int) ($data['manpower_request_id'] ?? 0);
+        $newDeptId = isset($data['new_department_id']) && $data['new_department_id'] !== null && $data['new_department_id'] !== ''
+            ? (int) $data['new_department_id']
+            : null;
+        if ($mppId <= 0) {
+            return $this->fail('manpower_request_id wajib diisi', 422, 'VALIDATION_ERROR');
+        }
+
+        // Cek tenant scope MPP via Service (untuk konsistensi).
+        $db = Database::connect();
+        $mpp = $db->table('manpower_requests')->where('id', $mppId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $mpp) return $this->fail('MPP tidak ditemukan', 404);
+        if (! $this->tenant()->isSuperAdmin() && (int) $mpp['company_id'] !== $this->companyId()) {
+            return $this->fail('Forbidden', 403);
+        }
+
+        try {
+            $result = Services::manpower()->moveToDepartment($mppId, $newDeptId, $this->userId());
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+
+        if (! ($result['unchanged'] ?? false)) {
+            Services::audit()->forModule('MASTER')->logUpdate(
+                'manpower_request', $mppId,
+                ['department_id' => $result['old']],
+                ['department_id' => $result['new']],
+                "Pindahkan MPP '{$mpp['proposed_title']}' antar department"
+            );
+        }
+
+        return $this->ok([
+            'manpower_request_id' => $mppId,
+            'department_id'       => $result['new'] ?? $newDeptId,
+            'unchanged'           => $result['unchanged'] ?? false,
+        ], 'MPP slot berhasil dipindahkan');
     }
 
     /**
@@ -445,6 +749,79 @@ class OrgStructureController extends ApiController
             $nameMap[(int) $r['id']] = $r['name'];
         }
 
+        // Sebelum apply, periksa juga department/parent yang mungkin ada di
+        // company lain (lintas-tenant) atau sudah di-soft-delete. Pesan lebih
+        // informatif untuk user: bedakan "tidak ada sama sekali", "di company
+        // lain", "soft-deleted". Frontend pakai info ini untuk auto-recover
+        // (mis. invalidate cache dan reload tree).
+        //
+        // Catatan penting: pakai array_key_exists() — BUKAN isset() — karena
+        // entry root-department punya value NULL (parent_id = NULL), dan
+        // isset() salah mengembalikan false untuk nilai null. Akibatnya
+        // sebelum fix ini, semua department root selalu dianggap "missing"
+        // dan endpoint balik 409 STALE_TREE_STATE walau datanya sehat.
+        $missingIds = [];
+        foreach ($moves as $m) {
+            $did = (int) ($m['department_id'] ?? 0);
+            if ($did <= 0) continue;
+            if (! array_key_exists($did, $current)) $missingIds[] = $did;
+            $newParent = isset($m['new_parent_id']) && $m['new_parent_id'] !== null && $m['new_parent_id'] !== ''
+                ? (int) $m['new_parent_id']
+                : null;
+            if ($newParent !== null && ! array_key_exists($newParent, $current)) {
+                $missingIds[] = $newParent;
+            }
+        }
+        $missingIds = array_values(array_unique($missingIds));
+
+        $diagnostics = [];
+        if (! empty($missingIds)) {
+            // Cek di seluruh tabel (tanpa scope tenant) untuk diagnosa
+            $diagRows = $db->table('departments')
+                ->select('id, name, company_id, deleted_at')
+                ->whereIn('id', $missingIds)
+                ->get()->getResultArray();
+            $foundIds = [];
+            foreach ($diagRows as $r) {
+                $rid = (int) $r['id'];
+                $foundIds[] = $rid;
+                if ($r['deleted_at'] !== null) {
+                    $diagnostics[$rid] = ['reason' => 'DELETED', 'name' => $r['name']];
+                } elseif ((int) $r['company_id'] !== $companyId && ! $this->tenant()->isSuperAdmin()) {
+                    $diagnostics[$rid] = ['reason' => 'CROSS_TENANT', 'name' => $r['name']];
+                } else {
+                    // Mestinya tidak terjadi — fallback
+                    $diagnostics[$rid] = ['reason' => 'OUT_OF_SCOPE', 'name' => $r['name']];
+                }
+            }
+            foreach ($missingIds as $mid) {
+                if (! in_array($mid, $foundIds, true)) {
+                    $diagnostics[$mid] = ['reason' => 'NOT_FOUND', 'name' => null];
+                }
+            }
+
+            // Bangun pesan ringkas untuk user awam
+            $deletedNames   = [];
+            $crossNames     = [];
+            $missingDispIds = [];
+            foreach ($diagnostics as $mid => $d) {
+                if ($d['reason'] === 'DELETED')      $deletedNames[] = $d['name'] ?? "#{$mid}";
+                elseif ($d['reason'] === 'CROSS_TENANT') $crossNames[] = $d['name'] ?? "#{$mid}";
+                else                                     $missingDispIds[] = "#{$mid}";
+            }
+            $msgParts = [];
+            if ($deletedNames)   $msgParts[] = "sudah dihapus: " . implode(', ', $deletedNames);
+            if ($crossNames)     $msgParts[] = "ada di perusahaan lain: " . implode(', ', $crossNames);
+            if ($missingDispIds) $msgParts[] = "tidak ditemukan: " . implode(', ', $missingDispIds);
+            $msg = "Beberapa department dalam perubahan tidak valid (" . implode('; ', $msgParts)
+                . "). Tree mungkin sudah berubah di sesi/tab lain — silakan muat ulang halaman.";
+
+            return $this->fail($msg, 409, 'STALE_TREE_STATE', [
+                'missing_department_ids' => array_values($missingIds),
+                'diagnostics'            => $diagnostics,
+            ]);
+        }
+
         // Apply moves to in-memory map first, validate, lalu persist.
         $applied = [];
         foreach ($moves as $m) {
@@ -453,16 +830,9 @@ class OrgStructureController extends ApiController
                 ? (int) $m['new_parent_id']
                 : null;
 
-            if ($did <= 0 || ! isset($current[$did])) {
-                return $this->fail("Department #{$did} tidak ditemukan dalam scope perusahaan", 404);
-            }
-            if ($newParent !== null) {
-                if ($newParent === $did) {
-                    return $this->fail("Department '{$nameMap[$did]}' tidak bisa jadi parent sendiri", 422, 'INVALID_PARENT');
-                }
-                if (! isset($current[$newParent])) {
-                    return $this->fail("Parent #{$newParent} tidak ditemukan", 404);
-                }
+            if ($did <= 0) continue; // sudah disaring di atas
+            if ($newParent !== null && $newParent === $did) {
+                return $this->fail("Department '{$nameMap[$did]}' tidak bisa jadi parent sendiri", 422, 'INVALID_PARENT');
             }
             $applied[$did] = ['old' => $current[$did], 'new' => $newParent];
             $current[$did] = $newParent; // update in-memory state
