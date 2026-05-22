@@ -1,0 +1,8 @@
+# PHPStan baseline — issue legacy yang sudah ada, di-ignore dari run
+# berikutnya supaya CI bisa enforce no-new-issue.
+#
+# Update via: composer stan:baseline
+#
+# Track menurunkan baseline secara bertahap di task refactor.
+parameters:
+    ignoreErrors: []

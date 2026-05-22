@@ -16,6 +16,7 @@
     "require-dev": {
         "fakerphp/faker": "^1.23",
         "mikey179/vfsstream": "^1.6",
+        "phpstan/phpstan": "1.12",
         "phpunit/phpunit": "^10.5"
     },
     "autoload": {
@@ -37,6 +38,13 @@
             "@composer dump-autoload"
         ],
         "test": "phpunit",
+        "test:unit": "phpunit --testsuite Unit",
+        "stan": "phpstan analyse --memory-limit=512M",
+        "stan:baseline": "phpstan analyse --memory-limit=512M --generate-baseline",
+        "ci": [
+            "@stan",
+            "@test"
+        ],
         "serve": "php spark serve"
     },
     "config": {
