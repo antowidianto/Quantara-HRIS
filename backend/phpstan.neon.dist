@@ -1,0 +1,24 @@
+parameters:
+    level: 0
+    paths:
+        - app/Libraries
+        - app/Validation
+    excludePaths:
+        analyse:
+            - app/Database/Migrations/*
+            # Sentry integration opsional (composer require sentry/sentry).
+            # PHPStan complain karena class tidak ada; di-skip dari analisa.
+            - app/Libraries/ExceptionLogger.php
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        # CodeIgniter helpers global yang tidak resolve di PHPStan tanpa
+        # bootstrap framework. Lebih clean untuk ignore daripada bikin
+        # stub: kita verifikasi behavior via PHPUnit, PHPStan focus ke
+        # type / unsafe call.
+        - '#Function (env|service|config|log_message|helper|model|view|esc) not found#'
+
+# Baseline diaktifkan setelah generate awal supaya tim bisa adopsi
+# bertahap (tidak langsung gagal di legacy code).
+includes:
+    - phpstan-baseline.neon
