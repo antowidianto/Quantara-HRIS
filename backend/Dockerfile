@@ -29,7 +29,7 @@ RUN composer install \
     && composer clear-cache
 
 # ─── Stage 2: runtime PHP-FPM ───────────────────────────────────────
-FROM php:8.2-fpm-alpine
+FROM php:8.5-fpm-alpine
 
 # OS deps + ekstensi PHP production
 RUN apk add --no-cache \

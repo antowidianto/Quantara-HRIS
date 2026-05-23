@@ -6,7 +6,7 @@
 #
 # Untuk PRODUCTION pakai Dockerfile (multi-stage, opcache enabled).
 
-FROM php:8.2-cli
+FROM php:8.5-cli
 
 # Install OS deps + ekstensi PHP yang dibutuhkan CI4 + HRIS:
 #   - mysqli         → MySQL connection
