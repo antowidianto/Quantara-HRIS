@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Husky pre-commit hook untuk frontend HRIS.
+# Auto-fix + format file yang di-stage sesuai konfigurasi `lint-staged`
+# di package.json.
+#
+# Setup (sekali setelah `npm install`):
+#   cd frontend && npx husky init
+# Husky akan otomatis register hook ini ke `.git/hooks/pre-commit`.
+#
+# Bypass kalau perlu (mis. WIP commit):
+#   git commit --no-verify
+
+cd frontend && npx lint-staged

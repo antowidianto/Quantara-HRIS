@@ -1,0 +1,96 @@
+# Dependabot — auto-update dependencies untuk backend, frontend, dan
+# GitHub Actions. PR di-grup supaya tidak meledak (1 PR/minggu/ekosistem).
+#
+# Lihat: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  # ─── Backend (Composer / PHP) ────────────────────────────────────
+  - package-ecosystem: composer
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    commit-message:
+      prefix: "chore(deps,backend)"
+    groups:
+      # PR satu untuk semua patch updates (low risk)
+      backend-patch:
+        applies-to: version-updates
+        update-types:
+          - patch
+      # PR terpisah untuk minor updates (review lebih hati-hati)
+      backend-minor:
+        applies-to: version-updates
+        update-types:
+          - minor
+    ignore:
+      # CodeIgniter major upgrade harus manual (breaking)
+      - dependency-name: codeigniter4/framework
+        update-types: [version-update:semver-major]
+
+  # ─── Frontend (npm / Node) ───────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: "chore(deps,frontend)"
+    groups:
+      frontend-patch:
+        applies-to: version-updates
+        update-types:
+          - patch
+      frontend-minor:
+        applies-to: version-updates
+        update-types:
+          - minor
+    ignore:
+      # Vue 3.x major upgrade harus manual
+      - dependency-name: vue
+        update-types: [version-update:semver-major]
+      # Vite major upgrade berisiko config breaking
+      - dependency-name: vite
+        update-types: [version-update:semver-major]
+
+  # ─── GitHub Actions ──────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      day: monday
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"
+
+  # ─── Docker (Dockerfile base images) ─────────────────────────────
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - docker

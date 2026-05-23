@@ -65,6 +65,7 @@ function copyAllCredentials() {
 const STAGES = [
   { code: 'NEW',            label: '🆕 Baru',         color: 'bg-gray-100' },
   { code: 'SCREENING',      label: '📋 Screening',    color: 'bg-blue-50' },
+  { code: 'ONLINE_TEST',    label: '📝 Tes Online',    color: 'bg-cyan-50' },
   { code: 'INTERVIEW_HR',   label: '🗣️ Interview HR',  color: 'bg-indigo-50' },
   { code: 'INTERVIEW_USER', label: '👥 Interview User',color: 'bg-purple-50' },
   { code: 'OFFER',          label: '💰 Offer',         color: 'bg-amber-50' },
@@ -301,14 +302,11 @@ function downloadDoc(doc) {
           <span v-if="rejectedCount > 0" class="text-red-600">({{ rejectedCount }} ditolak)</span>
         </p>
       </div>
-      <button v-if="canManage" class="btn-primary" @click="openAddCandidate">
-        <PlusIcon class="w-4 h-4" /> Tambah Kandidat
-      </button>
     </div>
 
     <!-- Kanban board -->
     <div v-if="loading" class="text-center py-12 text-gray-400">Memuat…</div>
-    <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
       <div v-for="stage in STAGES" :key="stage.code"
         :class="['rounded-lg p-3 min-h-64', stage.color]">
         <div class="font-semibold text-sm mb-3 flex items-center justify-between">

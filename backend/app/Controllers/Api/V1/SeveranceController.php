@@ -22,6 +22,8 @@ use Config\Services;
  */
 class SeveranceController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -365,6 +367,26 @@ class SeveranceController extends ApiController
             description: "Finalize severance #{$id} (total: " . number_format((float) $row['total_amount'], 0, ',', '.') . ')',
             severity: 'CRITICAL'
         );
+
+        // Sprint 14+ — webhook outbound `severance.finalized`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::SEVERANCE_FINALIZED,
+            (int) $row['company_id'],
+            [
+                'severance_id'  => (int) $id,
+                'employee'      => $emp ? [
+                    'id'              => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'name'            => $emp['full_name'] ?? null,
+                ] : null,
+                'reason_code'   => $row['reason_code'] ?? null,
+                'total_amount'  => (float) ($row['total_amount'] ?? 0),
+                'effective_date' => $row['effective_date'] ?? null,
+                'finalized_by'  => $this->userId(),
+                'finalized_at'  => $now,
+            ],
+        );
+
         return $this->ok(null, 'Severance difinalisasi');
     }
 
@@ -393,6 +415,25 @@ class SeveranceController extends ApiController
             description: "Tandai severance #{$id} sebagai PAID",
             severity: 'CRITICAL'
         );
+
+        // Sprint 14+ — webhook outbound `severance.paid`
+        $emp = $db->table('employees')->where('id', (int) $row['employee_id'])->get()->getRowArray();
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::SEVERANCE_PAID,
+            (int) $row['company_id'],
+            [
+                'severance_id' => (int) $id,
+                'employee'     => $emp ? [
+                    'id'              => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'name'            => $emp['full_name'] ?? null,
+                ] : null,
+                'total_amount' => (float) ($row['total_amount'] ?? 0),
+                'paid_by'      => $this->userId(),
+                'paid_at'      => $now,
+            ],
+        );
+
         return $this->ok(null, 'Severance ditandai sudah dibayar');
     }
 

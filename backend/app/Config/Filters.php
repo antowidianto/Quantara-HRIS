@@ -33,6 +33,7 @@ class Filters extends BaseConfig
 
         // Custom filters
         'jwt'           => \App\Filters\JwtAuthFilter::class,
+        'candidatejwt'  => \App\Filters\CandidateJwtAuthFilter::class,
         'permission'    => \App\Filters\PermissionFilter::class,
         'tenant'        => \App\Filters\TenantFilter::class,
         'throttle'      => \App\Filters\ThrottleFilter::class,

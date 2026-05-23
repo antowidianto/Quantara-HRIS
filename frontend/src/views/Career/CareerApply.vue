@@ -20,10 +20,15 @@ import { ref, reactive, computed, onMounted, watch, inject, nextTick } from 'vue
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import careerApi from '@/api/careerPublic'
+import { useCandidateAuthStore } from '@/stores/candidateAuth'
+
+const candidateAuth = useCandidateAuthStore()
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+
+const accountReady = ref(false)
 
 const slug = computed(() => route.params.slug)
 const jobSlug = computed(() => route.params.jobSlug)
@@ -156,11 +161,31 @@ async function fetchJob() {
     if (careerBrand) {
       careerBrand.value = {
         name:     company.value.name,
-        logo_url: company.value.logo_url || '',
+        logo_url: company.value.logo_url || company.value.logo_path || '',
         color:    brandColor,
       }
     }
     document.title = `Lamar — ${job.value.title}`
+
+    // Wajib punya akun dulu. Kalau belum login, arahkan ke register.
+    if (!candidateAuth.isAuthenticated) {
+      toast.info('Buat akun terlebih dahulu sebelum melamar')
+      router.replace({
+        name: 'candidate-register',
+        params: { slug: slug.value },
+        query: { redirect: route.fullPath },
+      })
+      return
+    }
+
+    // Pre-fill dari account kandidat agar alur lebih rapi.
+    if (candidateAuth.account) {
+      if (!form.full_name) form.full_name = candidateAuth.account.full_name || ''
+      if (!form.email) form.email = candidateAuth.account.email || ''
+      if (!form.phone) form.phone = candidateAuth.account.phone || ''
+    }
+
+    accountReady.value = true
 
     // Default available_from H+14
     if (! form.available_from) {
@@ -343,6 +368,16 @@ function openConfirm() {
 }
 
 async function submit() {
+  // Safety net — should already be enforced on page entry.
+  if (! candidateAuth.isAuthenticated) {
+    toast.info('Silakan daftar atau login terlebih dahulu untuk melamar')
+    router.push({
+      name: 'candidate-register',
+      params: { slug: slug.value },
+      query: { redirect: route.fullPath },
+    })
+    return
+  }
   showConfirmModal.value = false
   submitting.value = true
   try {
@@ -355,6 +390,7 @@ async function submit() {
     const res = await careerApi.post(
       `/careers/${slug.value}/jobs/${jobSlug.value}/apply`,
       payload,
+      { headers: { Authorization: `Bearer ${candidateAuth.accessToken}` } },
     )
     const data = res.data.data
     sessionStorage.setItem('career_track_token', data.token)

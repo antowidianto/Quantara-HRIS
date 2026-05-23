@@ -1,0 +1,48 @@
+# Backend production image — exclude file yang tidak perlu masuk runtime.
+
+# Composer cache & dev deps (deps di-install di stage builder)
+vendor/
+composer.phar
+
+# Test artifacts
+tests/
+phpunit.xml*
+phpstan.neon*
+phpstan-baseline.neon
+.phpunit.result.cache
+
+# Local env (mount via volume / env_file di runtime)
+.env
+.env.*
+!.env.example
+
+# Writable runtime data (mount via volume)
+writable/cache/*
+writable/logs/*
+writable/session/*
+writable/uploads/*
+writable/debugbar/*
+!writable/cache/.gitkeep
+!writable/logs/.gitkeep
+!writable/session/.gitkeep
+!writable/uploads/.gitkeep
+
+# Smoke test scripts (dev only)
+scripts/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile*
+.dockerignore
+docker-compose*.yml

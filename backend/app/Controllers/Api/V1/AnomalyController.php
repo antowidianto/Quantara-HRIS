@@ -19,6 +19,8 @@ use Config\Services;
  */
 class AnomalyController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     private function db() { return \Config\Database::connect(); }
     private function svc() { return Services::antiCheat(); }
 
@@ -118,6 +120,32 @@ class AnomalyController extends ApiController
                 severity: 'NOTICE',
             );
         } catch (\Throwable $e) {}
+
+        // Sprint 16+ — webhook outbound `attendance.anomaly_flagged` ke
+        // sistem external (mis. SIEM, fraud monitor) untuk audit trail
+        // lintas-sistem. Hanya fire kalau anomaly_score memang signifikan
+        // (> threshold), jangan untuk false-positive review yang sudah
+        // dikonfirmasi tidak masalah.
+        $score = (int) ($row['anomaly_score'] ?? 0);
+        $decision = strtoupper(trim((string) ($data['decision'] ?? '')));
+        if ($score >= 30 && $decision !== 'CLEARED') {
+            $this->dispatchWebhook(
+                \App\Constants\WebhookEvent::ATTENDANCE_ANOMALY_FLAGGED,
+                (int) $emp['company_id'],
+                [
+                    'attendance_id'   => $id,
+                    'employee_id'     => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'work_date'       => $row['work_date'] ?? null,
+                    'anomaly_score'   => $score,
+                    'anomaly_reasons' => $row['anomaly_reasons'] ?? null,
+                    'decision'        => $decision !== '' ? $decision : 'FLAGGED',
+                    'reviewer_note'   => $note,
+                    'reviewed_by'     => $userId,
+                    'reviewed_at'     => date('c'),
+                ],
+            );
+        }
 
         return $this->ok(['id' => $id, 'reviewed_by' => $userId]);
     }

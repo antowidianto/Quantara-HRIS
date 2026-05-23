@@ -6,6 +6,8 @@ use Config\Services;
 
 class OvertimeController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -156,6 +158,30 @@ class OvertimeController extends ApiController
                 $insert,
                 "Pengajuan lembur: {$emp['full_name']} {$hours} jam pada {$data['work_date']} ({$dayType})"
             );
+
+        // Sprint 14+ — webhook outbound `overtime.requested`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::OVERTIME_REQUESTED,
+            (int) $emp['company_id'],
+            [
+                'overtime_id'       => $id,
+                'request_number'    => $reqNumber,
+                'employee'          => [
+                    'id'              => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'name'            => $emp['full_name'] ?? null,
+                ],
+                'work_date'         => $data['work_date'],
+                'start_time'        => $data['start_time'],
+                'end_time'          => $data['end_time'],
+                'hours'             => $hours,
+                'day_type'          => $dayType,
+                'compensation_type' => $compType,
+                'status'            => 'PENDING',
+                'requested_at'      => date('c'),
+            ],
+        );
+
         return $this->ok([
             'id' => $id,
             'request_number' => $reqNumber,
@@ -305,6 +331,27 @@ class OvertimeController extends ApiController
                 'Lembur disetujui', $msg,
                 ['overtime_id' => $id], '/overtimes/' . $id, true);
         }
+
+        // Sprint 13+ — webhook dispatch via trait helper
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::OVERTIME_APPROVED,
+            (int) $ot['company_id'],
+            [
+                'overtime_id'       => $id,
+                'employee'          => $emp ? [
+                    'id'   => (int) $emp['id'],
+                    'nik'  => $emp['nik'] ?? null,
+                    'name' => $emp['full_name'] ?? $emp['name'] ?? null,
+                ] : null,
+                'work_date'         => $ot['work_date'] ?? null,
+                'hours'             => (float) ($ot['hours'] ?? 0),
+                'compensation_type' => $compType,
+                'amount'            => (float) $amount,
+                'approved_by'       => $this->userId(),
+                'approved_at'       => date('c'),
+            ],
+        );
+
         Services::audit()->forModule('OVERTIME')->logApprove('overtime', $id, $ot, $description);
 
         $resp = ['compensation_type' => $compType];
@@ -333,6 +380,33 @@ class OvertimeController extends ApiController
             'rejection_note' => $data['reason'] ?? '',
             'updated_at'  => date('Y-m-d H:i:s'),
         ]);
+
+        // Notify employee + dispatch webhook
+        $emp = $db->table('employees')->where('id', $ot['employee_id'])->get()->getRowArray();
+        if ($emp && ! empty($emp['user_id'])) {
+            Services::notification()->send((int) $emp['user_id'], (int) $ot['company_id'], 'overtime.rejected',
+                'Lembur ditolak', 'Pengajuan lembur Anda ditolak: ' . ($data['reason'] ?? '(tanpa alasan)'),
+                ['overtime_id' => $id], '/overtimes/' . $id, true);
+        }
+
+        // Sprint 14+ — webhook outbound `overtime.rejected`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::OVERTIME_REJECTED,
+            (int) $ot['company_id'],
+            [
+                'overtime_id' => $id,
+                'employee'    => $emp ? [
+                    'id'   => (int) $emp['id'],
+                    'name' => $emp['full_name'] ?? null,
+                ] : null,
+                'work_date'   => $ot['work_date'] ?? null,
+                'hours'       => (float) ($ot['hours'] ?? 0),
+                'reason'      => $data['reason'] ?? '',
+                'rejected_by' => $this->userId(),
+                'rejected_at' => date('c'),
+            ],
+        );
+
         Services::audit()
             ->forModule('OVERTIME')
             ->logReject('overtime', $id, $ot, $data['reason'] ?? '(tanpa alasan)');

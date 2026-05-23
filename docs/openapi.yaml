@@ -1,0 +1,1360 @@
+# HRIS API — OpenAPI 3.0 Specification
+#
+# Foundation spec untuk dokumentasi API public. Endpoint utama dikover di sini;
+# endpoint module-specific tinggal di-extend mengikuti pola yang sama.
+#
+# View di Swagger UI:
+#   - Online: paste ke https://editor.swagger.io
+#   - Self-hosted: docker run -p 8081:8080 -e SWAGGER_JSON=/docs/openapi.yaml \
+#                    -v $PWD/docs:/docs swaggerapi/swagger-ui
+#
+# Postman: import file ini → otomatis generate collection.
+
+openapi: 3.0.3
+
+info:
+  title: HRIS API
+  version: 1.0.0
+  description: |
+    Backend API untuk HRIS multi-tenant. Semua endpoint authenticated pakai
+    JWT Bearer. Multi-tenant scoping otomatis berdasarkan `company_id` di
+    JWT claim.
+
+    **Base URL development**: `http://localhost:8080/api/v1`
+    **Base URL production**: `https://hris.yourcompany.id/api/v1`
+
+    ## Conventions
+    - Response sukses: `{ "status": "success", "data": ..., "message": "..." }`
+    - Response error: `{ "status": "error", "code": "ERROR_CODE", "message": "...", "errors": {...} }`
+    - Pagination: query `?page=1&per_page=20`, response include `meta` dengan `total`, `page`, `per_page`, `total_pages`
+    - Tanggal pakai format ISO 8601 (`YYYY-MM-DD` atau `YYYY-MM-DD HH:MM:SS`)
+    - Mata uang dalam Rupiah, integer (tidak ada desimal)
+    - Multi-tenant: tidak perlu pass `company_id` di body — otomatis dari JWT
+  contact:
+    name: HRIS Support
+    email: support@hris.local
+  license:
+    name: Proprietary
+    url: https://example.com/license
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Development
+  - url: https://hris.yourcompany.id/api/v1
+    description: Production
+
+# ─── Security ────────────────────────────────────────────────────────
+security:
+  - bearerAuth: []
+
+# ─── Tags (untuk grouping di Swagger UI) ─────────────────────────────
+tags:
+  - name: Auth
+    description: Authentication, 2FA, password management
+  - name: Employees
+    description: Master karyawan, kontrak, dokumen
+  - name: Attendance
+    description: Clock-in/out, kalender, change request
+  - name: Leave
+    description: Pengajuan cuti, balance, calendar
+  - name: Overtime
+    description: Pengajuan & approval lembur
+  - name: Payroll
+    description: Periode payroll, payslip, THR, export
+  - name: Privacy
+    description: UU PDP — consent, data export, deletion request
+  - name: Notifications
+    description: In-app, email, web push
+  - name: Reports
+    description: Analytics & reporting
+  - name: Bonus Engine
+    description: Skema bonus reusable + run lifecycle (DRAFT → CALCULATED → APPROVED → PAID). Sprint 16+ → 21+
+
+paths:
+  # ═══════════════════════════════════════════════════════════════════
+  # AUTH
+  # ═══════════════════════════════════════════════════════════════════
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login dengan email + password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: admin@hris.local }
+                password: { type: string, format: password, example: Admin@12345 }
+      responses:
+        '200':
+          description: Login sukses (atau butuh 2FA)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LoginSuccessResponse'
+                  - $ref: '#/components/schemas/TwoFactorChallengeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/verify-2fa:
+    post:
+      tags: [Auth]
+      summary: Verifikasi 2FA (TOTP atau backup code)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge]
+              properties:
+                challenge: { type: string, description: Token dari /auth/login }
+                code: { type: string, description: TOTP 6-digit, example: "123456" }
+                backup_code: { type: string, description: Backup recovery code, example: "A8K2N-Q3R7M" }
+      responses:
+        '200':
+          description: 2FA verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginSuccessResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Token baru
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginSuccessResponse' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (revoke refresh token)
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/User' }
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Ganti password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password:
+                  type: string
+                  format: password
+                  description: Min 10 char, harus mengandung uppercase, lowercase, digit, simbol
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '422':
+          description: Password tidak memenuhi policy
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorEnvelope'
+                  - type: object
+                    properties:
+                      code: { type: string, example: PASSWORD_POLICY_VIOLATION }
+                      errors:
+                        type: array
+                        items: { type: string }
+                        example: ["Password harus mengandung minimal 1 simbol", "Password sudah pernah dipakai"]
+
+  /auth/2fa/enable:
+    post:
+      tags: [Auth]
+      summary: Enable 2FA + generate backup codes
+      responses:
+        '200':
+          description: TOTP secret + backup codes (sekali tampil!)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          secret: { type: string, example: JBSWY3DPEHPK3PXP }
+                          qr_url: { type: string, format: uri }
+                          backup_codes:
+                            type: array
+                            items: { type: string }
+                            example: ["A8K2N-Q3R7M", "B5LP4-X9F2H"]
+
+  # ═══════════════════════════════════════════════════════════════════
+  # EMPLOYEES
+  # ═══════════════════════════════════════════════════════════════════
+  /employees:
+    get:
+      tags: [Employees]
+      summary: List employees (dengan pagination & filter)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: q, in: query, schema: { type: string }, description: Search nama / NIK / email }
+        - { name: branch_id, in: query, schema: { type: integer } }
+        - { name: department_id, in: query, schema: { type: integer } }
+        - { name: is_active, in: query, schema: { type: integer, enum: [0, 1] } }
+      responses:
+        '200':
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Employee' }
+    post:
+      tags: [Employees]
+      summary: Create employee baru
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmployeeCreate' }
+      responses:
+        '201':
+          description: Employee created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Employee' }
+
+  /employees/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Employees]
+      summary: Detail karyawan
+      responses:
+        '200':
+          description: Employee detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Employee' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Employees]
+      summary: Update karyawan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmployeeCreate' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [Employees]
+      summary: Soft-delete karyawan
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # ATTENDANCE
+  # ═══════════════════════════════════════════════════════════════════
+  /attendance/clock-in:
+    post:
+      tags: [Attendance]
+      summary: Clock-in (presensi masuk)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude]
+              properties:
+                latitude: { type: number, format: double, example: -6.2 }
+                longitude: { type: number, format: double, example: 106.8 }
+                selfie: { type: string, format: byte, description: Base64 JPEG }
+                notes: { type: string }
+      responses:
+        '200':
+          description: Clock-in tercatat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Attendance' }
+        '422':
+          description: Outside geofence / shift / sudah clock-in / dll
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /attendance/clock-out:
+    post:
+      tags: [Attendance]
+      summary: Clock-out (presensi pulang)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                latitude: { type: number }
+                longitude: { type: number }
+                notes: { type: string }
+      responses:
+        '200':
+          description: Clock-out tercatat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Attendance' }
+
+  /attendance/my:
+    get:
+      tags: [Attendance]
+      summary: Riwayat presensi karyawan login
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to,   in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: List presensi
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Attendance' }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # LEAVE
+  # ═══════════════════════════════════════════════════════════════════
+  /leaves:
+    get:
+      tags: [Leave]
+      summary: List pengajuan cuti
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, PENDING, APPROVED, REJECTED, CANCELED] } }
+      responses:
+        '200':
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Leave' }
+    post:
+      tags: [Leave]
+      summary: Ajukan cuti
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leave_type_id, start_date, end_date, reason]
+              properties:
+                leave_type_id: { type: integer }
+                start_date: { type: string, format: date }
+                end_date:   { type: string, format: date }
+                half_day:   { type: string, enum: [NONE, MORNING, AFTERNOON], default: NONE }
+                reason:     { type: string }
+                attachment_path: { type: string, description: Path hasil upload via /upload/attachment }
+      responses:
+        '201':
+          description: Pengajuan dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Leave' }
+
+  /leaves/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Leave]
+      summary: Approve cuti (oleh approver)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /leaves/{id}/cancel:
+    post:
+      tags: [Leave]
+      summary: Self-cancel cuti (Sprint 17+)
+      description: |
+        Pemilik cuti (status PENDING/APPROVED, ≤ 2 hari berjalan) atau HR
+        (kapan saja) bisa membatalkan cuti. Kalau APPROVED & saldo dipakai →
+        saldo restore otomatis dan attendance future-day di-revert. Webhook
+        `leave.canceled` dispatched.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  description: Alasan pembatalan (audit + notif ke approver)
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /leaves/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Leave]
+      summary: Reject cuti
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # PRIVACY (UU PDP)
+  # ═══════════════════════════════════════════════════════════════════
+  /me/privacy/policy-version:
+    get:
+      tags: [Privacy]
+      summary: Versi kebijakan privasi saat ini
+      responses:
+        '200':
+          description: Policy version
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          version: { type: string, example: v1.0-2026 }
+                          consent_types:
+                            type: array
+                            items: { type: string }
+
+  /me/privacy/consents:
+    get:
+      tags: [Privacy]
+      summary: Riwayat consent
+      responses:
+        '200':
+          description: Consent history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+    post:
+      tags: [Privacy]
+      summary: Catat persetujuan/penolakan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consent_type, version, granted]
+              properties:
+                consent_type: { type: string, example: PRIVACY_POLICY }
+                version: { type: string, example: v1.0-2026 }
+                granted: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /me/data-export:
+    get:
+      tags: [Privacy]
+      summary: Download seluruh data pribadi (UU PDP Pasal 8b)
+      description: |
+        Throttled 10/jam. Response berupa JSON file dengan profile, payslips,
+        attendance, leaves, overtimes, documents, consents. PII di-decrypt,
+        secret/hash di-redact.
+      responses:
+        '200':
+          description: JSON file download
+          content:
+            application/json:
+              schema: { type: object }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /me/data-deletion-request:
+    post:
+      tags: [Privacy]
+      summary: Ajukan penghapusan data (UU PDP Pasal 8f)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # ═══════════════════════════════════════════════════════════════════
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifikasi user
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: unread_only, in: query, schema: { type: integer, enum: [0, 1] } }
+      responses:
+        '200':
+          description: Paginated list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedEnvelope' }
+
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Jumlah notifikasi belum dibaca
+      responses:
+        '200':
+          description: Count
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          unread_count: { type: integer }
+
+  /notifications/push-public-key:
+    get:
+      tags: [Notifications]
+      summary: VAPID public key untuk Web Push subscribe
+      responses:
+        '200':
+          description: Public key
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          public_key: { type: string }
+
+  /notifications/push-subscribe:
+    post:
+      tags: [Notifications]
+      summary: Daftarkan Web Push subscription (UPSERT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscription]
+              properties:
+                subscription:
+                  type: object
+                  required: [endpoint, keys]
+                  properties:
+                    endpoint: { type: string, format: uri }
+                    keys:
+                      type: object
+                      properties:
+                        p256dh: { type: string }
+                        auth:   { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [Notifications]
+      summary: Unsubscribe Web Push
+      parameters:
+        - { name: endpoint, in: query, schema: { type: string }, description: Kalau kosong → hapus semua subscription user }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  # ═══════════════════════════════════════════════════════════════════
+  # BONUS ENGINE (Sprint 16+ → 21+)
+  # ═══════════════════════════════════════════════════════════════════
+  /bonus-schemes:
+    get:
+      tags: [Bonus Engine]
+      summary: List skema bonus
+      description: |
+        Permission: `bonus.view`. Multi-tenant scoped. Filter optional via
+        query: `kind`, `q` (search code/name).
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: kind, in: query, schema: { type: string, enum: [ANNUAL, KPI, MILESTONE, SIGNON, RETENTION, DISCRETIONARY] } }
+        - { name: q,    in: query, schema: { type: string }, description: Search code/name }
+      responses:
+        '200':
+          description: Paginated list bonus schemes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/BonusScheme' }
+    post:
+      tags: [Bonus Engine]
+      summary: Buat skema bonus baru
+      description: 'Permission: `bonus.manage`. Code unique per company.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BonusSchemeInput' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /bonus-schemes/preview:
+    post:
+      tags: [Bonus Engine]
+      summary: Preview compute scheme (dry-run, no save)
+      description: |
+        Compute pure tanpa simpan ke DB. Useful untuk validasi formula
+        sebelum bikin run. Permission: `bonus.manage`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheme, employee, reference_date]
+              properties:
+                scheme:    { $ref: '#/components/schemas/BonusSchemeInput' }
+                employee:
+                  type: object
+                  description: Snapshot employee data minimum
+                  properties:
+                    id:                { type: integer }
+                    basic_salary:      { type: number }
+                    fixed_allowance:   { type: number }
+                    join_date:         { type: string, format: date }
+                    resign_date:       { type: string, format: date, nullable: true }
+                    employment_status: { type: string }
+                    kpi_score:         { type: number, description: 0..2, untuk formula KPI_SCORE }
+                reference_date: { type: string, format: date }
+      responses:
+        '200':
+          description: Preview hasil compute
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          amount:    { type: number, description: Final amount setelah cap }
+                          capped:    { type: boolean, description: True kalau original > cap_amount }
+                          breakdown:
+                            type: object
+                            description: 'Computation steps + inputs (basic, gross, tenure, kpi_score)'
+
+  /bonus-schemes/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Bonus Engine]
+      summary: Detail scheme
+      responses:
+        '200':
+          description: Scheme detail dengan eligibility decoded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/BonusScheme' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Bonus Engine]
+      summary: Update scheme
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BonusSchemeInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [Bonus Engine]
+      summary: Soft-delete scheme
+      description: 'Tidak bisa hapus kalau ada run aktif (DRAFT/CALCULATED/APPROVED) yang refer scheme ini.'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /bonus-runs:
+    get:
+      tags: [Bonus Engine]
+      summary: List bonus runs
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - { name: status,          in: query, schema: { type: string, enum: [DRAFT, CALCULATED, APPROVED, PAID, CANCELLED] } }
+        - { name: bonus_scheme_id, in: query, schema: { type: integer } }
+        - { name: period_year,     in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Paginated runs dengan scheme info
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/BonusRun' }
+    post:
+      tags: [Bonus Engine]
+      summary: Buat bonus run (status DRAFT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bonus_scheme_id, name, reference_date, pay_date]
+              properties:
+                bonus_scheme_id:    { type: integer }
+                payroll_period_id:  { type: integer, nullable: true, description: Optional auto-merge ke payslip }
+                name:               { type: string, maxLength: 200 }
+                reference_date:     { type: string, format: date, description: Untuk hitung tenure }
+                pay_date:           { type: string, format: date }
+                notes:              { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+
+  /bonus-runs/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Bonus Engine]
+      summary: Detail run + scheme info
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    put:
+      tags: [Bonus Engine]
+      summary: Update run (DRAFT only)
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [Bonus Engine]
+      summary: Hard-delete run (DRAFT only)
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /bonus-runs/{id}/calculate:
+    post:
+      tags: [Bonus Engine]
+      summary: Resolve eligibility + compute amount per recipient
+      description: |
+        DRAFT → CALCULATED. Idempotent (boleh re-calc selama belum APPROVED).
+        Override manual dari HR akan hilang saat re-calculate.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Hasil compute summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          recipient_count: { type: integer }
+                          total_amount:    { type: number }
+                          skipped:         { type: integer, description: Karyawan yang gagal eligibility check }
+
+  /bonus-runs/{id}/approve:
+    post:
+      tags: [Bonus Engine]
+      summary: Approve run (CALCULATED → APPROVED)
+      description: 'Permission: `bonus.approve` (4-eyes principle).'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /bonus-runs/{id}/mark-paid:
+    post:
+      tags: [Bonus Engine]
+      summary: Mark run as PAID (APPROVED → PAID)
+      description: 'Final state, tidak bisa rollback. Permission: `bonus.approve`.'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /bonus-runs/{id}/cancel:
+    post:
+      tags: [Bonus Engine]
+      summary: Cancel run
+      description: 'Cancel dari mana saja kecuali PAID. Wajib alasan ≥ 5 char.'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5 }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /bonus-runs/{id}/recipients:
+    get:
+      tags: [Bonus Engine]
+      summary: List recipients per run
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Recipients with snapshot per karyawan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/BonusRecipient' }
+
+  /bonus-recipients/{id}:
+    put:
+      tags: [Bonus Engine]
+      summary: Override amount / exclude recipient
+      description: 'Permission: `bonus.manage`. Hanya bisa selama run DRAFT/CALCULATED.'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:         { type: number, description: Override amount baru (cap_amount enforced) }
+                reason:         { type: string, description: Alasan override (audit) }
+                is_excluded:    { type: integer, enum: [0, 1] }
+                exclude_reason: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /employees/{id}/bonus-history:
+    get:
+      tags: [Bonus Engine]
+      summary: Riwayat bonus karyawan (Sprint 20+)
+      description: |
+        Lookup riwayat bonus untuk satu karyawan lintas-run. Permission:
+        self-access (employee_id == tenant.employee_id) atau `bonus.view`.
+        Self-access force `include_pending=false` (confidential pre-approval).
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: limit,           in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: include_pending, in: query, schema: { type: boolean, default: false }, description: Include DRAFT/CALCULATED (HR only) }
+      responses:
+        '200':
+          description: History dengan stats aggregate
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          history:
+                            type: array
+                            items: { $ref: '#/components/schemas/BonusHistoryItem' }
+                          stats:
+                            type: object
+                            properties:
+                              total_amount:    { type: number }
+                              count:           { type: integer }
+                              by_kind:
+                                type: object
+                                additionalProperties: { type: number }
+                              include_pending: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+# ─── Components ──────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PerPage:
+      name: per_page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    Success:
+      description: Operasi sukses
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+    Unauthorized:
+      description: Token tidak valid / expired
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Tidak punya permission untuk action ini
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Resource tidak ditemukan
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ValidationError:
+      description: Input tidak valid
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  errors:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items: { type: string }
+    RateLimited:
+      description: Terlalu banyak request
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Detik sebelum boleh retry
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [success], example: success }
+        message: { type: string }
+        data: {}
+
+    ErrorEnvelope:
+      type: object
+      required: [status, message]
+      properties:
+        status:  { type: string, enum: [error] }
+        code:    { type: string, example: VALIDATION_FAILED }
+        message: { type: string }
+        errors:
+          type: object
+          description: Map field → list error message
+
+    PaginatedEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            meta:
+              type: object
+              properties:
+                total: { type: integer }
+                page: { type: integer }
+                per_page: { type: integer }
+                total_pages: { type: integer }
+
+    LoginSuccessResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                access_token:  { type: string }
+                refresh_token: { type: string }
+                token_type:    { type: string, example: Bearer }
+                expires_in:    { type: integer, example: 3600 }
+                user: { $ref: '#/components/schemas/User' }
+
+    TwoFactorChallengeResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [twofa_required] }
+        challenge: { type: string, description: Token untuk submit ke /auth/verify-2fa }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string, format: email }
+        name: { type: string }
+        company_id: { type: integer }
+        employee_id: { type: integer, nullable: true }
+        roles:
+          type: array
+          items: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        is_2fa_enabled: { type: boolean }
+        avatar_url: { type: string, nullable: true }
+
+    Employee:
+      type: object
+      properties:
+        id: { type: integer }
+        nik: { type: string, example: EMP001 }
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        gender: { type: string, enum: [M, F] }
+        birth_date: { type: string, format: date }
+        join_date: { type: string, format: date }
+        resign_date: { type: string, format: date, nullable: true }
+        employment_status:
+          type: string
+          enum: [PKWTT, PKWT, MAGANG, HARIAN, OUTSOURCING]
+        branch_id: { type: integer }
+        department_id: { type: integer }
+        position_id: { type: integer }
+        job_grade_id: { type: integer, nullable: true }
+        basic_salary: { type: integer, example: 5000000 }
+        is_active: { type: integer, enum: [0, 1] }
+
+    EmployeeCreate:
+      type: object
+      required: [name, email, gender, birth_date, join_date, branch_id, department_id, position_id, employment_status]
+      properties:
+        nik: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        gender: { type: string, enum: [M, F] }
+        birth_date: { type: string, format: date }
+        join_date: { type: string, format: date }
+        employment_status: { type: string, enum: [PKWTT, PKWT, MAGANG, HARIAN, OUTSOURCING] }
+        branch_id: { type: integer }
+        department_id: { type: integer }
+        position_id: { type: integer }
+        job_grade_id: { type: integer }
+        basic_salary: { type: integer }
+
+    Attendance:
+      type: object
+      properties:
+        id: { type: integer }
+        employee_id: { type: integer }
+        work_date: { type: string, format: date }
+        clock_in_at: { type: string, format: date-time, nullable: true }
+        clock_out_at: { type: string, format: date-time, nullable: true }
+        late_minutes: { type: integer }
+        early_leave_minutes: { type: integer }
+        status: { type: string, enum: [PRESENT, LATE, ABSENT, LEAVE, HOLIDAY] }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        anomaly_score: { type: integer, description: 0-100, semakin tinggi semakin mencurigakan }
+        notes: { type: string, nullable: true }
+
+    Leave:
+      type: object
+      properties:
+        id: { type: integer }
+        employee_id: { type: integer }
+        leave_type_id: { type: integer }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        days: { type: number, format: float }
+        half_day: { type: string, enum: [NONE, MORNING, AFTERNOON] }
+        reason: { type: string }
+        status: { type: string, enum: [DRAFT, PENDING, APPROVED, REJECTED, CANCELED] }
+        approver_id: { type: integer, nullable: true }
+        approved_at: { type: string, format: date-time, nullable: true }
+        attachment_path: { type: string, nullable: true }
+
+    # ─── Bonus Engine schemas (Sprint 16+ → 21+) ───────────────────
+    BonusSchemeInput:
+      type: object
+      required: [code, name, formula_type]
+      properties:
+        code: { type: string, maxLength: 50, example: ANN-2027 }
+        name: { type: string, maxLength: 200, example: Annual Bonus 2027 }
+        kind:
+          type: string
+          enum: [ANNUAL, KPI, MILESTONE, SIGNON, RETENTION, DISCRETIONARY]
+          default: DISCRETIONARY
+        formula_type:
+          type: string
+          enum: [FIXED_AMOUNT, PCT_OF_BASIC, PCT_OF_GROSS, TENURE_BASED, KPI_SCORE, FORMULA_EXPR]
+        formula_value: { type: number, description: Nilai formula (persen / nominal / rate) }
+        formula_expr:
+          type: string
+          description: 'Dipakai jika formula_type=FORMULA_EXPR. Variable: basic,gross,tenure_months,tenure_years,kpi_score,value'
+        cap_amount: { type: number, nullable: true, description: Batas maksimal nominal per karyawan }
+        tax_treatment:
+          type: string
+          enum: [NORMAL, NON_TAXABLE, GROSS_UP, NET]
+          default: NORMAL
+        description: { type: string, nullable: true }
+        is_active: { type: integer, enum: [0, 1], default: 1 }
+        eligibility:
+          type: object
+          description: 'Filter eligibility (whitelist). Kosong = semua eligible'
+          properties:
+            employment_status:
+              type: array
+              items: { type: string }
+            min_tenure_months: { type: integer, minimum: 0 }
+            exclude_resigned: { type: boolean }
+            department_ids:
+              type: array
+              items: { type: integer }
+            branch_ids:
+              type: array
+              items: { type: integer }
+            grade_ids:
+              type: array
+              items: { type: integer }
+            position_ids:
+              type: array
+              items: { type: integer }
+
+    BonusScheme:
+      allOf:
+        - $ref: '#/components/schemas/BonusSchemeInput'
+        - type: object
+          properties:
+            id: { type: integer }
+            company_id: { type: integer }
+            created_by: { type: integer, nullable: true }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+            deleted_at: { type: string, format: date-time, nullable: true }
+
+    BonusRun:
+      type: object
+      properties:
+        id: { type: integer }
+        company_id: { type: integer }
+        bonus_scheme_id: { type: integer }
+        payroll_period_id: { type: integer, nullable: true, description: Linked payroll period untuk auto-merge ke payslip }
+        name: { type: string }
+        reference_date: { type: string, format: date }
+        pay_date: { type: string, format: date }
+        period_year: { type: integer }
+        status: { type: string, enum: [DRAFT, CALCULATED, APPROVED, PAID, CANCELLED] }
+        total_amount: { type: number }
+        recipient_count: { type: integer }
+        notes: { type: string, nullable: true }
+        calculated_by: { type: integer, nullable: true }
+        calculated_at: { type: string, format: date-time, nullable: true }
+        approved_by: { type: integer, nullable: true }
+        approved_at: { type: string, format: date-time, nullable: true }
+        paid_by: { type: integer, nullable: true }
+        paid_at: { type: string, format: date-time, nullable: true }
+        cancelled_by: { type: integer, nullable: true }
+        cancelled_at: { type: string, format: date-time, nullable: true }
+        cancellation_reason: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BonusRecipient:
+      type: object
+      properties:
+        id: { type: integer }
+        bonus_run_id: { type: integer }
+        company_id: { type: integer }
+        employee_id: { type: integer }
+        employee_number: { type: string }
+        employee_name: { type: string }
+        department_name: { type: string, nullable: true }
+        position_name: { type: string, nullable: true }
+        tenure_months: { type: integer }
+        monthly_salary: { type: number }
+        amount: { type: number }
+        amount_capped: { type: integer, enum: [0, 1] }
+        amount_overridden: { type: integer, enum: [0, 1] }
+        override_reason: { type: string, nullable: true }
+        is_excluded: { type: integer, enum: [0, 1] }
+        exclude_reason: { type: string, nullable: true }
+        breakdown:
+          type: object
+          description: Formula computation steps + inputs (decoded dari breakdown_json)
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BonusHistoryItem:
+      type: object
+      properties:
+        id: { type: integer, description: bonus_recipients.id }
+        bonus_run_id: { type: integer }
+        amount: { type: number }
+        amount_capped: { type: integer, enum: [0, 1] }
+        amount_overridden: { type: integer, enum: [0, 1] }
+        is_excluded: { type: integer, enum: [0, 1] }
+        tenure_months: { type: integer }
+        monthly_salary: { type: number }
+        run_name: { type: string }
+        run_status: { type: string, enum: [DRAFT, CALCULATED, APPROVED, PAID, CANCELLED] }
+        reference_date: { type: string, format: date }
+        pay_date: { type: string, format: date }
+        period_year: { type: integer }
+        payroll_period_id: { type: integer, nullable: true }
+        scheme_code: { type: string, nullable: true }
+        scheme_name: { type: string, nullable: true }
+        scheme_kind: { type: string, nullable: true }
+        tax_treatment: { type: string, enum: [NORMAL, NON_TAXABLE, GROSS_UP, NET] }
+        breakdown:
+          type: object
+          description: Decoded recipient breakdown_json
+        paid_at: { type: string, format: date-time, nullable: true }
+        recipient_at: { type: string, format: date-time, nullable: true }

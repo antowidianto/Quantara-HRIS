@@ -1,0 +1,49 @@
+# HRIS Backend — Dockerfile DEVELOPMENT.
+#
+# Image untuk dev: PHP 8.2 + Composer + extensions yang dibutuhkan CI4.
+# Source di-mount via volume di docker-compose.yml (bukan COPY) supaya
+# edit di host langsung kebaca tanpa rebuild.
+#
+# Untuk PRODUCTION pakai Dockerfile (multi-stage, opcache enabled).
+
+FROM php:8.2-cli
+
+# Install OS deps + ekstensi PHP yang dibutuhkan CI4 + HRIS:
+#   - mysqli         → MySQL connection
+#   - intl           → CodeIgniter intl helper
+#   - gd             → image processing (avatar resize)
+#   - zip            → phpoffice/phpspreadsheet
+#   - pdo_mysql      → fallback DB driver
+#   - mbstring/exif  → built-in di base image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        unzip \
+        libicu-dev \
+        libzip-dev \
+        libpng-dev \
+        libjpeg-dev \
+        libfreetype6-dev \
+        libonig-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) \
+        mysqli \
+        pdo_mysql \
+        intl \
+        gd \
+        zip \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Composer (copy from official image, lebih cepat & aman daripada install via curl)
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# Workdir di-mount via docker-compose volume
+WORKDIR /var/www/html
+
+# Default port spark serve
+EXPOSE 8080
+
+# Command default di-override oleh docker-compose.yml (composer install + serve)
+CMD ["php", "spark", "serve", "--host", "0.0.0.0", "--port", "8080"]

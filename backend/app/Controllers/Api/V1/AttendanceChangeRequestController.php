@@ -26,6 +26,8 @@ use Config\Services;
  */
 class AttendanceChangeRequestController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     /** Berapa hari ke belakang yang masih boleh diajukan koreksinya. */
     private const MAX_BACKDATE_DAYS = 90;
     /** Berapa hari ke depan yang masih boleh diajukan (mis. izin terjadwal). */
@@ -353,6 +355,24 @@ class AttendanceChangeRequestController extends ApiController
                 $cr,
                 "Menyetujui pengajuan {$cr['request_number']}: {$note}"
             );
+
+        // Sprint 15+ — webhook outbound `attendance.change_approved`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::ATTENDANCE_CHANGE_APPROVED,
+            (int) $cr['company_id'],
+            [
+                'change_request_id' => $id,
+                'request_number'    => $cr['request_number'] ?? null,
+                'attendance_id'     => $attId,
+                'employee_id'       => (int) $cr['employee_id'],
+                'work_date'         => $cr['work_date'],
+                'requested_clock_in'  => $cr['requested_clock_in'] ?? null,
+                'requested_clock_out' => $cr['requested_clock_out'] ?? null,
+                'requested_status'  => $cr['requested_status'] ?? null,
+                'approved_by'       => $this->userId(),
+                'approved_at'       => date('c'),
+            ],
+        );
 
         return $this->ok(['attendance_id' => $attId], 'Pengajuan disetujui & absensi diperbarui');
     }

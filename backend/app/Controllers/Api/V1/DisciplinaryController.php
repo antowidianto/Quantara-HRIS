@@ -23,6 +23,8 @@ use Config\Services;
  */
 class DisciplinaryController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     private const VALID_LEVELS = ['VERBAL', 'SP1', 'SP2', 'SP3', 'SUSPEND', 'TERMINATION'];
     private const VALID_STATUSES = ['DRAFT', 'ACTIVE', 'EXPIRED', 'REVOKED'];
 
@@ -206,6 +208,29 @@ class DisciplinaryController extends ApiController
             severity: 'WARNING'
         );
 
+        // Sprint 14+ — webhook outbound `disciplinary.sp_issued`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::SP_ISSUED,
+            $companyId,
+            [
+                'disciplinary_id'  => $id,
+                'reference_number' => $referenceNumber,
+                'level'            => $level,
+                'employee'         => [
+                    'id'              => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'name'            => $emp['full_name'] ?? null,
+                ],
+                'subject'          => $data['subject'],
+                'incident_date'    => $data['incident_date'],
+                'effective_date'   => $effectiveDate,
+                'expires_at'       => $expiresAt,
+                'category_id'      => ! empty($data['category_id']) ? (int) $data['category_id'] : null,
+                'issued_by'        => $this->userId(),
+                'issued_at'        => $now,
+            ],
+        );
+
         // Kalau levelnya SP3, beri tahu user bahwa pelanggaran selanjutnya
         // mengarah ke PHK
         $row = $db->table('disciplinary_records')->where('id', $id)->get()->getRowArray();
@@ -308,6 +333,22 @@ class DisciplinaryController extends ApiController
             description: "Membatalkan {$row['level']} {$row['reference_number']}",
             severity: 'WARNING'
         );
+
+        // Sprint 15+ — webhook outbound `disciplinary.sp_revoked`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::SP_REVOKED,
+            (int) $row['company_id'],
+            [
+                'disciplinary_id'  => (int) $id,
+                'reference_number' => $row['reference_number'] ?? null,
+                'level'            => $row['level'] ?? null,
+                'employee_id'      => isset($row['employee_id']) ? (int) $row['employee_id'] : null,
+                'reason'           => trim($data['reason']),
+                'revoked_by'       => $this->userId(),
+                'revoked_at'       => $now,
+            ],
+        );
+
         return $this->ok(null, 'SP dibatalkan');
     }
 

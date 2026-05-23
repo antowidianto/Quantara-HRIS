@@ -218,21 +218,48 @@ class AttendanceController extends ApiController
 
         $companyId = (int) $emp['company_id'];
         $today = date('Y-m-d');
+        $clockInTs = time();
 
-        $existing = $db->table('attendances')
-            ->where('employee_id', $employeeId)
-            ->where('work_date', $today)
-            ->get()->getRowArray();
-        if ($existing && $existing['clock_in_at']) {
-            return $this->fail('Already clocked in today', 409, 'ALREADY_CLOCKED_IN');
-        }
+        // Sprint 5-6 — resolve effective work date & shift dengan support
+        // shift cross-midnight (overnight 22:00→06:00). Kalau shift normal,
+        // workDate = today. Kalau overnight & clock-in dini hari, workDate
+        // = kemarin (tanggal mulai shift).
+        $shiftHelper = Services::shiftTime();
 
         // Determine shift via ShiftResolver — prioritas:
         // shift_schedules → employees.default_shift_id → pattern → assignment
         // → shifts.is_default → fallback shift aktif pertama.
+        // Resolve untuk today dulu; kalau overnight dan clock-in dini hari,
+        // re-resolve untuk yesterday (shift kemarin yang masih aktif).
         $resolved = Services::shiftResolver()->resolve((int) $employeeId, $today);
         $shift   = $resolved['shift'] ?? null;
+        $workDate = $today;
+
+        if ($shift && $shiftHelper->isOvernight($shift)) {
+            $effective = $shiftHelper->effectiveWorkDate($shift, $clockInTs);
+            if ($effective !== $today) {
+                // Clock-in dini hari → shift mulai kemarin. Re-resolve
+                // untuk pastikan kemarin memang assigned shift overnight.
+                $resolvedYesterday = Services::shiftResolver()->resolve((int) $employeeId, $effective);
+                if (! empty($resolvedYesterday['shift'])
+                    && $shiftHelper->isOvernight($resolvedYesterday['shift'])
+                ) {
+                    $resolved = $resolvedYesterday;
+                    $shift = $resolved['shift'];
+                    $workDate = $effective;
+                }
+            }
+        }
         $shiftId = $shift['id'] ?? null;
+
+        // Cek duplicate clock-in dengan workDate yang sudah resolved
+        $existing = $db->table('attendances')
+            ->where('employee_id', $employeeId)
+            ->where('work_date', $workDate)
+            ->get()->getRowArray();
+        if ($existing && $existing['clock_in_at']) {
+            return $this->fail('Already clocked in today', 409, 'ALREADY_CLOCKED_IN');
+        }
 
         // Kalau resolver bilang hari ini OFF / holiday tapi karyawan tetap
         // memutuskan clock-in (mis. lembur hari libur), kita izinkan tapi
@@ -242,17 +269,13 @@ class AttendanceController extends ApiController
             // perhitungan late.
         }
 
-        // Late minutes
+        // Late minutes — pakai ShiftTimeHelper agar overnight shift di-handle benar
         $lateMin = 0;
         $status = 'PRESENT';
         if ($shift) {
-            $shiftStart = strtotime($today . ' ' . $shift['start_time']);
-            $clockIn = time();
             $tolerance = (int) ($shift['late_tolerance_minutes'] ?? 0);
-            if ($clockIn > $shiftStart + $tolerance * 60) {
-                $lateMin = (int) ceil(($clockIn - $shiftStart) / 60);
-                $status = 'LATE';
-            }
+            $lateMin = $shiftHelper->lateMinutes($shift, $clockInTs, $tolerance);
+            if ($lateMin > 0) $status = 'LATE';
         }
 
         // Geofence (optional) — track distance untuk anti-cheat juga
@@ -312,7 +335,7 @@ class AttendanceController extends ApiController
             'company_id'   => $companyId,
             'employee_id'  => $employeeId,
             'shift_id'     => $shiftId,
-            'work_date'    => $today,
+            'work_date'    => $workDate,
             'clock_in_at'  => date('Y-m-d H:i:s'),
             'clock_in_lat' => $data['lat'] ?? null,
             'clock_in_lng' => $data['lng'] ?? null,
@@ -369,26 +392,44 @@ class AttendanceController extends ApiController
         }
         $db = \Config\Database::connect();
         $today = date('Y-m-d');
+        $now = time();
+
+        // Sprint 5-6 — cari attendance row aktif: prioritas today (open
+        // clock-in tanpa clock-out), lalu kemarin (untuk overnight shift
+        // yang clock-out keesokan paginya).
         $row = $db->table('attendances')
             ->where('employee_id', $employeeId)
             ->where('work_date', $today)
+            ->where('clock_in_at IS NOT NULL')
             ->get()->getRowArray();
+        if (! $row || $row['clock_out_at']) {
+            // Kemungkinan shift overnight → cari row kemarin yang masih open
+            $yesterday = date('Y-m-d', $now - 86400);
+            $candidate = $db->table('attendances')
+                ->where('employee_id', $employeeId)
+                ->where('work_date', $yesterday)
+                ->where('clock_in_at IS NOT NULL')
+                ->where('clock_out_at IS NULL')
+                ->get()->getRowArray();
+            if ($candidate) $row = $candidate;
+        }
         if (! $row || ! $row['clock_in_at']) return $this->fail('No clock-in found for today', 400, 'NO_CLOCK_IN');
         if ($row['clock_out_at']) return $this->fail('Already clocked out', 409, 'ALREADY_CLOCKED_OUT');
 
-        $now = time();
         $workMinutes = (int) round(($now - strtotime($row['clock_in_at'])) / 60);
 
-        // Early leave
+        // Early leave — pakai ShiftTimeHelper supaya overnight shift dihitung dari
+        // shift end keesokan paginya, bukan today's date.
         $earlyLeave = 0;
         if ($row['shift_id']) {
             $shift = $db->table('shifts')->where('id', $row['shift_id'])->get()->getRowArray();
             if ($shift) {
-                $shiftEnd = strtotime($today . ' ' . $shift['end_time']);
+                $shiftHelper = Services::shiftTime();
+                $shiftStart = strtotime($row['clock_in_at']);
+                // Recompute shiftStart canonical dari work_date + start_time
+                $canonicalStart = $shiftHelper->effectiveShiftStart($shift, $shiftStart);
                 $tol = (int) ($shift['early_leave_tolerance_minutes'] ?? 0);
-                if ($now < $shiftEnd - $tol * 60) {
-                    $earlyLeave = (int) ceil(($shiftEnd - $now) / 60);
-                }
+                $earlyLeave = $shiftHelper->earlyLeaveMinutes($shift, $now, $canonicalStart, $tol);
             }
         }
 

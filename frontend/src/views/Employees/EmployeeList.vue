@@ -8,7 +8,7 @@ import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   PlusIcon, MagnifyingGlassIcon, PencilIcon, EyeIcon, TrashIcon,
-  FunnelIcon, XMarkIcon, ArrowPathIcon,
+  FunnelIcon, XMarkIcon, ArrowPathIcon, GiftIcon,
 } from '@heroicons/vue/24/outline'
 import EmployeeModal from './EmployeeModal.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
@@ -224,14 +224,24 @@ function resetFilters() {
 // Mapping nilai untuk badge employment_status warna-warni.
 function statusBadgeClass(s) {
   switch (s) {
-    case 'PKWTT':      return 'bg-emerald-100 text-emerald-800'
-    case 'PKWT':       return 'bg-blue-100 text-blue-800'
-    case 'PROBATION':  return 'bg-amber-100 text-amber-800'
-    case 'HARIAN':     return 'bg-slate-100 text-slate-700'
-    case 'MAGANG':     return 'bg-purple-100 text-purple-800'
-    case 'OUTSOURCING':return 'bg-pink-100 text-pink-800'
-    default:           return 'bg-gray-100 text-gray-700'
+    case 'PKWTT':      return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    case 'PKWT':       return 'bg-blue-50 text-blue-700 border-blue-200'
+    case 'PROBATION':  return 'bg-amber-50 text-amber-700 border-amber-200'
+    case 'HARIAN':     return 'bg-slate-50 text-slate-700 border-slate-200'
+    case 'MAGANG':     return 'bg-purple-50 text-purple-700 border-purple-200'
+    case 'OUTSOURCING':return 'bg-pink-50 text-pink-700 border-pink-200'
+    default:           return 'bg-gray-50 text-gray-700 border-gray-200'
   }
+}
+
+/**
+ * Bikin inisial dari nama lengkap untuk avatar fallback.
+ * "Agus Saputra" → "AS", "Eko" → "E".
+ */
+function getInitials(name) {
+  if (! name) return '?'
+  return name.split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(s => s[0]).join('').toUpperCase()
 }
 </script>
 
@@ -417,39 +427,67 @@ function statusBadgeClass(s) {
                 </div>
               </td>
             </tr>
-            <tr v-for="e in items" :key="e.id" class="hover:bg-gray-50 cursor-pointer" @click="openView(e.id)">
-              <td class="font-mono text-sm">{{ e.employee_number }}</td>
+            <tr v-for="e in items" :key="e.id"
+                class="hover:bg-primary-50/30 cursor-pointer transition-colors"
+                @click="openView(e.id)">
+              <td class="font-mono text-xs text-gray-600">{{ e.employee_number }}</td>
               <td>
-                <div class="font-medium">{{ e.full_name }}</div>
-                <div class="text-xs text-gray-500">{{ e.email }}</div>
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white flex items-center justify-center text-xs font-semibold overflow-hidden">
+                    <img v-if="e.avatar_url" :src="e.avatar_url" :alt="e.full_name" class="w-9 h-9 rounded-full object-cover" />
+                    <span v-else>{{ getInitials(e.full_name) }}</span>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-medium text-gray-900 truncate">{{ e.full_name }}</div>
+                    <div class="text-xs text-gray-500 truncate">{{ e.email || '—' }}</div>
+                  </div>
+                </div>
               </td>
-              <td class="text-sm">{{ e.branch_name || '-' }}</td>
-              <td class="text-sm">{{ e.department_name || '-' }}</td>
-              <td class="text-sm">{{ e.position_name || '-' }}</td>
-              <td class="text-sm">
-                <span v-if="e.job_grade_code" class="badge-gray font-mono text-xs">{{ e.job_grade_code }}</span>
-                <span v-else class="text-gray-400">-</span>
+              <td class="text-sm text-gray-700">{{ e.branch_name || '—' }}</td>
+              <td class="text-sm text-gray-700">{{ e.department_name || '—' }}</td>
+              <td class="text-sm text-gray-700">{{ e.position_name || '—' }}</td>
+              <td>
+                <span v-if="e.job_grade_code"
+                      class="inline-flex items-center px-2 py-0.5 rounded font-mono text-xs bg-slate-100 text-slate-700 border border-slate-200">
+                  {{ e.job_grade_code }}
+                </span>
+                <span v-else class="text-gray-300">—</span>
               </td>
               <td>
-                <div class="flex flex-wrap gap-1">
-                  <span :class="e.is_active ? 'badge-green' : 'badge-gray'">
+                <div class="flex flex-col gap-1">
+                  <span :class="['inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit',
+                                 e.is_active
+                                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                   : 'bg-gray-100 text-gray-500 border-gray-200']">
+                    <span :class="e.is_active ? 'w-1.5 h-1.5 rounded-full bg-emerald-500' : 'w-1.5 h-1.5 rounded-full bg-gray-400'"></span>
                     {{ e.is_active ? 'Aktif' : 'Non-aktif' }}
                   </span>
-                  <span class="badge text-xs px-2 py-0.5 rounded font-medium" :class="statusBadgeClass(e.employment_status)">
+                  <span :class="['text-xs px-2 py-0.5 rounded-full border font-medium w-fit',
+                                 statusBadgeClass(e.employment_status)]">
                     {{ e.employment_status }}
                   </span>
                 </div>
               </td>
-              <td class="text-sm">{{ fmtDate(e.join_date) }}</td>
+              <td class="text-sm text-gray-700 whitespace-nowrap">{{ fmtDate(e.join_date) }}</td>
               <td class="text-right" @click.stop>
-                <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openView(e.id)" title="Detail">
+                <div class="inline-flex gap-1">
+                  <button class="p-1.5 rounded hover:bg-primary-100 text-gray-500 hover:text-primary-600 transition"
+                          @click="openView(e.id)" title="Detail">
                     <EyeIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="auth.can('employee.update')" class="text-gray-500 hover:text-primary-600" @click="openEdit(e.id)" title="Edit">
+                  <button v-if="auth.can('bonus.view')"
+                          class="p-1.5 rounded hover:bg-amber-100 text-gray-500 hover:text-amber-600 transition"
+                          @click="$router.push(`/employees/${e.id}/bonus-history`)" title="Bonus history">
+                    <GiftIcon class="w-4 h-4" />
+                  </button>
+                  <button v-if="auth.can('employee.update')"
+                          class="p-1.5 rounded hover:bg-primary-100 text-gray-500 hover:text-primary-600 transition"
+                          @click="openEdit(e.id)" title="Edit">
                     <PencilIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="auth.can('employee.delete')" @click="removeEmployee(e)" class="text-gray-500 hover:text-red-600" title="Nonaktifkan">
+                  <button v-if="auth.can('employee.delete')"
+                          class="p-1.5 rounded hover:bg-red-100 text-gray-500 hover:text-red-600 transition"
+                          @click="removeEmployee(e)" title="Nonaktifkan">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>

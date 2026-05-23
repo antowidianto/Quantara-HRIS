@@ -9,6 +9,11 @@ module.exports = {
   extends: [
     'eslint:recommended',
     'plugin:vue/vue3-essential',
+    // Prettier compat — disable ESLint rules yang konflik dengan
+    // Prettier (mis. indentation, quotes, comma-dangle). Format murni
+    // urusan Prettier; ESLint fokus ke logic/bug rules.
+    // Harus terakhir di list extends.
+    'prettier',
   ],
   parserOptions: {
     ecmaVersion: 'latest',

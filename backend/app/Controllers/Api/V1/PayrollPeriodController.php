@@ -6,6 +6,8 @@ use Config\Services;
 
 class PayrollPeriodController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -44,12 +46,38 @@ class PayrollPeriodController extends ApiController
         $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return null;
-        $code = $data['code'] ?? ('P-' . $data['period_year'] . '-' . str_pad((string) ($data['period_month'] ?? 0), 2, '0', STR_PAD_LEFT));
+
+        $type = $data['type'] ?? 'MONTHLY';
+
+        // Auto-generate code yang aman dari collision lintas tipe.
+        // Format: {PREFIX}-{YEAR}-{MM}[-N] — N hanya muncul kalau ada konflik
+        // (mis. dua BONUS di bulan sama). Kalau user kirim `code` eksplisit,
+        // kita pakai apa adanya tanpa suffix otomatis.
+        if (! empty($data['code'])) {
+            $code = (string) $data['code'];
+        } else {
+            $code = $this->generateUniquePeriodCode($db, $companyId, $type, (int) $data['period_year'], (int) ($data['period_month'] ?? 0));
+        }
+
+        // Pre-check duplicate supaya error message ramah (bukan 500 SQL exception).
+        $exists = $db->table('payroll_periods')
+            ->where('company_id', $companyId)
+            ->where('code', $code)
+            ->countAllResults() > 0;
+        if ($exists) {
+            return $this->fail(
+                "Kode periode '{$code}' sudah ada. Hapus atau ubah periode lama, atau tentukan kode unik.",
+                422,
+                'PERIOD_DUPLICATE',
+                ['code' => 'duplicate']
+            );
+        }
+
         $insert = [
             'company_id'   => $companyId,
             'code'         => $code,
             'name'         => $data['name'],
-            'type'         => $data['type'] ?? 'MONTHLY',
+            'type'         => $type,
             'period_year'  => $data['period_year'],
             'period_month' => $data['period_month'] ?? null,
             'start_date'   => $data['start_date'],
@@ -62,7 +90,23 @@ class PayrollPeriodController extends ApiController
             'created_at'   => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ];
-        $db->table('payroll_periods')->insert($insert);
+
+        try {
+            $db->table('payroll_periods')->insert($insert);
+        } catch (\CodeIgniter\Database\Exceptions\DatabaseException $e) {
+            // Last-line defense kalau ada race condition di antara pre-check & insert.
+            if (str_contains($e->getMessage(), 'Duplicate entry')) {
+                return $this->fail(
+                    "Periode dengan kode '{$code}' sudah ada untuk perusahaan ini.",
+                    422,
+                    'PERIOD_DUPLICATE',
+                    ['code' => 'duplicate']
+                );
+            }
+            log_message('error', 'Period create failed: ' . $e->getMessage());
+            return $this->fail('Gagal membuat periode: ' . $e->getMessage(), 500);
+        }
+
         $id = (int) $db->insertID();
         Services::audit()
             ->forModule('PAYROLL')
@@ -72,7 +116,51 @@ class PayrollPeriodController extends ApiController
                 $insert,
                 "Membuat periode payroll: {$insert['name']} ({$insert['start_date']} s/d {$insert['end_date']})"
             );
-        return $this->ok(['id' => $id], 'Period created', 201);
+        return $this->ok(['id' => $id, 'code' => $code], 'Period created', 201);
+    }
+
+    /**
+     * Generate kode periode unik per (company, type, year, month).
+     *
+     * Prefix per tipe:
+     *   MONTHLY    → P
+     *   BI_WEEKLY  → BW
+     *   WEEKLY     → WK
+     *   THR        → THR
+     *   BONUS      → BNS
+     *
+     * Bila ada konflik (mis. multiple BONUS di bulan yang sama), tambahkan
+     * suffix `-2`, `-3`, dst. sampai ketemu yang free. Maksimal 99 percobaan
+     * untuk safety; di atas itu controller akan biarkan caller ngirim `code`
+     * eksplisit.
+     */
+    private function generateUniquePeriodCode(
+        \CodeIgniter\Database\BaseConnection $db,
+        int $companyId,
+        string $type,
+        int $year,
+        int $month
+    ): string {
+        $prefix = match ($type) {
+            'BI_WEEKLY' => 'BW',
+            'WEEKLY'    => 'WK',
+            'THR'       => 'THR',
+            'BONUS'     => 'BNS',
+            default     => 'P',
+        };
+        $monthStr = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
+        $base     = sprintf('%s-%d-%s', $prefix, $year, $monthStr);
+
+        for ($i = 1; $i <= 99; $i++) {
+            $candidate = $i === 1 ? $base : ($base . '-' . $i);
+            $exists = $db->table('payroll_periods')
+                ->where('company_id', $companyId)
+                ->where('code', $candidate)
+                ->countAllResults() === 0;
+            if ($exists) return $candidate;
+        }
+        // Fallback: include timestamp untuk jamin unique.
+        return $base . '-' . substr((string) time(), -5);
     }
 
     public function update($id = null)
@@ -156,6 +244,42 @@ class PayrollPeriodController extends ApiController
                 description: 'Finalisasi & pembayaran payroll periode #' . $id,
                 severity: 'CRITICAL'
             );
+
+            // Sprint 14+ — webhook outbound `payroll.period_finalized`.
+            // Lookup periode untuk kirim metadata dasar (no PII slip).
+            $db = \Config\Database::connect();
+            $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+            if ($period) {
+                // Hitung ringkasan: total payslip + grand total net pay.
+                // NOTE: kolom di tabel `payslips` adalah `take_home_pay`
+                // (lihat migration 2024-01-01-000005_CreatePayrollTables).
+                // Sebelumnya pakai `net_pay` yang menyebabkan SQL error
+                // "Unknown column 'net_pay' in 'field list'" saat finalize.
+                $sum = $db->table('payslips')
+                    ->selectSum('take_home_pay', 'total_net')
+                    ->selectCount('id', 'count')
+                    ->where('payroll_period_id', $id)
+                    ->get()->getRowArray();
+
+                $this->dispatchWebhook(
+                    \App\Constants\WebhookEvent::PAYROLL_PERIOD_FINALIZED,
+                    (int) $period['company_id'],
+                    [
+                        'payroll_period_id' => $id,
+                        'name'              => $period['name'] ?? null,
+                        'period_year'       => isset($period['period_year']) ? (int) $period['period_year'] : null,
+                        'start_date'        => $period['start_date'] ?? null,
+                        'end_date'          => $period['end_date'] ?? null,
+                        'pay_date'          => $period['pay_date'] ?? null,
+                        'status'            => $period['status'] ?? 'PAID',
+                        'payslip_count'     => (int) ($sum['count'] ?? 0),
+                        'total_net_pay'     => (float) ($sum['total_net'] ?? 0),
+                        'finalized_by'      => $this->userId(),
+                        'finalized_at'      => date('c'),
+                    ],
+                );
+            }
+
             return $this->ok(null, 'Period finalized & payroll paid');
         } catch (\Throwable $e) {
             $audit->logFailure(

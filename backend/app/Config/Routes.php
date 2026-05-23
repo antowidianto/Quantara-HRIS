@@ -21,12 +21,14 @@ $routes->options('api/(:any)', static function () {
 $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static function ($routes) {
 
     // ─── Public (no auth) ───────────────────────────────────────────
+    // Sprint 3 — rate limit hardening: bucket khusus per endpoint
+    // sensitif (lebih ketat dari `login`). Lihat ThrottleFilter::bucketLimits.
     $routes->group('auth', static function ($routes) {
         $routes->post('login', 'AuthController::login', ['filter' => 'throttle:login']);
         $routes->post('refresh', 'AuthController::refresh');
-        $routes->post('forgot-password', 'AuthController::forgotPassword', ['filter' => 'throttle:login']);
-        $routes->post('reset-password', 'AuthController::resetPassword', ['filter' => 'throttle:login']);
-        $routes->post('verify-2fa', 'AuthController::verifyTwoFactor', ['filter' => 'throttle:login']);
+        $routes->post('forgot-password', 'AuthController::forgotPassword', ['filter' => 'throttle:forgot_password']);
+        $routes->post('reset-password', 'AuthController::resetPassword', ['filter' => 'throttle:password_reset']);
+        $routes->post('verify-2fa', 'AuthController::verifyTwoFactor', ['filter' => 'throttle:twofa']);
     });
 
     // Health check
@@ -40,12 +42,52 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     // Token HMAC + expiry pendek (lihat FileStorage::signedUrl) cover akses.
     $routes->get('files/serve', 'FileServeController::serve');
 
+    // ─── Inbound Webhook receiver (PUBLIC, signature-verified) ──────
+    // Sprint 14+. Sistem external (recruitment marketplace, accounting,
+    // partner HRIS) kirim event ke HRIS via HTTP POST + HMAC signature.
+    // Auth via X-HRIS-Signature + X-HRIS-Timestamp (lihat InboundWebhookController).
+    // Bucket throttle terpisah supaya retry sender tidak kena throttle:api global.
+    $routes->post('inbound/(:segment)', 'InboundWebhookController::receive/$1', [
+        'filter' => 'throttle:inbound_webhook',
+    ]);
+
     // ─── Career Portal (PUBLIC, no auth) ───────────────────────────
     // Lihat docs/CAREER_PORTAL.md. Endpoint dipisah dari group ber-JWT
     // karena pelamar tidak login. Throttle:api global filter sudah cover
     // basic abuse, dan CareerService punya rate-limit per IP per jam.
     $routes->post('careers/upload',                          'CareerPublicController::upload');
     $routes->get('careers/track/(:segment)',                 'CareerPublicController::track/$1');
+
+    // ─── Candidate Account (auth pelamar) ──────────────────────────
+    // Lihat docs/ONLINE_TEST.md. Endpoint registrasi/login PUBLIC tapi
+    // throttle khusus supaya tidak gampang di-brute-force / di-spam.
+    $routes->post('careers/account/reset-password',          'CandidateAuthController::resetPassword',
+        ['filter' => 'throttle:password_reset']);
+    $routes->post('careers/account/refresh',                 'CandidateAuthController::refresh');
+    $routes->post('careers/(:segment)/account/register',     'CandidateAuthController::register/$1',
+        ['filter' => 'throttle:login']);
+    $routes->post('careers/(:segment)/account/login',        'CandidateAuthController::login/$1',
+        ['filter' => 'throttle:login']);
+    $routes->post('careers/(:segment)/account/forgot-password', 'CandidateAuthController::forgotPassword/$1',
+        ['filter' => 'throttle:forgot_password']);
+
+    // Candidate-authenticated endpoints (filter candidatejwt)
+    $routes->group('careers/account', ['filter' => 'candidatejwt'], static function ($routes) {
+        $routes->post('logout',          'CandidateAuthController::logout');
+        $routes->get('me',               'CandidateAuthController::me');
+        $routes->post('change-password', 'CandidateAuthController::changePassword');
+
+        // Online tests (kandidat side)
+        $routes->get('tests',                                'CandidateOnlineTestController::listAssignments');
+        $routes->get('tests/(:num)',                         'CandidateOnlineTestController::showAssignment/$1');
+        $routes->post('tests/(:num)/start',                  'CandidateOnlineTestController::startAttempt/$1');
+        $routes->get('attempts/(:num)',                      'CandidateOnlineTestController::attemptState/$1');
+        $routes->post('attempts/(:num)/answer',              'CandidateOnlineTestController::saveAnswer/$1');
+        $routes->post('attempts/(:num)/submit',              'CandidateOnlineTestController::submitAttempt/$1');
+        $routes->post('attempts/(:num)/event',               'CandidateOnlineTestController::logEvent/$1');
+        $routes->get('attempts/(:num)/result',               'CandidateOnlineTestController::attemptResult/$1');
+    });
+
     // Detail & apply pakai 2 segmen slug
     $routes->post('careers/(:segment)/jobs/(:segment)/apply', 'CareerPublicController::apply/$1/$2');
     $routes->get('careers/(:segment)/jobs/(:segment)',        'CareerPublicController::jobDetail/$1/$2');
@@ -64,6 +106,21 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Foto profil — self-service upload/hapus, JPEG/PNG/WebP ≤ 2 MB.
         $routes->post('auth/me/avatar',   'AuthController::uploadAvatar');
         $routes->delete('auth/me/avatar', 'AuthController::deleteAvatar');
+
+        // ─── UU PDP (Sprint 4) — Data Subject Rights ───────────────
+        // Self-service untuk hak akses, hak penghapusan, dan record consent.
+        // Lihat docs/IMPROVEMENT_CHECKLIST.md section 3 + DataPrivacyService.
+        $routes->get('me/privacy/policy-version',  'PrivacyController::policyVersion');
+        $routes->get('me/privacy/consents',        'PrivacyController::consents');
+        $routes->post('me/privacy/consents',       'PrivacyController::recordConsent');
+        // Throttle export berat — sama bucket dengan endpoint export lain
+        $routes->get('me/data-export',             'PrivacyController::dataExport',     ['filter' => 'throttle:export']);
+        $routes->post('me/data-deletion-request',  'PrivacyController::requestDeletion');
+
+        // HR review penghapusan data (perlu permission `privacy.review`)
+        $routes->get('admin/privacy/deletion-requests',                 'PrivacyController::listRequests');
+        $routes->post('admin/privacy/deletion-requests/(:num)/review', 'PrivacyController::reviewRequest/$1');
+        $routes->post('admin/privacy/deletion-requests/(:num)/process','PrivacyController::processRequest/$1');
 
         // Master: Companies / Business Units
         $routes->resource('companies', ['controller' => 'CompanyController']);
@@ -138,6 +195,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->resource('leaves', ['controller' => 'LeaveController']);
         $routes->post('leaves/(:num)/approve', 'LeaveController::approve/$1');
         $routes->post('leaves/(:num)/reject', 'LeaveController::reject/$1');
+        // Sprint 17+ — self-cancel oleh karyawan (atau HR atas nama)
+        $routes->post('leaves/(:num)/cancel', 'LeaveController::cancel/$1');
         $routes->get('leave-balances/(:num)', 'LeaveController::balance/$1');
 
         // Overtime
@@ -156,9 +215,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('payroll-periods/(:num)/calculate',     'PayrollPeriodController::calculate/$1');
         $routes->post('payroll-periods/(:num)/finalize',      'PayrollPeriodController::finalize/$1');
         $routes->get('payroll-periods/(:num)/export-summary', 'PayrollPeriodController::exportSummary/$1');
-        $routes->get('payroll-periods/(:num)/bank-export',    'PayrollPeriodController::bankExport/$1');
-        $routes->get('payroll-periods/(:num)/pph21-export',   'PayrollPeriodController::pph21Export/$1');
-        $routes->get('payroll-periods/(:num)/bpjs-export',    'PayrollPeriodController::bpjsExport/$1');
+        // Sprint 3 — throttle berat export ke 10/jam per IP+path
+        $routes->get('payroll-periods/(:num)/bank-export',    'PayrollPeriodController::bankExport/$1',  ['filter' => 'throttle:export']);
+        $routes->get('payroll-periods/(:num)/pph21-export',   'PayrollPeriodController::pph21Export/$1', ['filter' => 'throttle:export']);
+        $routes->get('payroll-periods/(:num)/bpjs-export',    'PayrollPeriodController::bpjsExport/$1',  ['filter' => 'throttle:export']);
         $routes->resource('payroll-periods', ['controller' => 'PayrollPeriodController']);
         $routes->get('payslips', 'PayslipController::index');
         $routes->get('payslips/my', 'PayslipController::my');
@@ -176,6 +236,35 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('notifications/unread-count', 'NotificationController::unreadCount');
         $routes->post('notifications/(:num)/read', 'NotificationController::markRead/$1');
         $routes->post('notifications/read-all', 'NotificationController::markAllRead');
+
+        // Sprint 7 — Web Push subscription endpoints
+        $routes->get('notifications/push-public-key', 'WebPushController::publicKey');
+        $routes->post('notifications/push-subscribe', 'WebPushController::subscribe');
+        $routes->delete('notifications/push-subscribe', 'WebPushController::unsubscribe');
+
+        // Sprint 11+ — Webhook outbound (admin-managed integrations).
+        // Endpoint khusus didefinisikan SEBELUM /webhooks/(:num) supaya
+        // path /event-types tidak nyangkut sebagai resource id.
+        $routes->get('webhooks/event-types',                 'WebhookController::eventTypes');
+        $routes->get('webhooks',                             'WebhookController::index');
+        $routes->post('webhooks',                            'WebhookController::create');
+        $routes->get('webhooks/(:num)',                      'WebhookController::show/$1');
+        $routes->put('webhooks/(:num)',                      'WebhookController::update/$1');
+        $routes->delete('webhooks/(:num)',                   'WebhookController::delete/$1');
+        $routes->post('webhooks/(:num)/rotate-secret',       'WebhookController::rotateSecret/$1');
+        $routes->get('webhooks/(:num)/deliveries',           'WebhookController::deliveries/$1');
+
+        // Sprint 14+ — Inbound Webhook admin CRUD (counterpart untuk
+        // outbound /webhooks). Receiver-nya public di atas (lihat
+        // /api/v1/inbound/{slug}). Pattern routing sama: endpoint khusus
+        // (events) di atas pattern /(:num).
+        $routes->get('inbound-webhooks',                     'InboundWebhookController::index');
+        $routes->post('inbound-webhooks',                    'InboundWebhookController::create');
+        $routes->get('inbound-webhooks/(:num)',              'InboundWebhookController::show/$1');
+        $routes->put('inbound-webhooks/(:num)',              'InboundWebhookController::update/$1');
+        $routes->delete('inbound-webhooks/(:num)',           'InboundWebhookController::delete/$1');
+        $routes->post('inbound-webhooks/(:num)/rotate-secret','InboundWebhookController::rotateSecret/$1');
+        $routes->get('inbound-webhooks/(:num)/events',       'InboundWebhookController::events/$1');
 
         // Notification preferences (per user, multi-channel)
         // Lihat docs/AUDIT.md item K
@@ -197,7 +286,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Audit log (admin only)
         $routes->get('audit-logs', 'AuditLogController::index');
         $routes->get('audit-logs/stats', 'AuditLogController::stats');
-        $routes->get('audit-logs/export', 'AuditLogController::export');
+        // Sprint 3 — throttle berat export
+        $routes->get('audit-logs/export', 'AuditLogController::export', ['filter' => 'throttle:export']);
         $routes->get('audit-logs/(:num)', 'AuditLogController::show/$1');
 
         // Settings (per company)
@@ -374,6 +464,40 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('candidates/(:num)/reject',           'RecruitmentController::rejectCandidate/$1');
         $routes->post('candidates/(:num)/hire',             'RecruitmentController::hireCandidate/$1');
 
+        // ─── Online Tests (HR admin) ───────────────────────────────
+        // Lihat docs/ONLINE_TEST.md. Kandidat-side endpoint terpisah
+        // (filter: candidatejwt) — yang ini full-feature untuk HR.
+        // Endpoint khusus didefinisikan SEBELUM (:num) supaya path
+        // /categories tidak nyangkut sebagai resource id.
+        $routes->get('online-test-questions-bank/categories', 'OnlineTestController::bankCategories');
+        $routes->get('online-test-questions-bank',            'OnlineTestController::listBank');
+        $routes->post('online-test-questions-bank',           'OnlineTestController::createBank');
+        $routes->put('online-test-questions-bank/(:num)',     'OnlineTestController::updateBank/$1');
+        $routes->delete('online-test-questions-bank/(:num)',  'OnlineTestController::deleteBank/$1');
+
+        $routes->get('online-tests',                          'OnlineTestController::listTests');
+        $routes->post('online-tests',                         'OnlineTestController::createTest');
+        $routes->get('online-tests/(:num)',                   'OnlineTestController::showTest/$1');
+        $routes->put('online-tests/(:num)',                   'OnlineTestController::updateTest/$1');
+        $routes->delete('online-tests/(:num)',                'OnlineTestController::deleteTest/$1');
+        $routes->post('online-tests/(:num)/seed-template',    'OnlineTestController::seedTemplate/$1');
+        $routes->get('online-tests/(:num)/questions',         'OnlineTestController::listQuestions/$1');
+        $routes->post('online-tests/(:num)/questions',        'OnlineTestController::createQuestion/$1');
+        $routes->post('online-tests/(:num)/import-from-bank', 'OnlineTestController::importFromBank/$1');
+
+        $routes->put('online-test-questions/(:num)',          'OnlineTestController::updateQuestion/$1');
+        $routes->delete('online-test-questions/(:num)',       'OnlineTestController::deleteQuestion/$1');
+
+        $routes->get('online-test-assignments',               'OnlineTestController::listAssignments');
+        $routes->post('online-test-assignments',              'OnlineTestController::createAssignment');
+        $routes->get('online-test-assignments/(:num)',        'OnlineTestController::showAssignment/$1');
+        $routes->put('online-test-assignments/(:num)',        'OnlineTestController::updateAssignment/$1');
+        $routes->delete('online-test-assignments/(:num)',     'OnlineTestController::deleteAssignment/$1');
+        $routes->post('online-test-assignments/(:num)/cancel','OnlineTestController::cancelAssignment/$1');
+
+        $routes->get('online-test-attempts/(:num)',           'OnlineTestController::showAttempt/$1');
+        $routes->post('online-test-attempts/(:num)/grade',    'OnlineTestController::gradeAnswer/$1');
+
         // ─── Business Trip / SPPD ──────────────────────────────────
         $routes->put('business-trip-expenses/(:num)',    'BusinessTripController::updateExpense/$1');
         $routes->delete('business-trip-expenses/(:num)', 'BusinessTripController::deleteExpense/$1');
@@ -422,6 +546,31 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->put('employee-tasks/(:num)',         'EmployeeTaskController::update/$1');
         $routes->delete('employee-tasks/(:num)',      'EmployeeTaskController::delete/$1');
         $routes->post('employee-tasks/(:num)/complete','EmployeeTaskController::complete/$1');
+
+        // ─── Bonus Engine (Sprint 16+) ─────────────────────────────
+        // Modul P3 baru untuk handle bonus selain THR & insentif (annual,
+        // KPI, milestone, sign-on, retention). Workflow run:
+        //   DRAFT → CALCULATED → APPROVED → PAID. Lihat docs/BONUS_ENGINE.md.
+        $routes->post('bonus-schemes/preview',                  'BonusController::previewScheme');
+        $routes->get('bonus-schemes',                           'BonusController::listSchemes');
+        $routes->post('bonus-schemes',                          'BonusController::createScheme');
+        $routes->get('bonus-schemes/(:num)',                    'BonusController::showScheme/$1');
+        $routes->put('bonus-schemes/(:num)',                    'BonusController::updateScheme/$1');
+        $routes->delete('bonus-schemes/(:num)',                 'BonusController::deleteScheme/$1');
+        $routes->get('bonus-runs',                              'BonusController::listRuns');
+        $routes->post('bonus-runs',                             'BonusController::createRun');
+        $routes->get('bonus-runs/(:num)',                       'BonusController::showRun/$1');
+        $routes->put('bonus-runs/(:num)',                       'BonusController::updateRun/$1');
+        $routes->delete('bonus-runs/(:num)',                    'BonusController::deleteRun/$1');
+        $routes->post('bonus-runs/(:num)/calculate',            'BonusController::calculateRun/$1');
+        $routes->post('bonus-runs/(:num)/approve',              'BonusController::approveRun/$1');
+        $routes->post('bonus-runs/(:num)/mark-paid',            'BonusController::markRunPaid/$1');
+        $routes->post('bonus-runs/(:num)/cancel',               'BonusController::cancelRun/$1');
+        $routes->get('bonus-runs/(:num)/recipients',            'BonusController::listRecipients/$1');
+        $routes->post('bonus-runs/(:num)/recipients/include-all', 'BonusController::includeAllRecipients/$1');
+        $routes->put('bonus-recipients/(:num)',                 'BonusController::overrideRecipient/$1');
+        // Sprint 20+ — Bonus history per karyawan (untuk profile tab + HR analytics)
+        $routes->get('employees/(:num)/bonus-history',          'BonusController::employeeHistory/$1');
 
         // ─── Severance / Pesangon (PHK) ────────────────────────────
         // Endpoint khusus didefinisikan SEBELUM CRUD

@@ -124,6 +124,18 @@ class CareerPublicController extends BaseController
         $company = $this->resolveCompanyOrFail($slug);
         if (! $company) return $this->response;
 
+        // Sprint 21+ — apply WAJIB login candidate. Kalau tidak ada
+        // Authorization header, kembalikan 401 dengan code khusus supaya
+        // frontend bisa redirect ke /careers/{slug}/login.
+        $candidateAccount = $this->resolveCandidateFromHeader((int) $company['id']);
+        if (! $candidateAccount) {
+            return $this->response->setStatusCode(401)->setJSON([
+                'status'  => 'error',
+                'code'    => 'CANDIDATE_LOGIN_REQUIRED',
+                'message' => 'Silakan login atau buat akun terlebih dahulu untuk melamar.',
+            ]);
+        }
+
         $db = \Config\Database::connect();
         $job = $db->table('job_postings')
             ->where('company_id', (int) $company['id'])
@@ -136,6 +148,14 @@ class CareerPublicController extends BaseController
         if (! is_array($body)) $body = $this->request->getPost();
         if (! is_array($body)) $body = [];
 
+        // Auto-fill email/full_name dari account kalau body tidak sertakan,
+        // supaya kandidat tidak perlu input ulang.
+        if (empty($body['email']))     $body['email']     = $candidateAccount['email'];
+        if (empty($body['full_name'])) $body['full_name'] = $candidateAccount['full_name'];
+        if (empty($body['phone']) && ! empty($candidateAccount['phone'])) {
+            $body['phone'] = $candidateAccount['phone'];
+        }
+
         $applicantIp = $this->request->getIPAddress();
 
         try {
@@ -144,6 +164,7 @@ class CareerPublicController extends BaseController
                 (int) $job['id'],
                 $body,
                 $applicantIp,
+                (int) $candidateAccount['id'],
             );
         } catch (\RuntimeException $e) {
             return $this->fail($e->getMessage(), 422);
@@ -290,6 +311,31 @@ class CareerPublicController extends BaseController
         // Allow alnum + dash, max 100
         if (! preg_match('/^[a-z0-9][a-z0-9-]{0,99}$/', $s)) return null;
         return $s;
+    }
+
+    /**
+     * Resolve candidate account dari Authorization Bearer header.
+     * Pastikan account aktif & terikat ke company yang sama dengan slug
+     * di URL — supaya tidak bisa submit lamaran ke perusahaan lain pakai
+     * token yang dikeluarkan untuk perusahaan A.
+     */
+    private function resolveCandidateFromHeader(int $companyId): ?array
+    {
+        $header = $this->request->getHeaderLine('Authorization');
+        if (! $header || ! preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
+            return null;
+        }
+        $payload = Services::candidateAuth()->validateAccess(trim($m[1]));
+        if (! $payload) return null;
+        if ((int) ($payload['company_id'] ?? 0) !== $companyId) return null;
+
+        $db = \Config\Database::connect();
+        $row = $db->table('candidate_accounts')
+            ->where('id', (int) $payload['sub'])
+            ->where('is_active', 1)
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        return $row ?: null;
     }
 
     private function resolveCompanyOrFail(string $slug): ?array

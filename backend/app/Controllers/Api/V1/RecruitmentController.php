@@ -35,7 +35,9 @@ use Config\Services;
  */
 class RecruitmentController extends ApiController
 {
-    private const STAGES = ['NEW','SCREENING','INTERVIEW_HR','INTERVIEW_USER','OFFER','HIRED','REJECTED','WITHDRAWN'];
+    use \App\Traits\DispatchesWebhooks;
+
+    private const STAGES = ['NEW','SCREENING','ONLINE_TEST','INTERVIEW_HR','INTERVIEW_USER','OFFER','HIRED','REJECTED','WITHDRAWN'];
     private const SOURCES = ['WEBSITE','LINKEDIN','JOBSTREET','REFERRAL','WALK_IN','OTHER'];
     private const DOC_TYPES = ['CV','KTP','IJAZAH','TRANSKRIP','SERTIFIKAT','PORTFOLIO','OTHER'];
 
@@ -474,6 +476,28 @@ class RecruitmentController extends ApiController
             description: "Convert {$row['full_name']} → employee #{$employeeId} + auto-trigger onboarding"
                 . ($result['user_id'] ? " + auto-create user account #{$result['user_id']}" : ''),
             severity: 'CRITICAL'
+        );
+
+        // Sprint 14+ — webhook outbound `recruitment.candidate_hired`.
+        // Sengaja TIDAK kirim temp_password / email account ke external —
+        // hanya identifier supaya consumer (mis. background-check tool,
+        // analytics, accounting integration) bisa link ke employee baru.
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::CANDIDATE_HIRED,
+            (int) $row['company_id'],
+            [
+                'candidate_id'      => (int) $id,
+                'employee_id'       => $employeeId,
+                'job_posting_id'    => isset($row['job_posting_id']) ? (int) $row['job_posting_id'] : null,
+                'candidate_name'    => $row['full_name'] ?? null,
+                'employment_status' => $overrides['employment_status'] ?? null,
+                'join_date'         => $overrides['join_date'] ?? null,
+                'department_id'     => isset($overrides['department_id']) ? (int) $overrides['department_id'] : null,
+                'position_id'       => isset($overrides['position_id']) ? (int) $overrides['position_id'] : null,
+                'branch_id'         => isset($overrides['branch_id']) ? (int) $overrides['branch_id'] : null,
+                'hired_by'          => $this->userId(),
+                'hired_at'          => date('c'),
+            ],
         );
 
         // Sync MPP hired_count: kalau posting kandidat ini ditarik dari

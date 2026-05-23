@@ -6,6 +6,12 @@ use Config\Services;
 
 /**
  * PayrollService - Orchestrates payroll calculation per period.
+ *
+ * Sprint 17+ — auto-merge bonus run yang APPROVED/PAID dengan
+ * `payroll_period_id` matching ke payslip karyawan tersebut. Bonus
+ * total appear sebagai earning baru kategori `BONUS` (tax_treatment
+ * NORMAL → taxable, NON_TAXABLE → exclude dari grossTaxable, GROSS_UP
+ * & NET defer ke Sprint 18+).
  */
 class PayrollService
 {
@@ -70,8 +76,28 @@ class PayrollService
         $pphCalc  = Services::pph21();
         $otCalc   = new OvertimeCalculator();
 
+        // Sprint 5-6 — magic numbers ke setting per-company
+        $cfg = Services::payrollSettings();
+        $workingDaysPerMonth = $cfg->workingDaysPerMonth((int) $period['company_id']);
+        $overtimeHoursPerMonth = $cfg->overtimeHoursPerMonth((int) $period['company_id']);
+        $absentDeductionEnabled = $cfg->absentDeductionEnabled((int) $period['company_id']);
+
+        // Sprint 17+ — Lookup bonus yang sudah di-link ke period ini
+        // (status APPROVED/PAID). Map: employee_id => {amount, breakdown}.
+        // Hanya queried sekali per period untuk efisiensi.
+        try {
+            $bonusByEmp = (new BonusService($db))->bonusesForPayrollPeriod($payrollPeriodId);
+        } catch (\Throwable $e) {
+            log_message('warning', 'BonusService lookup failed: ' . $e->getMessage());
+            $bonusByEmp = [];
+        }
+
         foreach ($employees as $emp) {
-            $result = $this->calculateEmployee($emp, $period, $bpjsCalc, $pphCalc, $otCalc);
+            $result = $this->calculateEmployee(
+                $emp, $period, $bpjsCalc, $pphCalc, $otCalc,
+                $workingDaysPerMonth, $overtimeHoursPerMonth, $absentDeductionEnabled,
+                $bonusByEmp[(int) $emp['id']] ?? null,
+            );
             $totalGross     += $result['gross_earning'];
             $totalDeduction += $result['total_deduction'];
             $totalNet       += $result['take_home_pay'];
@@ -97,12 +123,23 @@ class PayrollService
         ];
     }
 
+    /**
+     * @param array{amount:float, breakdown:array}|null $bonusInfo
+     *        Sprint 17+ — info bonus run yang sudah APPROVED/PAID untuk
+     *        period ini. Kalau null/empty → tidak ada bonus untuk
+     *        karyawan ini. Diteruskan oleh calculatePeriod() supaya
+     *        DB query bonus hanya sekali (di luar loop employee).
+     */
     private function calculateEmployee(
         array $emp,
         array $period,
         BpjsCalculator $bpjsCalc,
         Pph21TerCalculator $pphCalc,
-        OvertimeCalculator $otCalc
+        OvertimeCalculator $otCalc,
+        int $workingDaysPerMonth = 22,
+        int $overtimeHoursPerMonth = 173,
+        bool $absentDeductionEnabled = true,
+        ?array $bonusInfo = null,
     ): array {
         $db = \Config\Database::connect();
         $companyId = (int) $period['company_id'];
@@ -190,7 +227,14 @@ class PayrollService
             if ($e['category'] === 'ALLOWANCE') $fixedAllowance += $e['amount'];
         }
         foreach ($otRows as $ot) {
-            $amount = $otCalc->calculate($basicSalary + $fixedAllowance, (float) $ot['hours'], $ot['day_type']);
+            // Sprint 5-6 — pakai overtimeHoursPerMonth dari setting (default 173)
+            $amount = $otCalc->calculate(
+                $basicSalary + $fixedAllowance,
+                (float) $ot['hours'],
+                $ot['day_type'],
+                5,
+                $overtimeHoursPerMonth,
+            );
             $totalOtAmount += $amount;
             $totalOtHours  += (float) $ot['hours'];
         }
@@ -214,10 +258,52 @@ class PayrollService
             $earnings[] = ['code' => 'REIMB', 'name' => 'Reimbursement', 'category' => 'REIMBURSEMENT', 'amount' => $reimbTotal, 'is_taxable' => 0];
         }
 
+        // ─── Bonus auto-merge (Sprint 17+/18+) ──────────────────────
+        // Bonus run yang sudah APPROVED/PAID dengan payroll_period_id
+        // = period ini → masuk sebagai earning kategori BONUS via
+        // helper pure function BonusCalculator::bonusEarningEntries()
+        // (tax-treatment grouping di sana, mudah unit-tested).
+        //
+        // Sprint 18+ — Untuk bonus dengan tax_treatment GROSS_UP atau NET,
+        // pre-process dulu via applyGrossUp() supaya nominal di breakdown
+        // jadi effective gross. taxFunc-nya pakai TER monthly dengan
+        // base = penghasilan taxable saat ini (basic + allowance +
+        // overtime — reimbursement skip karena non-taxable).
+        $bonusTotal = 0.0;
+        $bonusInfoForEntries = $bonusInfo;
+        if (is_array($bonusInfo) && ! empty($bonusInfo['breakdown'])) {
+            $hasGrossUpOrNet = false;
+            foreach ($bonusInfo['breakdown'] as $b) {
+                $tt = strtoupper((string) ($b['tax_treatment'] ?? 'NORMAL'));
+                if ($tt === 'GROSS_UP' || $tt === 'NET') {
+                    $hasGrossUpOrNet = true;
+                    break;
+                }
+            }
+            if ($hasGrossUpOrNet) {
+                // Hitung base taxable dari earnings yang sudah ada
+                $baseTaxable = 0.0;
+                foreach ($earnings as $e) {
+                    if ($e['is_taxable']) $baseTaxable += (float) $e['amount'];
+                }
+                $taxFunc = fn (float $g): float => (float) $pphCalc->calculateMonthlyTer(
+                    $g, $emp['ptkp_status'] ?: 'TK0', (int) $period['period_year']
+                )['tax'];
+                $bonusInfoForEntries = BonusCalculator::applyGrossUp($bonusInfo, $taxFunc, $baseTaxable);
+            }
+        }
+        $bonusEntries = BonusCalculator::bonusEarningEntries($bonusInfoForEntries);
+        foreach ($bonusEntries as $entry) {
+            $earnings[] = $entry;
+            $bonusTotal += (float) $entry['amount'];
+        }
+
         // ─── Absent deduction (proportional) ────────────────────────
+        // Sprint 5-6 — workingDaysPerMonth dari setting per-company,
+        // default 22. Bisa di-disable lewat setting `payroll.absent_deduction_enabled=0`.
         $absentDeduction = 0;
-        if ($absent > 0 && $workDays > 0) {
-            $perDay = $basicSalary / 22; // standard 22 working days
+        if ($absentDeductionEnabled && $absent > 0 && $workDays > 0) {
+            $perDay = $basicSalary / max(1, $workingDaysPerMonth);
             $absentDeduction = round($perDay * $absent);
             $deductions[] = ['code' => 'ABSENT', 'name' => 'Potongan Absen', 'category' => 'OTHER', 'amount' => $absentDeduction, 'is_taxable' => 0];
         }
@@ -321,6 +407,7 @@ class PayrollService
             'gross_earning'      => $grossEarning,
             'overtime_amount'    => $totalOtAmount,
             'reimbursement_amount' => $reimbTotal,
+            'bonus_amount'       => $bonusTotal,
             'bpjs_kes_employee'  => $bpjs['kes_employee'],
             'bpjs_kes_company'   => $bpjs['kes_company'],
             'bpjs_jht_employee'  => $bpjs['jht_employee'],

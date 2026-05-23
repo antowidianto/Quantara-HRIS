@@ -332,4 +332,157 @@ class Services extends BaseService
 
         return new \App\Libraries\EmployeeTransferService();
     }
+
+    /**
+     * PasswordPolicy — aturan & utility untuk validasi password (Sprint 3).
+     * Aturan R1-R6 (panjang, kompleksitas, common, history, rotation,
+     * user-specific). Lihat docs/IMPROVEMENT_CHECKLIST.md Sprint 3.
+     */
+    public static function passwordPolicy(bool $getShared = true): \App\Libraries\PasswordPolicy
+    {
+        if ($getShared) {
+            return static::getSharedInstance('passwordPolicy');
+        }
+
+        return new \App\Libraries\PasswordPolicy();
+    }
+
+    /**
+     * TwoFactorBackupCodes — generate/verify 8 single-use recovery codes
+     * untuk user 2FA (Sprint 3). Codes di-hash Argon2id sama seperti password.
+     */
+    public static function twoFactorBackupCodes(bool $getShared = true): \App\Libraries\TwoFactorBackupCodes
+    {
+        if ($getShared) {
+            return static::getSharedInstance('twoFactorBackupCodes');
+        }
+
+        return new \App\Libraries\TwoFactorBackupCodes();
+    }
+
+    /**
+     * DataPrivacyService — UU PDP (UU 27/2022) compliance (Sprint 4):
+     * consent record, data export, deletion request workflow, anonimisasi PII.
+     */
+    public static function dataPrivacy(bool $getShared = true): \App\Libraries\DataPrivacyService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('dataPrivacy');
+        }
+
+        return new \App\Libraries\DataPrivacyService();
+    }
+
+    /**
+     * PayrollSettings — config payroll per-company (Sprint 5-6):
+     * working_days_per_month, overtime_hours_per_month, overtime→leave
+     * conversion ratio, absent_deduction_enabled. Override via tabel `settings`.
+     */
+    public static function payrollSettings(bool $getShared = true): \App\Libraries\PayrollSettings
+    {
+        if ($getShared) {
+            return static::getSharedInstance('payrollSettings');
+        }
+
+        return new \App\Libraries\PayrollSettings();
+    }
+
+    /**
+     * ShiftTimeHelper — resolve waktu shift termasuk cross-midnight
+     * (Sprint 5-6 fix). Pakai untuk hitung effectiveShiftStart/End,
+     * lateMinutes, earlyLeaveMinutes saat shift overnight 22:00→06:00.
+     */
+    public static function shiftTime(bool $getShared = true): \App\Libraries\ShiftTimeHelper
+    {
+        if ($getShared) {
+            return static::getSharedInstance('shiftTime');
+        }
+
+        return new \App\Libraries\ShiftTimeHelper();
+    }
+
+    /**
+     * EmailTemplateRenderer — render template per company × event_type
+     * dengan variable substitution {{var}} (Sprint 7).
+     */
+    public static function emailTemplate(bool $getShared = true): \App\Libraries\EmailTemplateRenderer
+    {
+        if ($getShared) {
+            return static::getSharedInstance('emailTemplate');
+        }
+
+        return new \App\Libraries\EmailTemplateRenderer();
+    }
+
+    /**
+     * CacheService — wrapper Redis/file cache untuk lookup yang sering
+     * dipakai (UMP/UMK, holidays, role permissions, BPJS rates) dengan
+     * TTL convention terpusat. Sprint 10+.
+     */
+    public static function cacheService(bool $getShared = true): \App\Libraries\CacheService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('cacheService');
+        }
+
+        return new \App\Libraries\CacheService();
+    }
+
+    /**
+     * WebhookDispatcher — orchestrate webhook outbound delivery dengan
+     * retry exponential backoff + HMAC-SHA256 signing. Sprint 11+.
+     * Lihat docs/WEBHOOKS.md.
+     */
+    public static function webhook(bool $getShared = true): \App\Libraries\WebhookDispatcher
+    {
+        if ($getShared) {
+            return static::getSharedInstance('webhook');
+        }
+
+        return new \App\Libraries\WebhookDispatcher();
+    }
+
+    /**
+     * InboundWebhookHandler — registry + verifikasi untuk webhook inbound
+     * (Sprint 14+). Counterpart dari WebhookDispatcher: terima event dari
+     * sistem external lewat HTTP POST + HMAC signature, dispatch ke
+     * handler terdaftar (RecruitmentService, AccountingSync, dll).
+     * Lihat docs/WEBHOOKS.md section "Inbound".
+     */
+    public static function inbound(bool $getShared = true): \App\Libraries\InboundWebhookHandler
+    {
+        if ($getShared) {
+            return static::getSharedInstance('inbound');
+        }
+
+        return new \App\Libraries\InboundWebhookHandler();
+    }
+
+    /**
+     * CandidateAuthService — auth khusus pelamar (kandidat) di Career Portal.
+     * JWT terpisah dari user internal (claim aud=candidate). Lihat
+     * docs/CAREER_PORTAL.md section "Candidate Auth".
+     */
+    public static function candidateAuth(bool $getShared = true): \App\Libraries\CandidateAuthService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('candidateAuth');
+        }
+
+        return new \App\Libraries\CandidateAuthService();
+    }
+
+    /**
+     * OnlineTestService — engine test online untuk kandidat (TPA, English,
+     * DISC, technical). Auto-grade MCQ/TF/Numeric/Likert, manual grade
+     * essay. Lihat docs/ONLINE_TEST.md.
+     */
+    public static function onlineTest(bool $getShared = true): \App\Libraries\OnlineTestService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('onlineTest');
+        }
+
+        return new \App\Libraries\OnlineTestService();
+    }
 }
