@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -8,15 +8,61 @@ const router = useRouter()
 const toast = useToast()
 const saving = ref(false)
 const now = new Date()
+
+const MONTH_NAMES_ID = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+]
+
+function pad(n) { return String(n).padStart(2, '0') }
+function ymd(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+function buildName(year, month, type) {
+  const monthIdx = Math.min(12, Math.max(1, Number(month) || 1)) - 1
+  const monthName = MONTH_NAMES_ID[monthIdx]
+  if (type === 'THR') return `THR ${year}`
+  if (type === 'BONUS') return `Bonus ${monthName} ${year}`
+  return `${monthName} ${year}`
+}
+
+const initialYear = now.getFullYear()
+const initialMonth = now.getMonth() + 1
 const form = ref({
-  name: now.toLocaleString('id-ID', { month: 'long', year: 'numeric' }),
+  name: buildName(initialYear, initialMonth, 'MONTHLY'),
   type: 'MONTHLY',
-  period_year: now.getFullYear(),
-  period_month: now.getMonth() + 1,
-  start_date: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
-  end_date: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10),
-  pay_date: new Date(now.getFullYear(), now.getMonth() + 1, 5).toISOString().slice(0, 10),
+  period_year: initialYear,
+  period_month: initialMonth,
+  start_date: ymd(new Date(initialYear, initialMonth - 1, 1)),
+  end_date: ymd(new Date(initialYear, initialMonth, 0)), // last day of month
+  pay_date: ymd(new Date(initialYear, initialMonth, 5)), // 5th of next month
 })
+
+// Track whether user has manually edited the name; if so, stop auto-syncing.
+const nameTouched = ref(false)
+function onNameInput() { nameTouched.value = true }
+
+// Auto-sync name + dates ketika user mengubah year/month/type.
+// Tujuannya: tidak ada lagi mismatch "Agustus 2026" tapi month=5 yang
+// menyebabkan user salah duga periode.
+watch(
+  () => [form.value.period_year, form.value.period_month, form.value.type],
+  ([year, month, type]) => {
+    const y = Number(year)
+    const m = Number(month)
+    if (!y || !m) return
+    if (!nameTouched.value) {
+      form.value.name = buildName(y, m, type)
+    }
+    // Hanya auto-update dates kalau user belum kustomisasi (heuristik:
+    // start_date masih sama dengan tanggal 1 bulan sebelumnya). Kita simpler:
+    // selalu update saat year/month berubah sebelum user simpan, supaya
+    // konsisten dengan periode yang dipilih.
+    form.value.start_date = ymd(new Date(y, m - 1, 1))
+    form.value.end_date = ymd(new Date(y, m, 0))
+    form.value.pay_date = ymd(new Date(y, m, 5))
+  },
+)
 
 async function submit() {
   saving.value = true
@@ -24,8 +70,17 @@ async function submit() {
     const res = await api.post('/payroll-periods', form.value)
     toast.success('Periode dibuat')
     router.push(`/payroll/periods/${res.data.data.id}`)
-  } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
-  finally { saving.value = false }
+  } catch (e) {
+    const resp = e.response?.data
+    // Backend kirim code=PERIOD_DUPLICATE → tampilkan pesan konkret.
+    if (resp?.code === 'PERIOD_DUPLICATE') {
+      toast.error(resp.message || 'Periode untuk bulan ini sudah ada')
+    } else {
+      toast.error(resp?.message || 'Gagal membuat periode')
+    }
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -34,7 +89,10 @@ async function submit() {
     <h1 class="text-2xl font-bold mb-4">Buat Periode Payroll</h1>
     <form @submit.prevent="submit" class="card">
       <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="md:col-span-2"><label class="label">Nama Periode</label><input v-model="form.name" class="input" required /></div>
+        <div class="md:col-span-2">
+          <label class="label">Nama Periode</label>
+          <input v-model="form.name" class="input" required @input="onNameInput" />
+        </div>
         <div><label class="label">Tipe</label>
           <select v-model="form.type" class="input">
             <option value="MONTHLY">Bulanan</option><option value="THR">THR</option><option value="BONUS">Bonus</option>

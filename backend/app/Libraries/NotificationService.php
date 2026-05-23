@@ -238,6 +238,7 @@ class NotificationService
     public function queueEmail(?int $companyId, string $toEmail, ?string $toName, string $subject, string $bodyHtml, array $attachments = []): int
     {
         $db = \Config\Database::connect();
+        $now = date('Y-m-d H:i:s');
         $db->table('email_queue')->insert([
             'company_id'  => $companyId,
             'to_email'    => $toEmail,
@@ -247,23 +248,40 @@ class NotificationService
             'attachments' => $attachments ? json_encode($attachments) : null,
             'status'      => 'QUEUED',
             'attempts'    => 0,
-            'scheduled_at'=> date('Y-m-d H:i:s'),
-            'created_at'  => date('Y-m-d H:i:s'),
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'scheduled_at'=> $now,
+            // Sprint 7 — kolom retry tracking. Default null (boleh kirim sekarang).
+            'next_retry_at'   => null,
+            'last_attempt_at' => null,
+            'created_at'  => $now,
+            'updated_at'  => $now,
         ]);
         return (int) $db->insertID();
     }
 
     /**
      * Process the email queue. Run via cron or `php spark email:process`.
+     *
+     * Sprint 7 hardening:
+     *  - Pakai `App\Libraries\EmailQueueBackoff` untuk schedule retry
+     *    dengan exponential backoff + jitter (1m → 5m → 30m).
+     *  - Skip row yang `next_retry_at` masih di masa depan.
+     *  - Set `next_retry_at` saat fail; saat attempt habis (≥ MAX_ATTEMPTS),
+     *    biarkan FAILED final (tidak akan di-retry lagi).
      */
     public function processEmailQueue(int $batch = 20): int
     {
         $db = \Config\Database::connect();
+        $now = date('Y-m-d H:i:s');
+
         $rows = $db->table('email_queue')
             ->whereIn('status', ['QUEUED', 'FAILED'])
-            ->where('attempts <', 3)
-            ->where('scheduled_at <=', date('Y-m-d H:i:s'))
+            ->where('attempts <', \App\Libraries\EmailQueueBackoff::MAX_ATTEMPTS)
+            ->where('scheduled_at <=', $now)
+            // next_retry_at NULL atau ≤ now (boleh retry sekarang)
+            ->groupStart()
+                ->where('next_retry_at IS NULL')
+                ->orWhere('next_retry_at <=', $now)
+            ->groupEnd()
             ->orderBy('id', 'ASC')
             ->limit($batch)
             ->get()
@@ -271,24 +289,36 @@ class NotificationService
 
         $sent = 0;
         foreach ($rows as $row) {
+            $newAttempt = (int) $row['attempts'] + 1;
             $db->table('email_queue')->where('id', $row['id'])->update([
-                'status'   => 'SENDING',
-                'attempts' => (int) $row['attempts'] + 1,
+                'status'          => 'SENDING',
+                'attempts'        => $newAttempt,
+                'last_attempt_at' => $now,
             ]);
             try {
                 $this->dispatch($row);
                 $db->table('email_queue')->where('id', $row['id'])->update([
-                    'status'   => 'SENT',
-                    'sent_at'  => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'status'        => 'SENT',
+                    'sent_at'       => date('Y-m-d H:i:s'),
+                    'next_retry_at' => null,
+                    'updated_at'    => date('Y-m-d H:i:s'),
                 ]);
                 $sent++;
             } catch (\Throwable $e) {
-                $db->table('email_queue')->where('id', $row['id'])->update([
-                    'status'    => 'FAILED',
-                    'last_error'=> substr($e->getMessage(), 0, 1000),
-                    'updated_at'=> date('Y-m-d H:i:s'),
-                ]);
+                // Schedule next retry kalau masih ada budget attempts.
+                // Kalau sudah habis, set status FAILED final tanpa next_retry_at.
+                $exhausted = $newAttempt >= \App\Libraries\EmailQueueBackoff::MAX_ATTEMPTS;
+                $update = [
+                    'status'     => 'FAILED',
+                    'last_error' => substr($e->getMessage(), 0, 1000),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
+                if (! $exhausted) {
+                    $update['next_retry_at'] = \App\Libraries\EmailQueueBackoff::nextRetryAt($newAttempt);
+                } else {
+                    $update['next_retry_at'] = null;  // tidak retry lagi
+                }
+                $db->table('email_queue')->where('id', $row['id'])->update($update);
             }
         }
         return $sent;

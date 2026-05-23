@@ -168,11 +168,20 @@ class AuthController extends ApiController
     public function verifyTwoFactor()
     {
         $data = $this->getJsonInput();
+        // Accept either:
+        //  - `code`        : 6 digit TOTP dari authenticator app
+        //  - `backup_code` : 10 char alfanumerik recovery code (Sprint 3)
+        // Salah satu wajib ada.
         $valid = $this->validateOrFail($data, [
-            'challenge' => 'required|alpha_numeric|max_length[64]',
-            'code'      => 'required|numeric|exact_length[6]',
+            'challenge'   => 'required|alpha_numeric|max_length[64]',
+            'code'        => 'permit_empty|numeric|exact_length[6]',
+            'backup_code' => 'permit_empty|max_length[32]',
         ]);
         if (! $valid) return null;
+
+        if (empty($data['code']) && empty($data['backup_code'])) {
+            return $this->fail('Wajib isi kode 2FA atau backup code', 400, 'MISSING_2FA_CODE');
+        }
 
         $cache = Services::cache();
         $entry = $cache->get('2fa:' . $data['challenge']);
@@ -184,12 +193,37 @@ class AuthController extends ApiController
         $user = $db->table('users')->where('id', $entry['user_id'])->get()->getRowArray();
         if (! $user) return $this->fail('User not found', 404);
 
-        $tfa = new \RobThree\Auth\TwoFactorAuth((string) env('twofa.issuer', 'HRIS'));
-        if (! $tfa->verifyCode($user['twofa_secret'], $data['code'])) {
-            return $this->fail('Invalid 2FA code', 401, 'INVALID_2FA');
+        $usedBackup = false;
+        if (! empty($data['backup_code'])) {
+            // Sprint 3 — recovery via backup code
+            if (! Services::twoFactorBackupCodes()->verify((int) $user['id'], (string) $data['backup_code'])) {
+                Services::audit()->forModule('AUTH')->logFailure(
+                    'auth.2fa.backup_invalid',
+                    'user', (int) $user['id'],
+                    'INVALID_BACKUP_CODE',
+                    "Backup code 2FA tidak valid: {$user['email']}"
+                );
+                return $this->fail('Invalid 2FA backup code', 401, 'INVALID_2FA_BACKUP');
+            }
+            $usedBackup = true;
+        } else {
+            $tfa = new \RobThree\Auth\TwoFactorAuth((string) env('twofa.issuer', 'HRIS'));
+            if (! $tfa->verifyCode($user['twofa_secret'], $data['code'])) {
+                return $this->fail('Invalid 2FA code', 401, 'INVALID_2FA');
+            }
         }
 
         $cache->delete('2fa:' . $data['challenge']);
+
+        if ($usedBackup) {
+            $remaining = Services::twoFactorBackupCodes()->remainingCount((int) $user['id']);
+            Services::audit()->forModule('AUTH')->log(
+                action: 'auth.2fa.backup_used',
+                entity: 'user', entityId: (int) $user['id'],
+                description: "Login via backup code 2FA: {$user['email']} (sisa {$remaining} kode)",
+                severity: 'NOTICE'
+            );
+        }
 
         $db->table('users')->where('id', $user['id'])->update([
             'last_login_at' => date('Y-m-d H:i:s'),
@@ -204,10 +238,15 @@ class AuthController extends ApiController
 
         $tokens = Services::jwt()->issueTokenPair($user, $companyId ? (int) $companyId : null);
 
-        return $this->ok([
+        $resp = [
             'tokens' => $tokens,
             'user'   => $this->shapeUser($user, $companyId),
-        ], '2FA verified');
+        ];
+        if ($usedBackup) {
+            $resp['used_backup_code'] = true;
+            $resp['backup_codes_remaining'] = Services::twoFactorBackupCodes()->remainingCount((int) $user['id']);
+        }
+        return $this->ok($resp, '2FA verified');
     }
 
     public function refresh()
@@ -351,10 +390,24 @@ class AuthController extends ApiController
             return $this->fail('Hanya JPEG/PNG/WebP yang diperbolehkan', 415);
         }
 
+        // Sprint 3 — verify magic bytes, jangan trust MIME yang dikirim browser.
+        // Mencegah upload .php/.html/.exe yang direname ke .jpg.
+        $tempPath = $file->getTempName();
+        if (! \App\Libraries\FileSignatureValidator::matches($tempPath, $allowedMime)) {
+            Services::audit()->forModule('AUTH')->logFailure(
+                'profile.avatar.invalid_signature',
+                'user', (int) $userId,
+                'INVALID_FILE_SIGNATURE',
+                'Upload avatar ditolak: file signature tidak match (kemungkinan spoofed MIME)'
+            );
+            return $this->fail('File bukan gambar JPEG/PNG/WebP yang valid', 415, 'INVALID_FILE_SIGNATURE');
+        }
+
         // Simpan ke avatars/{user_id}/<timestamp>.<ext> — segmen random
         // mencegah cache lama browser tampil setelah ganti foto.
-        $ext = pathinfo($file->getClientName(), PATHINFO_EXTENSION) ?: 'jpg';
-        $ext = preg_replace('/[^A-Za-z0-9]+/', '', strtolower($ext));
+        // Sprint 3 — pakai ext dari magic bytes (bukan dari nama file)
+        // supaya konsisten dan tidak bisa di-fake (mis. fake.gif.exe).
+        $ext = \App\Libraries\FileSignatureValidator::safeExtension($tempPath) ?: 'jpg';
         $relativePath = sprintf(
             'avatars/%d/%s_%s.%s',
             $userId,
@@ -459,7 +512,7 @@ class AuthController extends ApiController
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'current_password' => 'required|string',
-            'new_password'     => 'required|string|min_length[10]|regex_match[/^(?=.*[A-Za-z])(?=.*\d).{10,}$/]',
+            'new_password'     => 'required|string|max_length[200]',
         ]);
         if (! $valid) return null;
 
@@ -469,16 +522,32 @@ class AuthController extends ApiController
             return $this->fail('Current password incorrect', 400, 'INVALID_CURRENT_PASSWORD');
         }
 
+        // ─── Sprint 3 — Password Policy enforcement ─────────────────
+        $policy = Services::passwordPolicy();
+        $errors = $policy->validate($data['new_password']);
+        $errors = array_merge($errors, $policy->validateAgainstUser($data['new_password'], $user));
+        if ($policy->isReused((int) $user['id'], $data['new_password'])) {
+            $errors[] = sprintf(
+                'Password tidak boleh sama dengan %d password sebelumnya.',
+                \App\Libraries\PasswordPolicy::HISTORY_LIMIT
+            );
+        }
         if (password_verify($data['new_password'], $user['password_hash'])) {
-            return $this->fail('New password must differ from current', 400, 'PASSWORD_REUSE');
+            $errors[] = 'Password baru harus berbeda dari password saat ini.';
+        }
+        if (! empty($errors)) {
+            return $this->fail($errors[0], 422, 'PASSWORD_POLICY_VIOLATION', ['errors' => $errors]);
         }
 
+        $newHash = password_hash($data['new_password'], PASSWORD_ARGON2ID);
         $db->table('users')->where('id', $user['id'])->update([
-            'password_hash'        => password_hash($data['new_password'], PASSWORD_ARGON2ID),
+            'password_hash'        => $newHash,
             'password_changed_at'  => date('Y-m-d H:i:s'),
             'must_change_password' => 0,
             'updated_at'           => date('Y-m-d H:i:s'),
         ]);
+        // Catat ke history (Sprint 3 R5)
+        $policy->recordUsed((int) $user['id'], $newHash);
 
         // Revoke all refresh tokens for safety
         Services::jwt()->revokeAllForUser($user['id']);
@@ -531,7 +600,7 @@ class AuthController extends ApiController
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'token'        => 'required|alpha_numeric|min_length[64]|max_length[64]',
-            'new_password' => 'required|min_length[10]|regex_match[/^(?=.*[A-Za-z])(?=.*\d).{10,}$/]',
+            'new_password' => 'required|max_length[200]',
         ]);
         if (! $valid) return null;
 
@@ -547,8 +616,26 @@ class AuthController extends ApiController
             return $this->fail('Invalid or expired token', 400, 'INVALID_TOKEN');
         }
 
+        // ─── Sprint 3 — Password Policy enforcement ─────────────────
+        $user = $db->table('users')->where('id', (int) $row['user_id'])->get()->getRowArray();
+        $policy = Services::passwordPolicy();
+        $errors = $policy->validate($data['new_password']);
+        if ($user) {
+            $errors = array_merge($errors, $policy->validateAgainstUser($data['new_password'], $user));
+        }
+        if ($policy->isReused((int) $row['user_id'], $data['new_password'])) {
+            $errors[] = sprintf(
+                'Password tidak boleh sama dengan %d password sebelumnya.',
+                \App\Libraries\PasswordPolicy::HISTORY_LIMIT
+            );
+        }
+        if (! empty($errors)) {
+            return $this->fail($errors[0], 422, 'PASSWORD_POLICY_VIOLATION', ['errors' => $errors]);
+        }
+
+        $newHash = password_hash($data['new_password'], PASSWORD_ARGON2ID);
         $db->table('users')->where('id', $row['user_id'])->update([
-            'password_hash'       => password_hash($data['new_password'], PASSWORD_ARGON2ID),
+            'password_hash'       => $newHash,
             'password_changed_at' => date('Y-m-d H:i:s'),
             'must_change_password'=> 0,
             'failed_attempts'     => 0,
@@ -556,6 +643,8 @@ class AuthController extends ApiController
             'updated_at'          => date('Y-m-d H:i:s'),
         ]);
         $db->table('password_resets')->where('id', $row['id'])->update(['used_at' => date('Y-m-d H:i:s')]);
+        // Catat ke history (Sprint 3 R5)
+        $policy->recordUsed((int) $row['user_id'], $newHash);
 
         Services::jwt()->revokeAllForUser((int) $row['user_id']);
         Services::audit()
@@ -581,10 +670,21 @@ class AuthController extends ApiController
 
         $db->table('users')->where('id', $user['id'])->update(['twofa_secret' => $secret, 'twofa_enabled' => 0]);
 
+        // Sprint 3 — generate 8 backup codes sekaligus.
+        // User HARUS simpan ini; tidak akan diperlihatkan lagi.
+        $backupCodes = Services::twoFactorBackupCodes()->regenerate((int) $user['id']);
+        Services::audit()->forModule('AUTH')->log(
+            action: 'auth.2fa.enable',
+            entity: 'user', entityId: (int) $user['id'],
+            description: "User enable 2FA + " . count($backupCodes) . ' backup codes',
+            severity: 'NOTICE'
+        );
+
         return $this->ok([
-            'secret' => $secret,
-            'qr'     => $qr,
-            'note'   => 'Confirm by sending a verification code to /auth/2fa/confirm',
+            'secret'       => $secret,
+            'qr'           => $qr,
+            'backup_codes' => $backupCodes,
+            'note'         => 'Simpan backup codes ini di tempat aman — tidak akan ditampilkan ulang. Confirm 2FA dengan kirim kode TOTP ke /auth/2fa/confirm.',
         ]);
     }
 

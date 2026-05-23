@@ -22,6 +22,8 @@ use Config\Services;
  */
 class CareerController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     /**
      * GET /career-page — settings career page untuk current company.
      * Otomatis generate slug perusahaan kalau belum ada.
@@ -266,11 +268,38 @@ class CareerController extends ApiController
             severity: 'NOTICE',
         );
 
+        $publicSlug = $update['public_slug'] ?? $job['public_slug'];
+
+        // Sprint 15+ — webhook outbound `recruitment.posting_published`.
+        // Berguna untuk integrasi ke job board external (LinkedIn, Glints,
+        // Kalibrr) supaya posting auto-mirror.
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::POSTING_PUBLISHED,
+            (int) $job['company_id'],
+            [
+                'job_posting_id'   => $jobId,
+                'reference_number' => $job['reference_number'] ?? null,
+                'title'            => $job['title'] ?? null,
+                'employment_type'  => $job['employment_type'] ?? null,
+                'department_id'    => isset($job['department_id']) ? (int) $job['department_id'] : null,
+                'position_id'      => isset($job['position_id']) ? (int) $job['position_id'] : null,
+                'branch_id'        => isset($job['branch_id']) ? (int) $job['branch_id'] : null,
+                'salary_min'       => isset($job['salary_min']) ? (float) $job['salary_min'] : null,
+                'salary_max'       => isset($job['salary_max']) ? (float) $job['salary_max'] : null,
+                'salary_visible'   => (bool) ($job['salary_visible'] ?? false),
+                'public_url_path'  => '/careers/' . $company['career_slug'] . '/jobs/' . $publicSlug,
+                'public_slug'      => $publicSlug,
+                'company_slug'     => $company['career_slug'] ?? null,
+                'published_by'     => $this->userId(),
+                'published_at'     => date('c'),
+            ],
+        );
+
         return $this->ok([
             'is_published_to_career' => 1,
-            'public_slug'            => $update['public_slug'] ?? $job['public_slug'],
+            'public_slug'            => $publicSlug,
             'public_url'             => '/careers/' . $company['career_slug']
-                . '/jobs/' . ($update['public_slug'] ?? $job['public_slug']),
+                . '/jobs/' . $publicSlug,
         ], 'Posting dipublish ke career portal');
     }
 

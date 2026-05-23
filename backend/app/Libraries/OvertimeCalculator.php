@@ -25,15 +25,31 @@ namespace App\Libraries;
  */
 class OvertimeCalculator
 {
+    /** Default jam per bulan per PP 35/2021 (= 40 jam/minggu × 4.33 minggu). */
+    public const DEFAULT_HOURS_PER_MONTH = 173;
+
+    /**
+     * Hitung total upah lembur.
+     *
+     * @param float  $monthlyBase   Upah bulanan dasar (basic + tunjangan tetap)
+     * @param float  $hours         Total jam lembur
+     * @param string $dayType       'WEEKDAY' | 'WEEKEND' | 'HOLIDAY'
+     * @param int    $workDaysPerWeek 5 atau 6 (untuk schema rest-day)
+     * @param int    $hoursPerMonth Override divisor jam (Sprint 5-6 — biasanya
+     *                              dari `PayrollSettings::overtimeHoursPerMonth`).
+     *                              Default 173 untuk backward-compat.
+     */
     public function calculate(
         float $monthlyBase,
         float $hours,
         string $dayType = 'WEEKDAY',
-        int $workDaysPerWeek = 5
+        int $workDaysPerWeek = 5,
+        int $hoursPerMonth = self::DEFAULT_HOURS_PER_MONTH,
     ): float {
         if ($hours <= 0) return 0.0;
+        if ($hoursPerMonth <= 0) $hoursPerMonth = self::DEFAULT_HOURS_PER_MONTH;
 
-        $hourly = $monthlyBase / 173;
+        $hourly = $monthlyBase / $hoursPerMonth;
 
         if ($dayType === 'WEEKDAY') {
             return $this->calculateWeekday($hourly, $hours);

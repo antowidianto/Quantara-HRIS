@@ -19,6 +19,15 @@ const routes = [
       { path: 'success',                     name: 'career-success',  component: () => import('@/views/Career/CareerSuccess.vue') },
       { path: 'track',                       name: 'career-track',    component: () => import('@/views/Career/CareerTrack.vue') },
       { path: 'track/:token',                name: 'career-track-token', component: () => import('@/views/Career/CareerTrack.vue') },
+
+      // Sprint 21+ — Candidate Account & Online Test
+      // Pelamar punya akun tersendiri (terpisah dari user HRIS internal).
+      // Lihat docs/ONLINE_TEST.md.
+      { path: 'login',                       name: 'candidate-login',     component: () => import('@/views/Career/CandidateLogin.vue') },
+      { path: 'register',                    name: 'candidate-register',  component: () => import('@/views/Career/CandidateRegister.vue') },
+      { path: 'dashboard',                   name: 'candidate-dashboard', component: () => import('@/views/Career/CandidateDashboard.vue') },
+      { path: 'tests/:id',                   name: 'candidate-test-detail', component: () => import('@/views/Career/CandidateTakeTest.vue') },
+      { path: 'tests/result/:attemptId',    name: 'candidate-test-result', component: () => import('@/views/Career/CandidateTestResult.vue') },
     ],
   },
 
@@ -38,6 +47,8 @@ const routes = [
       { path: 'employees/new', name: 'employee-new', component: () => import('@/views/Employees/EmployeeList.vue') },
       { path: 'employees/:id', name: 'employee-detail', component: () => import('@/views/Employees/EmployeeList.vue') },
       { path: 'employees/:id/edit', name: 'employee-edit', component: () => import('@/views/Employees/EmployeeList.vue') },
+      // Sprint 23+ — HR bonus history per employee (review/merit context)
+      { path: 'employees/:id/bonus-history', name: 'employee-bonus-history', component: () => import('@/views/Payroll/Bonus/EmployeeBonusHistory.vue') },
 
       // Allowance mapping (per cabang & grade)
       { path: 'master/allowances', name: 'allowances', component: () => import('@/views/Master/Allowances.vue') },
@@ -97,6 +108,12 @@ const routes = [
       { path: 'recruitment/jobs/:id', name: 'recruitment-pipeline', component: () => import('@/views/Recruitment/PipelineBoard.vue') },
       // Career Portal — admin settings
       { path: 'recruitment/career-settings', name: 'career-settings', component: () => import('@/views/Career/CareerSettings.vue') },
+      // Sprint 21+ — Online Tests admin (TPA, English, DISC, Technical)
+      { path: 'recruitment/online-tests',         name: 'online-tests',           component: () => import('@/views/Recruitment/OnlineTests/TestList.vue') },
+      { path: 'recruitment/online-tests/:id',     name: 'online-test-detail',     component: () => import('@/views/Recruitment/OnlineTests/TestBuilder.vue') },
+      { path: 'recruitment/online-test-bank',     name: 'online-test-bank',       component: () => import('@/views/Recruitment/OnlineTests/QuestionBank.vue') },
+      { path: 'recruitment/online-test-assignments', name: 'online-test-assignments', component: () => import('@/views/Recruitment/OnlineTests/AssignmentList.vue') },
+      { path: 'recruitment/online-test-attempts/:id', name: 'online-test-attempt-review', component: () => import('@/views/Recruitment/OnlineTests/AttemptReview.vue') },
       // HR Helpdesk / Tickets
       { path: 'helpdesk/tickets', name: 'helpdesk-tickets', component: () => import('@/views/Helpdesk/TicketList.vue') },
       { path: 'helpdesk/tickets/:id', name: 'helpdesk-ticket-detail', component: () => import('@/views/Helpdesk/TicketDetail.vue') },
@@ -138,6 +155,13 @@ const routes = [
       { path: 'payslips', name: 'payslips', component: () => import('@/views/Payroll/PayslipList.vue') },
       { path: 'payslips/my', name: 'my-payslips', component: () => import('@/views/Payroll/MyPayslips.vue') },
       { path: 'payslips/:id', name: 'payslip-detail', component: () => import('@/views/Payroll/PayslipDetail.vue') },
+      // Sprint 21+ — Self-service riwayat bonus per karyawan
+      { path: 'bonuses/my', name: 'my-bonuses', component: () => import('@/views/Payroll/MyBonuses.vue') },
+
+      // Bonus Engine — Sprint 19+ admin UI; backend Sprint 16+ (lihat docs/BONUS_ENGINE.md)
+      { path: 'payroll/bonus/schemes', name: 'bonus-schemes', component: () => import('@/views/Payroll/Bonus/BonusSchemeList.vue') },
+      { path: 'payroll/bonus/runs',    name: 'bonus-runs',    component: () => import('@/views/Payroll/Bonus/BonusRunList.vue') },
+      { path: 'payroll/bonus/runs/:id', name: 'bonus-run-detail', component: () => import('@/views/Payroll/Bonus/BonusRunDetail.vue') },
 
       // Reimbursement / Loan
       { path: 'reimbursements', name: 'reimbursements', component: () => import('@/views/Finance/ReimbursementList.vue') },

@@ -216,7 +216,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                 <span class="px-2 py-0.5 rounded text-xs" :class="STATUS_BADGE[r.status]?.cls">
                   {{ STATUS_BADGE[r.status]?.label || r.status }}
                 </span>
-                <span v-if="r.is_published_to_career"
+                <span v-if="Number(r.is_published_to_career) === 1"
                   class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-indigo-100 text-indigo-700 inline-block"
                   title="Tampil di public Career Portal">
                   🌐 Career
@@ -236,11 +236,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                     class="text-gray-600 hover:text-gray-800 p-1" title="Tutup" @click="closeJob(r)">
                     <XCircleIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage && r.status === 'OPEN' && ! r.is_published_to_career"
+                  <button v-if="canManage && r.status === 'OPEN' && Number(r.is_published_to_career) !== 1"
                     class="text-indigo-600 hover:text-indigo-800 p-1" title="Publish ke Career Portal" @click="publishCareer(r)">
                     <GlobeAltIcon class="w-4 h-4" />
                   </button>
-                  <button v-else-if="canManage && r.is_published_to_career"
+                  <button v-else-if="canManage && Number(r.is_published_to_career) === 1"
                     class="text-emerald-600 hover:text-emerald-800 p-1" title="Sudah dipublish (klik untuk unpublish)" @click="unpublishCareer(r)">
                     <GlobeAltIcon class="w-4 h-4" />
                   </button>

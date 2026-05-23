@@ -15,9 +15,11 @@
  */
 import { ref, computed, provide } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useCandidateAuthStore } from '@/stores/candidateAuth'
 
 const route = useRoute()
 const router = useRouter()
+const candidateAuth = useCandidateAuthStore()
 
 const companySlug = computed(() => route.params.slug || '')
 
@@ -31,8 +33,21 @@ function goHome() {
   if (companySlug.value) router.push(`/careers/${companySlug.value}`)
 }
 
-const isHome  = computed(() => route.name === 'CareerHome')
-const isTrack = computed(() => route.name === 'CareerTrack')
+const isHome = computed(() => ['career-home', 'career-job', 'career-apply'].includes(String(route.name || '')))
+const isTrack = computed(() => ['career-track', 'career-track-token'].includes(String(route.name || '')))
+const isCandidateArea = computed(() =>
+  ['candidate-login', 'candidate-register', 'candidate-dashboard', 'candidate-test-detail', 'candidate-test-result']
+    .includes(String(route.name || '')),
+)
+
+function goDashboard() {
+  router.push(`/careers/${companySlug.value}/dashboard`)
+}
+
+async function logoutCandidate() {
+  await candidateAuth.logout()
+  router.push(`/careers/${companySlug.value}`)
+}
 
 const year = new Date().getFullYear()
 </script>
@@ -84,6 +99,7 @@ const year = new Date().getFullYear()
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           </router-link>
+
           <router-link
             :to="`/careers/${companySlug}/track`"
             class="px-3 py-1.5 rounded-md transition-colors"
@@ -96,6 +112,38 @@ const year = new Date().getFullYear()
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.2-5.2m2.2-5.3a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z" />
             </svg>
           </router-link>
+
+          <router-link
+            v-if="!candidateAuth.isAuthenticated"
+            :to="`/careers/${companySlug}/login`"
+            class="px-3 py-1.5 rounded-md transition-colors"
+            :class="isCandidateArea
+              ? 'bg-[var(--brand-color,#0F62FE)] text-white font-medium'
+              : 'text-white bg-[var(--brand-color,#0F62FE)] hover:opacity-90'"
+          >
+            <span class="hidden sm:inline">Masuk / Daftar</span>
+            <span class="sm:hidden">Akun</span>
+          </router-link>
+
+          <template v-else>
+            <router-link
+              :to="`/careers/${companySlug}/dashboard`"
+              class="px-3 py-1.5 rounded-md transition-colors"
+              :class="isCandidateArea
+                ? 'bg-[var(--brand-color,#0F62FE)]/10 text-[var(--brand-color,#0F62FE)] font-medium'
+                : 'text-slate-700 hover:bg-slate-100'"
+            >
+              <span class="hidden sm:inline">Dashboard Saya</span>
+              <span class="sm:hidden">Saya</span>
+            </router-link>
+            <button
+              @click="logoutCandidate"
+              class="px-3 py-1.5 rounded-md transition-colors text-slate-700 hover:bg-slate-100"
+            >
+              <span class="hidden sm:inline">Logout</span>
+              <span class="sm:hidden">Keluar</span>
+            </button>
+          </template>
         </nav>
       </div>
     </header>

@@ -309,7 +309,7 @@ class CareerService
      *
      * @throws \RuntimeException kalau rate-limit / job sudah closed / data invalid
      */
-    public function submitApplication(int $companyId, int $jobId, array $data, ?string $applicantIp = null): array
+    public function submitApplication(int $companyId, int $jobId, array $data, ?string $applicantIp = null, ?int $candidateAccountId = null): array
     {
         $db = \Config\Database::connect();
         $job = $db->table('job_postings')
@@ -322,6 +322,22 @@ class CareerService
         }
         if ((int) $job['is_published_to_career'] !== 1 || $job['status'] !== 'OPEN') {
             throw new \RuntimeException('Lowongan ini sudah tidak menerima lamaran baru');
+        }
+
+        // Sprint 21+ — kalau ada candidate_account_id, cegah dobel-apply
+        // ke posting yang sama dari akun yang sama (independent dari email).
+        if ($candidateAccountId !== null && $candidateAccountId > 0) {
+            $dup = $db->table('candidates')
+                ->where('company_id', $companyId)
+                ->where('job_posting_id', $jobId)
+                ->where('candidate_account_id', $candidateAccountId)
+                ->where('deleted_at IS NULL')
+                ->countAllResults();
+            if ($dup > 0) {
+                throw new \RuntimeException(
+                    'Anda sudah pernah melamar untuk posisi ini. Cek status di dashboard.'
+                );
+            }
         }
 
         // Rate-limit per IP per hour (best-effort, in-memory cache)
@@ -393,6 +409,7 @@ class CareerService
             'applied_via_career' => 1,
             'applied_at'      => $now,
             'applicant_ip'    => $applicantIp,
+            'candidate_account_id' => $candidateAccountId,
             'created_at'      => $now,
             'updated_at'      => $now,
         ];

@@ -23,6 +23,7 @@ class RecruitmentService
     public const STAGES = [
         'NEW',
         'SCREENING',
+        'ONLINE_TEST',
         'INTERVIEW_HR',
         'INTERVIEW_USER',
         'OFFER',

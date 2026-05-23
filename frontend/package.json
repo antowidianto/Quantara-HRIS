@@ -10,8 +10,11 @@
     "preview": "vite preview --host",
     "lint": "eslint \"src/**/*.{js,vue}\"",
     "lint:fix": "eslint \"src/**/*.{js,vue}\" --fix",
+    "format": "prettier --write \"src/**/*.{js,vue,css,scss,json}\"",
+    "format:check": "prettier --check \"src/**/*.{js,vue,css,scss,json}\"",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@heroicons/vue": "^2.1.5",
@@ -30,11 +33,24 @@
     "@vue/test-utils": "^2.4.6",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-vue": "^9.32.0",
+    "husky": "^9.1.7",
     "jsdom": "^25.0.1",
+    "lint-staged": "^15.2.10",
     "postcss": "^8.4.47",
+    "prettier": "^3.3.3",
     "tailwindcss": "^3.4.13",
     "vite": "^5.4.8",
     "vitest": "^2.1.9"
+  },
+  "lint-staged": {
+    "src/**/*.{js,vue}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "src/**/*.{css,scss,json}": [
+      "prettier --write"
+    ]
   }
 }

@@ -6,6 +6,8 @@ use Config\Services;
 
 class EmployeeController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -328,6 +330,27 @@ class EmployeeController extends ApiController
             }
         }
 
+        // Sprint 13+ — webhook dispatch via trait helper. Sengaja tidak
+        // include PII sensitif (NIK/NPWP/rekening) di payload — consumer
+        // hanya butuh id + employee_number + nama untuk sync.
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::EMPLOYEE_CREATED,
+            $companyId,
+            [
+                'employee_id'       => (int) $id,
+                'employee_number'   => $insert['employee_number'] ?? null,
+                'full_name'         => $insert['full_name'] ?? null,
+                'email'             => $insert['email'] ?? null,
+                'employment_status' => $insert['employment_status'] ?? null,
+                'employment_type'   => $insert['employment_type'] ?? null,
+                'branch_id'         => isset($insert['branch_id']) ? (int) $insert['branch_id'] : null,
+                'department_id'     => isset($insert['department_id']) ? (int) $insert['department_id'] : null,
+                'position_id'       => isset($insert['position_id']) ? (int) $insert['position_id'] : null,
+                'join_date'         => $insert['join_date'] ?? null,
+                'created_at'        => date('c'),
+            ],
+        );
+
         return $this->ok(['id' => $id], 'Employee created', 201);
     }
 
@@ -437,6 +460,52 @@ class EmployeeController extends ApiController
                 $update,
                 "Memperbarui data karyawan: {$existing['full_name']} ({$existing['employee_number']})"
             );
+
+        // Sprint 15+ — webhook outbound. Detect 2 event:
+        //   - employee.resigned: resign_date sebelumnya kosong, sekarang ada
+        //   - employee.updated: ada perubahan field non-PII penting
+        // Sengaja exclude PII detail (NIK/NPWP/rekening/alamat) dari payload —
+        // consumer hanya butuh signal "ada perubahan" + identifier; data
+        // detail bisa di-pull via API kalau perlu (least-privilege).
+        $companyId = (int) $existing['company_id'];
+        $resignedNow = ! empty($update['resign_date']) && empty($existing['resign_date']);
+        if ($resignedNow) {
+            $this->dispatchWebhook(
+                \App\Constants\WebhookEvent::EMPLOYEE_RESIGNED,
+                $companyId,
+                [
+                    'employee_id'     => $id,
+                    'employee_number' => $existing['employee_number'] ?? null,
+                    'name'            => $existing['full_name'] ?? null,
+                    'resign_date'     => $update['resign_date'],
+                    'resign_reason'   => $update['resign_reason'] ?? null,
+                    'updated_at'      => date('c'),
+                ],
+            );
+        } else {
+            // Trigger employee.updated hanya kalau field signifikan berubah,
+            // bukan untuk update minor (last_login_at di token refresh, dll).
+            $significantKeys = [
+                'employment_status', 'employment_type', 'branch_id',
+                'department_id', 'position_id', 'job_grade_id', 'manager_id',
+                'is_active', 'employee_number', 'email', 'phone',
+                'contract_end_date', 'probation_end_date',
+            ];
+            $changedSignificant = array_intersect(array_keys($update), $significantKeys);
+            if (! empty($changedSignificant)) {
+                $this->dispatchWebhook(
+                    \App\Constants\WebhookEvent::EMPLOYEE_UPDATED,
+                    $companyId,
+                    [
+                        'employee_id'     => $id,
+                        'employee_number' => $existing['employee_number'] ?? null,
+                        'name'            => $existing['full_name'] ?? null,
+                        'changed_fields'  => array_values($changedSignificant),
+                        'updated_at'      => date('c'),
+                    ],
+                );
+            }
+        }
 
         // Kalau lokasi rumah / branch / grade berubah, recompute tunjangan
         // berbasis jarak agar snapshot karyawan ter-update.

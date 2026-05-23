@@ -1,0 +1,14 @@
+# HRIS Frontend — Dockerfile DEVELOPMENT.
+#
+# Vite dev server di port 5173 dengan HMR (hot reload).
+# Source di-mount via volume di docker-compose.yml.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Default port Vite dev server
+EXPOSE 5173
+
+# Command default di-override docker-compose (npm install + npm run dev --host)
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

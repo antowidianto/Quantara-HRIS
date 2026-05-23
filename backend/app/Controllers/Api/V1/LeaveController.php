@@ -6,6 +6,8 @@ use Config\Services;
 
 class LeaveController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     /**
      * Aturan eligibilitas per kategori leave_types berdasarkan UU 13/2003,
      * UU 6/2023 (Cipta Kerja), PP 35/2021, dan praktik Kemenaker.
@@ -569,6 +571,33 @@ class LeaveController extends ApiController
                 $insert,
                 "Pengajuan cuti {$leaveType['name']}: {$emp['full_name']} ({$data['start_date']} s/d {$data['end_date']}, {$days} hari)"
             );
+
+        // Sprint 14+ — webhook outbound `leave.requested`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::LEAVE_REQUESTED,
+            (int) $emp['company_id'],
+            [
+                'leave_id'       => $id,
+                'request_number' => $reqNumber,
+                'employee'       => [
+                    'id'              => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'name'            => $emp['full_name'] ?? null,
+                ],
+                'leave_type'     => [
+                    'id'   => (int) $leaveType['id'],
+                    'code' => $leaveType['code'] ?? null,
+                    'name' => $leaveType['name'] ?? null,
+                ],
+                'start_date'     => $data['start_date'],
+                'end_date'       => $data['end_date'],
+                'days'           => $days,
+                'is_half_day'    => $isHalf,
+                'status'         => 'PENDING',
+                'requested_at'   => date('c'),
+            ],
+        );
+
         return $this->ok([
             'id' => $id,
             'request_number' => $reqNumber,
@@ -654,6 +683,29 @@ class LeaveController extends ApiController
                 'Pengajuan cuti disetujui', 'Pengajuan cuti Anda telah disetujui',
                 ['leave_id' => $id], '/leaves/' . $id, true);
         }
+
+        // Sprint 13+ — dispatch webhook outbound via trait helper.
+        // Defensive: trait sudah handle exception + log warning.
+        $leaveType = $leaveType ?? $db->table('leave_types')
+            ->where('id', $leave['leave_type_id'])->get()->getRowArray();
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::LEAVE_APPROVED,
+            (int) $leave['company_id'],
+            [
+                'leave_id'   => $id,
+                'employee'   => $emp ? [
+                    'id'   => (int) $emp['id'],
+                    'nik'  => $emp['nik'] ?? null,
+                    'name' => $emp['name'] ?? null,
+                ] : null,
+                'leave_type' => $leaveType ? ($leaveType['code'] ?? $leaveType['name'] ?? null) : null,
+                'start_date' => $leave['start_date'],
+                'end_date'   => $leave['end_date'],
+                'days'       => (float) $leave['days'],
+                'approved_by' => $this->userId(),
+                'approved_at' => date('c'),
+            ],
+        );
         Services::audit()
             ->forModule('LEAVE')
             ->logApprove(
@@ -689,10 +741,198 @@ class LeaveController extends ApiController
             Services::notification()->send((int) $emp['user_id'], (int) $leave['company_id'], 'leave.rejected',
                 'Pengajuan cuti ditolak', "Alasan: {$reason}", ['leave_id' => $id], '/leaves/' . $id, true);
         }
+
+        // Sprint 13+ — dispatch webhook untuk integrasi external
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::LEAVE_REJECTED,
+            (int) $leave['company_id'],
+            [
+                'leave_id'   => $id,
+                'employee'   => $emp ? [
+                    'id'   => (int) $emp['id'],
+                    'nik'  => $emp['nik'] ?? null,
+                    'name' => $emp['name'] ?? null,
+                ] : null,
+                'reason'      => $reason,
+                'rejected_by' => $this->userId(),
+                'rejected_at' => date('c'),
+            ],
+        );
+
         Services::audit()
             ->forModule('LEAVE')
             ->logReject('leave', $id, $leave, $reason ?: '(tanpa alasan)');
         return $this->ok(null, 'Leave rejected');
+    }
+
+    /**
+     * POST /api/v1/leaves/(:num)/cancel
+     *
+     * Karyawan self-cancel cuti sebelum/saat mulai. Aturan (Sprint 17+):
+     *   - Pemilik cuti = pemanggil (atau super_admin/HR dengan
+     *     `leave.approve` boleh cancel atas nama)
+     *   - Status awal harus PENDING atau APPROVED
+     *   - Kalau APPROVED dan start_date sudah ≥ 2 hari kerja lampau, tolak —
+     *     karyawan tidak bisa cancel cuti yang sudah lebih dari 2 hari
+     *     berjalan; minta hubungi HR untuk koreksi attendance
+     *   - Wajib alasan minimal 5 karakter
+     *
+     * Side effects saat cancel APPROVED:
+     *   - Restore saldo cuti (used -= days, remaining += days)
+     *   - Hapus mark `attendances.status = LEAVE` untuk hari yang BELUM
+     *     terjadi (≥ today). Hari yang sudah lewat dipertahankan supaya
+     *     audit attendance historis tidak rusak — HR yang putus apakah
+     *     mau koreksi attendance lewat AttendanceChangeRequest.
+     */
+    public function cancel($id = null)
+    {
+        $id = (int) $id;
+        $db = \Config\Database::connect();
+        $leave = $db->table('leaves')->where('id', $id)->get()->getRowArray();
+        if (! $leave) return $this->fail('Not found', 404);
+
+        $tenant = $this->tenant();
+        $isOwner = (int) $leave['employee_id'] === (int) $tenant->getEmployeeId();
+        $canActAsHr = $tenant->isSuperAdmin() || $tenant->hasPermission('leave.approve');
+
+        if (! $isOwner && ! $canActAsHr) {
+            return $this->fail('Hanya pemilik cuti atau HR yang dapat membatalkan',
+                403, \App\Constants\ErrorCode::PERMISSION_DENIED);
+        }
+        if (! in_array($leave['status'], ['PENDING', 'APPROVED'], true)) {
+            return $this->fail('Hanya cuti PENDING/APPROVED yang bisa dibatalkan; status saat ini: ' . $leave['status'],
+                422, \App\Constants\ErrorCode::APPROVAL_INVALID_STATE);
+        }
+
+        // Tolak self-cancel kalau sudah > 2 hari berjalan (HR-only path)
+        $today = date('Y-m-d');
+        $start = (string) $leave['start_date'];
+        $daysSinceStart = (int) round((strtotime($today) - strtotime($start)) / 86400);
+        if (! $canActAsHr && $daysSinceStart > 2) {
+            return $this->fail(
+                'Cuti sudah berjalan lebih dari 2 hari; hubungi HR untuk koreksi.',
+                422, \App\Constants\ErrorCode::APPROVAL_INVALID_STATE,
+            );
+        }
+
+        $data = $this->getJsonInput();
+        $reason = trim((string) ($data['reason'] ?? ''));
+        if (strlen($reason) < 5) {
+            return $this->fail('Alasan pembatalan minimal 5 karakter', 422,
+                \App\Constants\ErrorCode::VALIDATION_FAILED);
+        }
+
+        $previousStatus = (string) $leave['status'];
+        $now = date('Y-m-d H:i:s');
+
+        $db->transStart();
+
+        $db->table('leaves')->where('id', $id)->update([
+            'status'              => 'CANCELLED',
+            'cancellation_reason' => $reason,
+            'cancelled_by'        => $this->userId(),
+            'cancelled_at'        => $now,
+            'updated_at'          => $now,
+        ]);
+
+        // Kalau cuti sudah APPROVED, restore saldo + hapus mark attendance
+        // di hari yang BELUM terjadi.
+        if ($previousStatus === 'APPROVED') {
+            $leaveType = $db->table('leave_types')
+                ->where('id', $leave['leave_type_id'])->get()->getRowArray();
+            if ($leaveType && (int) $leaveType['reset_yearly'] === 1
+                && (float) $leaveType['default_days'] > 0
+            ) {
+                $year = (int) date('Y', strtotime($leave['start_date']));
+                $bal = $db->table('leave_balances')
+                    ->where('employee_id', $leave['employee_id'])
+                    ->where('leave_type_id', $leave['leave_type_id'])
+                    ->where('period_year', $year)
+                    ->get()->getRowArray();
+                if ($bal) {
+                    $db->table('leave_balances')->where('id', $bal['id'])->update([
+                        'used'      => max(0, (float) $bal['used'] - (float) $leave['days']),
+                        'remaining' => (float) $bal['remaining'] + (float) $leave['days'],
+                        'updated_at'=> $now,
+                    ]);
+                }
+            }
+
+            // Hapus mark attendance LEAVE untuk hari yang belum terjadi
+            $db->table('attendances')
+                ->where('employee_id', $leave['employee_id'])
+                ->where('status', 'LEAVE')
+                ->where('work_date >=', $today)
+                ->where('work_date <=', $leave['end_date'])
+                ->where('clock_in_at IS NULL')   // safe: hanya yg memang LEAVE-only, bukan campuran clock+leave
+                ->delete();
+        }
+
+        $db->transComplete();
+        if ($db->transStatus() === false) {
+            return $this->fail('Gagal membatalkan cuti', 500);
+        }
+
+        // Notifikasi: kalau HR cancel atas nama karyawan, kasih tahu karyawan
+        $emp = $db->table('employees')->where('id', $leave['employee_id'])->get()->getRowArray();
+        if (! $isOwner && $emp && ! empty($emp['user_id'])) {
+            Services::notification()->send(
+                (int) $emp['user_id'], (int) $leave['company_id'], 'leave.canceled',
+                'Cuti dibatalkan',
+                "Cuti #{$leave['request_number']} dibatalkan oleh HR. Alasan: {$reason}",
+                ['leave_id' => $id], '/leaves/' . $id, true,
+            );
+        }
+        // Kalau pemilik cancel sendiri tapi sudah APPROVED, kasih tahu approver
+        if ($isOwner && $previousStatus === 'APPROVED' && ! empty($leave['approved_by'])) {
+            Services::notification()->send(
+                (int) $leave['approved_by'], (int) $leave['company_id'], 'leave.canceled',
+                'Cuti yang Anda setujui dibatalkan',
+                "Karyawan {$emp['full_name']} membatalkan cuti #{$leave['request_number']}. Alasan: {$reason}",
+                ['leave_id' => $id], '/leaves/' . $id, true,
+            );
+        }
+
+        // Sprint 17+ — webhook outbound `leave.canceled`
+        $leaveType = $leaveType ?? $db->table('leave_types')
+            ->where('id', $leave['leave_type_id'])->get()->getRowArray();
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::LEAVE_CANCELED,
+            (int) $leave['company_id'],
+            [
+                'leave_id'        => $id,
+                'request_number'  => $leave['request_number'] ?? null,
+                'previous_status' => $previousStatus,
+                'employee'        => $emp ? [
+                    'id'              => (int) $emp['id'],
+                    'employee_number' => $emp['employee_number'] ?? null,
+                    'name'            => $emp['full_name'] ?? null,
+                ] : null,
+                'leave_type' => $leaveType ? ($leaveType['code'] ?? $leaveType['name'] ?? null) : null,
+                'start_date' => $leave['start_date'],
+                'end_date'   => $leave['end_date'],
+                'days'       => (float) $leave['days'],
+                'reason'     => $reason,
+                'cancelled_by'    => $this->userId(),
+                'cancelled_by_hr' => $canActAsHr && ! $isOwner,
+                'cancelled_at'    => $now,
+            ],
+        );
+
+        Services::audit()
+            ->forModule('LEAVE')
+            ->log(
+                action: 'leave.cancel',
+                entity: 'leave',
+                entityId: $id,
+                before: ['status' => $previousStatus],
+                after: ['status' => 'CANCELLED', 'reason' => $reason],
+                description: ($isOwner ? 'Karyawan' : 'HR')
+                    . " membatalkan cuti #{$leave['request_number']} ({$leave['days']} hari): {$reason}",
+                severity: $previousStatus === 'APPROVED' ? 'WARNING' : 'NOTICE',
+            );
+
+        return $this->ok(null, 'Cuti dibatalkan');
     }
 
     /**

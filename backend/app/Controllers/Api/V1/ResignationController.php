@@ -25,6 +25,8 @@ use Config\Services;
  */
 class ResignationController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
     private const REASON_CATEGORIES = [
         'PERSONAL'    => 'Alasan pribadi',
         'CAREER'      => 'Pindah karir / karir baru',
@@ -390,6 +392,29 @@ class ResignationController extends ApiController
                     'tasks_created'     => $tasksCreated,
                     'template_id'       => $offboardingTemplateId,
                     'mpp_auto_created'  => $autoMppId,
+                ],
+            );
+
+            // Sprint 15+ — webhook outbound `employee.resigned`
+            // Source-of-truth approval voluntary resignation. Beda dengan
+            // EmployeeController::update yang detect resign_date diset
+            // manually oleh HR — di sini resign_date berasal dari workflow
+            // resignation request, dengan reference id-nya.
+            $this->dispatchWebhook(
+                \App\Constants\WebhookEvent::EMPLOYEE_RESIGNED,
+                (int) $row['company_id'],
+                [
+                    'resignation_id'     => (int) $row['id'],
+                    'employee_id'        => (int) $row['employee_id'],
+                    'employee_number'    => $emp['employee_number'] ?? null,
+                    'name'               => $emp['full_name'] ?? null,
+                    'resign_date'        => $effectiveDateForReplacement,
+                    'last_working_date'  => $row['last_working_date'] ?? null,
+                    'reason_category'    => $row['reason_category'] ?? null,
+                    'mpp_auto_created'   => $autoMppId,
+                    'tasks_generated'    => $tasksCreated,
+                    'approved_by'        => $userId,
+                    'approved_at'        => $now,
                 ],
             );
 

@@ -178,4 +178,29 @@ class OvertimeCalculatorTest extends TestCase
         $this->assertSame((float) (int) $amount, $amount,
             'Hasil overtime harus integer (sudah di-round)');
     }
+
+    // ─── Sprint 5-6 — custom hoursPerMonth divisor ─────────────────
+
+    public function testCustomHoursPerMonthDivisor(): void
+    {
+        // Perusahaan dengan working hours 160 (40 jam × 4 minggu),
+        // bukan default 173. Hourly rate jadi lebih besar.
+        $base = 4_800_000;
+        // Default (173): hourly = 27_745, 1 jam weekday = 41_618
+        // Custom (160): hourly = 30_000, 1 jam weekday = 45_000
+        $defaultAmount = $this->calc->calculate($base, 1, 'WEEKDAY');
+        $customAmount  = $this->calc->calculate($base, 1, 'WEEKDAY', 5, 160);
+
+        $this->assertEqualsWithDelta(41_618, $defaultAmount, 1);
+        $this->assertSame(45_000.0, $customAmount);
+    }
+
+    public function testInvalidHoursPerMonthFallsbackToDefault(): void
+    {
+        $base = 5_190_000;
+        $expected = $this->calc->calculate($base, 1, 'WEEKDAY');
+        // 0 atau negatif → fallback ke 173
+        $this->assertSame($expected, $this->calc->calculate($base, 1, 'WEEKDAY', 5, 0));
+        $this->assertSame($expected, $this->calc->calculate($base, 1, 'WEEKDAY', 5, -10));
+    }
 }

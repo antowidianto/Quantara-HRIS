@@ -20,6 +20,15 @@ const earnings = computed(() => (slip.value?.details || []).filter(d => d.type =
 const deductions = computed(() => (slip.value?.details || []).filter(d => d.type === 'DEDUCTION'))
 
 /**
+ * Sprint 20+ — Pisahkan earning kategori BONUS supaya bisa di-render
+ * di section terpisah dengan tax indicator. Bonus Engine (Sprint 16+)
+ * auto-merge ke payslip via PayrollService::calculatePeriod (Sprint 17+).
+ */
+const earningsNonBonus = computed(() => earnings.value.filter(d => d.category !== 'BONUS'))
+const earningsBonus = computed(() => earnings.value.filter(d => d.category === 'BONUS'))
+const hasBonus = computed(() => earningsBonus.value.length > 0 || (slip.value?.bonus_amount || 0) > 0)
+
+/**
  * Download PDF lewat axios supaya header Authorization (JWT) ikut.
  * `window.open` ke endpoint protected akan kena 401 karena browser tidak
  * meneruskan token. Caranya: minta blob, buat object URL, lalu klik
@@ -97,13 +106,49 @@ async function downloadBlob(url, filename, expectedMime) {
           <h3 class="font-semibold mb-2 text-sm text-gray-700">Pendapatan</h3>
           <table class="table mb-4">
             <tbody class="divide-y divide-gray-100">
-              <tr v-for="d in earnings" :key="d.id">
+              <tr v-for="d in earningsNonBonus" :key="d.id">
                 <td>{{ d.name }}</td>
                 <td class="text-right">{{ fmtCurrency(d.amount) }}</td>
               </tr>
               <tr class="font-semibold bg-gray-50"><td>Total Pendapatan</td><td class="text-right">{{ fmtCurrency(slip.gross_earning) }}</td></tr>
             </tbody>
           </table>
+
+          <!-- Sprint 20+ — Bonus section (auto-merge dari Bonus Engine) -->
+          <div v-if="hasBonus" class="mb-4 border border-amber-200 bg-amber-50/50 rounded-lg overflow-hidden">
+            <div class="px-3 py-2 bg-amber-100/60 border-b border-amber-200 flex items-center gap-2">
+              <span class="text-sm font-semibold text-amber-900">🎁 Bonus</span>
+              <span class="text-xs text-amber-700 ml-auto">
+                Otomatis dari Bonus Engine (Sprint 17+)
+              </span>
+            </div>
+            <table class="table mb-0">
+              <tbody class="divide-y divide-amber-100">
+                <tr v-for="d in earningsBonus" :key="d.id">
+                  <td class="pl-3">
+                    <span>{{ d.name }}</span>
+                    <span v-if="d.code === 'BONUS_NT'"
+                          class="ml-2 text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700"
+                          title="Non-Pajak — tidak masuk grossTaxable">
+                      Non-Pajak
+                    </span>
+                    <span v-else
+                          class="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700"
+                          title="Taxable — masuk grossTaxable, kena PPh21 TER">
+                      Taxable
+                    </span>
+                  </td>
+                  <td class="text-right pr-3">{{ fmtCurrency(d.amount) }}</td>
+                </tr>
+                <tr v-if="slip.bonus_amount > 0" class="bg-amber-100/40 text-xs">
+                  <td class="pl-3 text-amber-900">Total Bonus</td>
+                  <td class="text-right pr-3 text-amber-900 font-semibold">
+                    {{ fmtCurrency(slip.bonus_amount) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <h3 class="font-semibold mb-2 text-sm text-gray-700">Potongan</h3>
           <table class="table mb-4">

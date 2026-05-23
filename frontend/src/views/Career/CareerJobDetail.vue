@@ -17,10 +17,12 @@ import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import careerApi from '@/api/careerPublic'
 import { useToast } from 'vue-toastification'
+import { useCandidateAuthStore } from '@/stores/candidateAuth'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const candidateAuth = useCandidateAuthStore()
 const slug = computed(() => route.params.slug)
 const jobSlug = computed(() => route.params.jobSlug)
 
@@ -114,6 +116,17 @@ const closingInfo = computed(() => {
 const postedRel = computed(() => relativeTime(job.value?.posted_at || job.value?.created_at))
 
 function goApply() {
+  // Alur baru: guest harus daftar dulu, lalu login, lalu lengkapi profil,
+  // baru masuk ke form lamaran.
+  if (!candidateAuth.isAuthenticated) {
+    toast.info('Buat akun atau login terlebih dahulu sebelum melamar')
+    router.push({
+      name: 'candidate-register',
+      params: { slug: slug.value },
+      query: { redirect: `/careers/${slug.value}/jobs/${jobSlug.value}/apply` },
+    })
+    return
+  }
   router.push(`/careers/${slug.value}/jobs/${jobSlug.value}/apply`)
 }
 

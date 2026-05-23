@@ -1,0 +1,31 @@
+# Frontend image — exclude file yang tidak perlu masuk build context.
+
+node_modules/
+dist/
+coverage/
+.vite/
+.cache/
+
+# Local env (di-bake via build-arg, bukan COPY)
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+*.spec.js
+__tests__/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+.dockerignore

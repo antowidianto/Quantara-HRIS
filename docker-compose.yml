@@ -1,0 +1,138 @@
+# HRIS — Docker Compose untuk development.
+#
+# Stack lengkap untuk dev lokal: backend (php-fpm + nginx), frontend (vite),
+# mysql, redis (cache + session), mailhog (catch outgoing email).
+#
+# Pakai:
+#   docker compose up -d              # start semua service
+#   docker compose logs -f backend    # tail logs
+#   docker compose exec backend bash  # shell ke container backend
+#   docker compose down               # stop & remove
+#   docker compose down -v            # stop + remove volumes (reset DB)
+#
+# Untuk first-time setup setelah `up`:
+#   docker compose exec backend php spark migrate
+#   docker compose exec backend php spark db:seed InitialSeeder
+#
+# Frontend (Vite) hot-reload langsung — edit file di host = update di browser.
+# Backend (PHP-FPM) auto-reload via filesystem mount, tidak perlu restart.
+
+name: hris
+
+services:
+  # ─── MySQL 8 ─────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: hris-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: hris_db
+      MYSQL_USER: hris_user
+      MYSQL_PASSWORD: hris_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ─── Redis (cache + session) ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: hris-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── MailHog (dev SMTP catcher) ──────────────────────────────────
+  # SMTP di port 1025, web UI di http://localhost:8025
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: hris-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+
+  # ─── Backend (PHP-FPM + spark serve) ─────────────────────────────
+  # Pakai `php spark serve` di dev (lebih simpel daripada nginx+fpm).
+  # Untuk production lihat Dockerfile.prod dan docker-compose.prod.yml.
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: hris-backend
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+      - backend_vendor:/var/www/html/vendor
+    environment:
+      CI_ENVIRONMENT: development
+      database.default.hostname: mysql
+      database.default.database: hris_db
+      database.default.username: hris_user
+      database.default.password: hris_pass
+      database.default.DBDriver: MySQLi
+      database.default.port: "3306"
+      mail.protocol: smtp
+      mail.SMTPHost: mailhog
+      mail.SMTPPort: "1025"
+      mail.fromAddress: noreply@hris.local
+      mail.fromName: HRIS Dev
+      cache.handler: redis
+      cache.redis.host: redis
+      cache.redis.port: "6379"
+      cors.allowedOrigins: http://localhost:5173
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mailhog:
+        condition: service_started
+    command: >
+      sh -c "
+        composer install --no-interaction --prefer-dist --optimize-autoloader &&
+        php spark serve --host 0.0.0.0 --port 8080
+      "
+
+  # ─── Frontend (Vite dev server) ──────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: hris-frontend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+      VITE_USE_PROXY: "false"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    command: >
+      sh -c "
+        npm install --no-audit --no-fund &&
+        npm run dev -- --host 0.0.0.0
+      "
+
+volumes:
+  mysql_data:
+  backend_vendor:
+  frontend_node_modules:

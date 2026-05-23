@@ -68,6 +68,8 @@ const groups = computed(() => {
         { name: t('nav.items.leave_balance'),       to: '/leaves/balance',          icon: CalendarDaysIcon },
         { name: t('nav.items.my_overtimes'),        to: '/overtimes',               icon: ClockIcon },
         { name: t('nav.items.my_payslips'),         to: '/payslips/my',             icon: CurrencyDollarIcon },
+        // Sprint 21+ — Self-service riwayat bonus
+        { name: 'Riwayat Bonus',                     to: '/bonuses/my',              icon: BanknotesIcon },
         { name: t('nav.items.approval_inbox'),      to: '/approvals/inbox',         icon: ClipboardDocumentListIcon },
         { name: t('nav.items.approval_delegations'),to: '/approvals/delegations',   icon: ShieldCheckIcon },
         { name: t('nav.items.my_performance'),      to: '/performance/my',          icon: ChartBarIcon },
@@ -106,6 +108,9 @@ const groups = computed(() => {
         { name: 'Manpower Planning (MPP)',          to: '/recruitment/mpp',                            icon: ClipboardDocumentListIcon,  perm: 'mpp.view' },
         { name: t('nav.items.recruitment'),         to: '/recruitment/jobs',                           icon: UsersIcon,                  perm: 'recruitment.view' },
         { name: 'Career Portal',                    to: '/recruitment/career-settings',                icon: UsersIcon,                  perm: 'careers.manage' },
+        { name: 'Online Tests',                     to: '/recruitment/online-tests',                   icon: ClipboardDocumentListIcon,  perm: 'online_tests.view' },
+        { name: 'Question Bank',                    to: '/recruitment/online-test-bank',               icon: ClipboardDocumentListIcon,  perm: 'online_tests.manage' },
+        { name: 'Test Assignments',                 to: '/recruitment/online-test-assignments',        icon: ClipboardDocumentListIcon,  perm: 'online_tests.view' },
         { name: t('nav.items.helpdesk'),            to: '/helpdesk/tickets',                           icon: ClipboardDocumentListIcon,  perm: 'helpdesk.view' },
         { name: t('nav.items.training'),            to: '/training',                                   icon: ClipboardDocumentListIcon,  perm: 'training.view' },
         { name: t('nav.items.certificates'),        to: '/certificates',                               icon: ClipboardDocumentListIcon,  perm: 'certificate.view' },
@@ -115,8 +120,11 @@ const groups = computed(() => {
     {
       title: t('nav.payroll'),
       items: [
-        { name: t('nav.items.payroll_periods'), to: '/payroll/periods', icon: CurrencyDollarIcon,        perm: 'payroll.view' },
-        { name: t('nav.items.payslips'),        to: '/payslips',        icon: ClipboardDocumentListIcon, perm: 'payslip.view_all' },
+        { name: t('nav.items.payroll_periods'), to: '/payroll/periods',        icon: CurrencyDollarIcon,        perm: 'payroll.view' },
+        { name: t('nav.items.payslips'),        to: '/payslips',                icon: ClipboardDocumentListIcon, perm: 'payslip.view_all' },
+        // Bonus Engine — Sprint 16+ backend, Sprint 19+ UI. Lihat docs/BONUS_ENGINE.md
+        { name: 'Bonus Schemes',                to: '/payroll/bonus/schemes',  icon: BanknotesIcon,             perm: 'bonus.manage' },
+        { name: 'Bonus Runs',                   to: '/payroll/bonus/runs',     icon: BanknotesIcon,             perm: 'bonus.view' },
       ].filter(i => ! i.perm || can(i.perm)),
     },
     {

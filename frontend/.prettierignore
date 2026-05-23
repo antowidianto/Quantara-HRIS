@@ -1,0 +1,32 @@
+# Dependencies & build artifacts
+node_modules/
+dist/
+coverage/
+.vite/
+.cache/
+
+# Generated / env
+.env
+.env.*
+!.env.example
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# PWA generated
+public/sw.js
+public/registerSW.js
+public/workbox-*.js
+public/manifest.webmanifest
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Markdown / docs (keep author formatting)
+*.md

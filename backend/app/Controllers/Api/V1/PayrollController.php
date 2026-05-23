@@ -5,14 +5,97 @@ namespace App\Controllers\Api\V1;
 use Config\Services;
 
 /**
- * PayrollController — for actions not tied to a single period (e.g. THR generation)
+ * PayrollController — for actions not tied to a single period (e.g. THR generation).
+ *
+ * THR (Tunjangan Hari Raya) sesuai PMK 6/2016 & Permenaker 6/2016:
+ *   - Masa kerja ≥ 12 bulan : 1 bulan upah penuh
+ *   - Masa kerja 1–11 bulan : proporsional = (bulan_kerja / 12) × upah
+ *   - Masa kerja < 1 bulan  : tidak berhak THR
+ *
+ * Sprint 4 fix:
+ *   - `tenureMonths` dihitung sampai `pay_date` (bukan time()) supaya
+ *     re-generate THR tidak mengubah hasil sebelumnya.
+ *   - Karyawan resign mid-year DI-include kalau resign_date setelah
+ *     awal periode THR (Jan 1) — tenure dihitung dari join_date sampai
+ *     min(resign_date, pay_date). Sebelumnya: pakai `is_active=1` saja
+ *     yang otomatis exclude resign meski masih berhak THR.
+ *
+ * Lihat docs/IMPROVEMENT_CHECKLIST.md item 4 (Payroll Engine).
  */
 class PayrollController extends ApiController
 {
+    use \App\Traits\DispatchesWebhooks;
+
+    /**
+     * Hitung total masa kerja (bulan) sampai tanggal pay_date THR.
+     * Public + static supaya bisa di-unit-test.
+     *
+     * Aturan eligibility (PMK 6/2016 & Permenaker 6/2016):
+     *  - Karyawan yang resign sebelum awal periode THR (default: 1 Jan
+     *    tahun pay_date) tidak berhak → return 0.
+     *  - Karyawan yang masih aktif atau resign DI dalam periode THR
+     *    berhak proporsional. Tenure dihitung dari `join_date` sampai
+     *    `min(pay_date, resign_date)` — total kumulatif, tidak di-cap.
+     *
+     * Kaller (`computeThrAmount`) yang putuskan: tenure ≥ 12 → 1 bulan
+     * upah penuh; tenure 1..11 → proporsional; tenure < 1 → 0.
+     *
+     * @param string      $joinDate    YYYY-MM-DD
+     * @param string|null $resignDate  YYYY-MM-DD; null = masih aktif
+     * @param string      $payDate     YYYY-MM-DD tanggal bayar THR
+     * @param string|null $periodStart YYYY-MM-DD; cutoff eligibility resign
+     *                                 (default: 1 Jan tahun pay_date)
+     * @return int Total masa kerja dalam bulan (0..N), 0 = tidak berhak
+     */
+    public static function computeTenureMonths(
+        string $joinDate,
+        ?string $resignDate,
+        string $payDate,
+        ?string $periodStart = null,
+    ): int {
+        $payTs = strtotime($payDate);
+        if ($payTs === false) return 0;
+
+        $startTs = $periodStart
+            ? strtotime($periodStart)
+            : strtotime(date('Y-01-01', $payTs));
+        $joinTs = strtotime($joinDate);
+        if ($joinTs === false) return 0;
+
+        // Karyawan join setelah pay_date → tidak berhak
+        if ($joinTs > $payTs) return 0;
+
+        // Eligibility: resign sebelum awal periode THR → tidak berhak
+        $effectiveEnd = $payTs;
+        if ($resignDate) {
+            $resignTs = strtotime($resignDate);
+            if ($resignTs !== false) {
+                if ($resignTs < $startTs) return 0;
+                $effectiveEnd = min($payTs, $resignTs);
+            }
+        }
+        if ($effectiveEnd < $joinTs) return 0;
+
+        // Total masa kerja kumulatif (1 bulan = 30 hari approximation)
+        $months = (int) floor(($effectiveEnd - $joinTs) / 86400 / 30);
+        return max(0, $months);
+    }
+
+    /**
+     * Hitung nominal THR proporsional.
+     * - tenure ≥ 12 bulan → 1 bulan penuh
+     * - tenure 1..11    → tenure/12 × upah
+     * - tenure < 1      → 0
+     */
+    public static function computeThrAmount(float $monthlySalary, int $tenureMonths): float
+    {
+        if ($tenureMonths < 1 || $monthlySalary <= 0) return 0.0;
+        if ($tenureMonths >= 12) return round($monthlySalary);
+        return round($monthlySalary * ($tenureMonths / 12));
+    }
+
     /**
      * Generate THR period for the company.
-     * THR aturan: minimal 1 bulan upah untuk masa kerja >= 12 bulan,
-     * proporsional untuk masa kerja >= 1 bulan tapi < 12 bulan.
      */
     public function generateThr()
     {
@@ -24,8 +107,19 @@ class PayrollController extends ApiController
         if (! $valid) return null;
 
         $companyId = $this->companyId();
-        $year = (int) date('Y', strtotime($data['pay_date']));
-        $code = 'THR-' . $year;
+        $payTs = strtotime($data['pay_date']);
+
+        // Sprint 22+ — opsi tax treatment THR:
+        //   - GROSS (default, backward-compatible behavior lama)
+        //   - NET   (employer absorb pajak via yearly progressive gross-up)
+        $taxTreatment = strtoupper((string) ($data['tax_treatment'] ?? 'GROSS'));
+        if (! in_array($taxTreatment, ['GROSS', 'NET'], true)) {
+            return $this->fail('tax_treatment harus GROSS atau NET', 422);
+        }
+        $year  = (int) date('Y', $payTs);
+        $code  = 'THR-' . $year;
+        $startDate = date('Y-01-01', $payTs);
+        $endDate   = $data['pay_date'];
 
         $db = \Config\Database::connect();
         $existing = $db->table('payroll_periods')->where('company_id', $companyId)->where('code', $code)->countAllResults();
@@ -33,9 +127,7 @@ class PayrollController extends ApiController
             return $this->fail('THR period for this year already exists', 409);
         }
 
-        $startDate = date('Y-01-01', strtotime($data['pay_date']));
-        $endDate   = $data['pay_date'];
-
+        $now = date('Y-m-d H:i:s');
         $db->table('payroll_periods')->insert([
             'company_id'   => $companyId,
             'code'         => $code,
@@ -48,24 +140,65 @@ class PayrollController extends ApiController
             'cutoff_attendance_date' => $endDate,
             'status'       => 'DRAFT',
             'created_by'   => $this->userId(),
-            'created_at'   => date('Y-m-d H:i:s'),
-            'updated_at'   => date('Y-m-d H:i:s'),
+            'created_at'   => $now,
+            'updated_at'   => $now,
         ]);
         $periodId = (int) $db->insertID();
 
-        // Create THR slips
+        // Sprint 4 — include karyawan yang resign mid-year selama
+        // resign_date ≥ start_date THR; mereka tetap berhak THR proporsional.
         $employees = $db->table('employees')
             ->where('company_id', $companyId)
-            ->where('is_active', 1)
             ->where('deleted_at IS NULL')
+            ->where('join_date <=', $endDate)
+            ->groupStart()
+                ->where('resign_date IS NULL')
+                ->orWhere('resign_date >=', $startDate)
+            ->groupEnd()
             ->get()->getResultArray();
 
         $totalGross = 0;
+        $totalNet = 0;
+        $totalDeduction = 0;
+        $countIncluded = 0;
         foreach ($employees as $emp) {
-            $tenureMonths = max(0, (int) ((time() - strtotime($emp['join_date'])) / 86400 / 30));
+            $tenureMonths = self::computeTenureMonths(
+                (string) $emp['join_date'],
+                ! empty($emp['resign_date']) ? (string) $emp['resign_date'] : null,
+                $data['pay_date'],
+                $startDate,
+            );
             if ($tenureMonths < 1) continue;
+
             $monthly = (float) $emp['basic_salary'];
-            $thrAmount = $tenureMonths >= 12 ? $monthly : round($monthly * ($tenureMonths / 12));
+            $thrNetTarget = self::computeThrAmount($monthly, $tenureMonths);
+            if ($thrNetTarget <= 0) continue;
+
+            $ptkp = (string) ($emp['ptkp_status'] ?: 'TK0');
+            $baseGrossYearly = $monthly * 12.0;
+
+            $thrGross = $thrNetTarget;
+            $thrPph = 0.0;
+            $thrGrossUp = 0.0;
+            if ($taxTreatment === 'NET') {
+                $grossUp = Services::pph21()->grossUpYearlyFromNet(
+                    $thrNetTarget,
+                    $baseGrossYearly,
+                    $ptkp,
+                    $year,
+                    0.0, // BPJS yearly THR scope belum dipipe (defer)
+                );
+                $thrGross = (float) $grossUp['gross_up_amount'];
+                $thrPph = (float) $grossUp['tax_added'];
+                $thrGrossUp = max(0.0, $thrGross - $thrNetTarget);
+            }
+
+            // Backward-compatible: mode GROSS mengikuti behavior lama (tidak
+            // potong pajak terpisah pada slip THR). Mode NET set take_home ke
+            // target net (employer absorb tax).
+            $takeHome = $taxTreatment === 'NET'
+                ? $thrNetTarget
+                : $thrGross;
 
             $slipNumber = 'THR-' . $year . '-' . str_pad((string) $emp['id'], 5, '0', STR_PAD_LEFT);
             $db->table('payslips')->insert([
@@ -75,34 +208,77 @@ class PayrollController extends ApiController
                 'slip_number'       => $slipNumber,
                 'employee_number'   => $emp['employee_number'],
                 'employee_name'     => $emp['full_name'],
-                'ptkp_status'       => $emp['ptkp_status'],
-                'thr_amount'        => $thrAmount,
-                'gross_earning'     => $thrAmount,
-                'total_earning'     => $thrAmount,
-                'take_home_pay'     => $thrAmount,
+                'ptkp_status'       => $ptkp,
+                'thr_amount'        => $thrGross,
+                'gross_earning'     => $thrGross,
+                'total_earning'     => $thrGross,
+                'pph21_amount'      => $thrPph,
+                'total_deduction'   => $thrPph,
+                'take_home_pay'     => $takeHome,
                 'pph21_method'      => 'TER',
                 'breakdown'         => json_encode([
                     'tenure_months' => $tenureMonths,
                     'monthly_base'  => $monthly,
-                    'thr_amount'    => $thrAmount,
+                    'thr_net_target'=> $thrNetTarget,
+                    'thr_gross'     => $thrGross,
+                    'thr_pph'       => $thrPph,
+                    'thr_gross_up'  => $thrGrossUp,
+                    'tax_treatment' => $taxTreatment,
+                    'resign_date'   => $emp['resign_date'] ?? null,
                 ], JSON_UNESCAPED_UNICODE),
-                'created_at'        => date('Y-m-d H:i:s'),
-                'updated_at'        => date('Y-m-d H:i:s'),
+                'created_at'        => $now,
+                'updated_at'        => $now,
             ]);
-            $totalGross += $thrAmount;
+            $totalGross += $thrGross;
+            $totalDeduction += $thrPph;
+            $totalNet += $takeHome;
+            $countIncluded++;
         }
 
         $db->table('payroll_periods')->where('id', $periodId)->update([
-            'status'      => 'CALCULATED',
-            'total_gross' => $totalGross,
-            'total_net'   => $totalGross,
+            'status'          => 'CALCULATED',
+            'total_gross'     => $totalGross,
+            'total_deduction' => $totalDeduction,
+            'total_net'       => $totalNet,
         ]);
 
-        Services::audit()->log('payroll.thr_generate', 'payroll_period', $periodId);
+        Services::audit()->forModule('PAYROLL')->log(
+            action: 'payroll.thr_generate',
+            entity: 'payroll_period',
+            entityId: $periodId,
+            description: "Generate THR {$year}: {$countIncluded} karyawan, gross Rp "
+                . number_format($totalGross, 0, ',', '.')
+                . ", net Rp " . number_format($totalNet, 0, ',', '.')
+                . " ({$taxTreatment})",
+            severity: 'NOTICE',
+        );
+
+        // Sprint 15+ — webhook outbound `thr.generated`
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::THR_GENERATED,
+            (int) $companyId,
+            [
+                'payroll_period_id' => $periodId,
+                'name'              => $data['name'],
+                'period_year'       => $year,
+                'pay_date'          => $data['pay_date'],
+                'employee_count'    => $countIncluded,
+                'total_gross'       => $totalGross,
+                'total_deduction'   => $totalDeduction,
+                'total_net'         => $totalNet,
+                'tax_treatment'     => $taxTreatment,
+                'generated_by'      => $this->userId(),
+                'generated_at'      => date('c'),
+            ],
+        );
+
         return $this->ok([
-            'period_id' => $periodId,
-            'total'     => $totalGross,
-            'count'     => count($employees),
+            'period_id'       => $periodId,
+            'total_gross'     => $totalGross,
+            'total_deduction' => $totalDeduction,
+            'total_net'       => $totalNet,
+            'tax_treatment'   => $taxTreatment,
+            'count'           => $countIncluded,
         ], 'THR generated', 201);
     }
 }
