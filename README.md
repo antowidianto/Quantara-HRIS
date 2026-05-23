@@ -1,4 +1,4 @@
-# HRIS — Production-Ready Indonesian HRIS
+# Quantara - HRIS System
 
 Sistem Human Resource Information System (HRIS) yang patuh pada peraturan Kemenaker terbaru, mendukung **multi business unit**, payroll siap pakai, notifikasi multi-channel, dan keamanan berlapis (2FA, password policy, file magic-byte validation, rate limit per endpoint, audit log lengkap).
 
@@ -215,27 +215,5 @@ npm run build          # Production build
 
 ## Deployment Production
 
-Lihat `docs/DEPLOYMENT.md` untuk panduan Nginx + PHP-FPM, atau gunakan Dockerfile production:
-
-```bash
-# Build images
-docker build -t hris-backend:latest -f backend/Dockerfile backend/
-docker build --build-arg VITE_API_BASE_URL=https://api.hris.example.com \
-             -t hris-frontend:latest -f frontend/Dockerfile frontend/
-
-# Run (dengan reverse proxy nginx + ssl di depan)
-docker run -d -p 9000:9000 --env-file backend/.env.production \
-    -v hris_writable:/var/www/html/writable hris-backend:latest
-docker run -d -p 80:80 hris-frontend:latest
-```
-
-## Contributing
-
-- Branch dari `main`, PR dengan judul Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`)
-- CI wajib hijau sebelum merge (PHPStan + PHPUnit + ESLint + Vitest + build)
-- Tambah unit test untuk pure-function library baru
-- Migrasi pakai pola **additive-only** (jangan rename/drop kolom existing)
-
-## License
-
+## Lisensi
 Proprietary — Internal use.
