@@ -3,7 +3,7 @@
 # Vite dev server di port 5173 dengan HMR (hot reload).
 # Source di-mount via volume di docker-compose.yml.
 
-FROM node:20-alpine
+FROM node:26-alpine
 
 WORKDIR /app
 

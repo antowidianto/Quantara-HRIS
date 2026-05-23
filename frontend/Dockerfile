@@ -14,7 +14,7 @@
 #                -t hris-frontend:latest -f frontend/Dockerfile frontend/
 
 # ─── Stage 1: build SPA ────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
