@@ -187,6 +187,9 @@ const routes = [
     ],
   },
 
+  // Contract digital signing — accessed via notification link, NOT in sidebar
+  { path: '/employee/contracts/sign/:id', name: 'contract-sign', component: () => import('@/views/Employees/ContractSign.vue'), meta: { requiresAuth: true } },
+
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFound.vue') },
 ]
 

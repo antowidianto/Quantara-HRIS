@@ -3,23 +3,36 @@ import { ref, onMounted } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
+import { EyeIcon } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
 const employee = ref(null)
 const balances = ref([])
 const contracts = ref([])
+const generatedContracts = ref([])
 
 onMounted(async () => {
   const id = route.params.id
-  const [emp, bal, ctr] = await Promise.allSettled([
+  const [emp, bal, ctr, gen] = await Promise.allSettled([
     api.get(`/employees/${id}`),
     api.get(`/leave-balances/${id}`),
     api.get(`/employees/${id}/contracts`),
+    api.get('/generated-contracts', { params: { employee_id: id } }),
   ])
   if (emp.status === 'fulfilled') employee.value = emp.value.data.data
   if (bal.status === 'fulfilled') balances.value = bal.value.data.data
   if (ctr.status === 'fulfilled') contracts.value = ctr.value.data.data
+  if (gen.status === 'fulfilled') generatedContracts.value = gen.value.data.data
 })
+
+function openGeneratedContract(c) {
+  api.get(`/generated-contracts/${c.id}/html`, { responseType: 'blob' }).then(res => {
+    const url = URL.createObjectURL(res.data)
+    window.open(url, '_blank')
+  }).catch(e => {
+    console.error('Gagal membuka kontrak:', e)
+  })
+}
 </script>
 
 <template>
@@ -45,6 +58,7 @@ onMounted(async () => {
           <div><div class="text-gray-500">Bank</div><div>{{ employee.bank_name || '-' }} {{ employee.bank_account ? '· ' + employee.bank_account : '' }}</div></div>
           <div><div class="text-gray-500">BPJS Kes</div><div>{{ employee.bpjs_kesehatan_no || '-' }}</div></div>
           <div class="col-span-2"><div class="text-gray-500">Alamat</div><div>{{ employee.address || '-' }}</div></div>
+          <div v-if="employee.contract_end_date"><div class="text-gray-500">Akhir Kontrak</div><div>{{ fmtDate(employee.contract_end_date) }}</div></div>
         </div>
       </div>
 
@@ -75,6 +89,29 @@ onMounted(async () => {
               <td>{{ fmtDate(c.start_date) }}</td>
               <td>{{ fmtDate(c.end_date) }}</td>
               <td>{{ fmtCurrency(c.basic_salary) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card mt-6">
+      <div class="card-header"><span class="font-semibold">Dokumen Kontrak Generated</span></div>
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead><tr><th>No Kontrak</th><th>Subject</th><th>Status</th><th>Dibuat</th><th></th></tr></thead>
+          <tbody>
+            <tr v-if="generatedContracts.length === 0"><td colspan="5" class="text-center py-4 text-gray-400">Belum ada kontrak digenerate</td></tr>
+            <tr v-for="g in generatedContracts" :key="g.id">
+              <td class="font-mono text-sm">{{ g.contract_number }}</td>
+              <td class="text-sm">{{ g.subject || '—' }}</td>
+              <td><span class="badge-blue">{{ g.status }}</span></td>
+              <td class="text-sm">{{ fmtDate(g.created_at) }}</td>
+              <td class="text-right">
+                <button class="btn-secondary text-xs" @click="openGeneratedContract(g)">
+                  <EyeIcon class="w-3.5 h-3.5" /> Buka
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>

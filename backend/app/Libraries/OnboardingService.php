@@ -241,6 +241,32 @@ class OnboardingService
     }
 
     /**
+     * Public method untuk menandai task ONBOARD sebagai COMPLETED dari luar.
+     * Dipanggil misalnya dari GeneratedContractController saat kontrak
+     * ditandatangani.
+     */
+    public function completeTaskByKey(int $employeeId, string $type, string $taskKey, string $note = ''): void
+    {
+        $db = \Config\Database::connect();
+        $task = $db->table('employee_tasks')
+            ->where('employee_id', $employeeId)
+            ->where('type', $type)
+            ->where('task_key', $taskKey)
+            ->where('status', 'PENDING')
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $task) return;
+        $now = date('Y-m-d H:i:s');
+        $db->table('employee_tasks')->where('id', (int) $task['id'])->update([
+            'status'          => 'COMPLETED',
+            'completed_at'    => $now,
+            'completion_note' => $note ?: "Auto-complete: {$taskKey} selesai via sistem",
+            'updated_at'      => $now,
+        ]);
+        log_message('info', "Task {$taskKey} auto-completed for employee #{$employeeId}");
+    }
+
+    /**
      * Mark satu task ONBOARD dengan key tertentu sebagai COMPLETED.
      * Idempotent: skip kalau sudah completed/cancelled. Increment counter
      * via reference.
