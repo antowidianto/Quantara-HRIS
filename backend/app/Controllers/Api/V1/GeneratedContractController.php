@@ -118,6 +118,97 @@ class GeneratedContractController extends ApiController
     }
 
     /**
+     * Tanda tangan digital kontrak oleh karyawan.
+     * Menerima signature sebagai base64 data-URL PNG atau upload file.
+     */
+    public function sign($id = null)
+    {
+        $row = $this->loadOwned((int) $id);
+        if ($row instanceof \CodeIgniter\HTTP\ResponseInterface) return $row;
+
+        if ($row['status'] !== 'SENT') {
+            return $this->fail('Kontrak sudah ditandatangani atau tidak dalam status SENT', 422);
+        }
+
+        $body = $this->getJsonInput();
+        $signatureData = $body['signature_data'] ?? null; // base64 data-URL
+
+        if (! $signatureData) {
+            return $this->fail('signature_data (base64) wajib diisi', 422);
+        }
+
+        // Decode base64
+        if (! preg_match('/^data:image\/(png|jpeg|webp);base64,(.+)$/', $signatureData, $m)) {
+            return $this->fail('Format signature tidak valid. Gunakan data:image/png;base64,...', 422);
+        }
+        $ext = $m[1] === 'jpeg' ? 'jpg' : $m[1];
+        $binary = base64_decode(str_replace(' ', '+', $m[2]), true);
+        if ($binary === false || strlen($binary) > 2 * 1024 * 1024) {
+            return $this->fail('File signature tidak valid atau terlalu besar (maks 2 MB)', 422);
+        }
+
+        // Simpan ke FileStorage
+        $relativePath = 'contracts/signatures/' . (int) $row['company_id']
+            . '/' . $id . '_' . date('YmdHis') . '.' . $ext;
+        $storage = Services::fileStorage();
+        $storage->put($relativePath, $binary);
+
+        $now = date('Y-m-d H:i:s');
+        $db = \Config\Database::connect();
+        $db->table('generated_contracts')->where('id', (int) $id)->update([
+            'status'     => 'SIGNED',
+            'signed_at'  => $now,
+            'signed_url' => $relativePath,
+            'updated_at' => $now,
+        ]);
+
+        // Auto-complete CONTRACT_SIGN onboarding task
+        try {
+            $onboarding = Services::onboarding();
+            $onboarding->completeTaskByKey((int) $row['employee_id'], 'ONBOARD', 'CONTRACT_SIGN');
+        } catch (\Throwable $e) {
+            log_message('warning', "Auto-complete CONTRACT_SIGN failed: " . $e->getMessage());
+        }
+
+        Services::audit()
+            ->forModule('EMPLOYEE')
+            ->logUpdate('generated_contract', (int) $id, ['status' => 'SENT'], ['status' => 'SIGNED'],
+                "Kontrak {$row['contract_number']} ditandatangani digital oleh karyawan");
+
+        return $this->ok([
+            'signed_url' => $storage->signedUrl($relativePath, 86400),
+            'signed_at'  => $now,
+        ], 'Kontrak berhasil ditandatangani');
+    }
+
+    /**
+     * Daftar kontrak yang menunggu tanda tangan untuk employee yang sedang login.
+     */
+    public function pendingForEmployee()
+    {
+        $user = $this->tenant()->getUser();
+        $employeeId = (int) ($user['employee_id'] ?? 0);
+        if (! $employeeId) {
+            return $this->fail('User ini tidak terhubung ke data karyawan', 400);
+        }
+
+        $db = \Config\Database::connect();
+        $rows = $db->table('generated_contracts')
+            ->where('employee_id', $employeeId)
+            ->where('status', 'SENT')
+            ->where('deleted_at IS NULL')
+            ->orderBy('created_at', 'DESC')
+            ->get()->getResultArray();
+
+        foreach ($rows as &$r) {
+            unset($r['rendered_html'], $r['variables_snapshot']);
+        }
+        unset($r);
+
+        return $this->ok($rows);
+    }
+
+    /**
      * Helper: cek scope + load row.
      */
     private function loadOwned(int $id)

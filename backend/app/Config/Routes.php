@@ -130,11 +130,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->resource('job-grades', ['controller' => 'JobGradeController']);
 
         // Employees
-        $routes->resource('employees', ['controller' => 'EmployeeController']);
+        // Custom routes HARUS sebelum resource agar tidak tabrakan dengan resource show()
         $routes->get('employees/(:num)/contracts', 'EmployeeController::contracts/$1');
         $routes->post('employees/(:num)/contracts', 'EmployeeController::addContract/$1');
         $routes->get('employees/(:num)/documents', 'EmployeeController::documents/$1');
         $routes->post('employees/(:num)/documents', 'EmployeeController::uploadDocument/$1');
+        $routes->resource('employees', ['controller' => 'EmployeeController']);
 
         // Attendance
         $routes->get('attendance', 'AttendanceController::index');
@@ -715,6 +716,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('generated-contracts/(:num)/html',      'GeneratedContractController::html/$1');
         $routes->put('generated-contracts/(:num)/status',    'GeneratedContractController::updateStatus/$1');
         $routes->delete('generated-contracts/(:num)',        'GeneratedContractController::delete/$1');
+        // Tanda tangan digital kontrak oleh karyawan
+        $routes->post('generated-contracts/(:num)/sign',     'GeneratedContractController::sign/$1');
+        // Daftar kontrak yang menunggu tanda tangan untuk employee login
+        $routes->get('employee/pending-contracts',           'GeneratedContractController::pendingForEmployee');
     });
 });
 

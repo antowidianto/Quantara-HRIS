@@ -288,6 +288,16 @@ class RecruitmentService
             log_message('warning', "Onboarding apply failed for employee #{$employeeId}: " . $e->getMessage());
         }
 
+        // Auto-generate kontrak kerja dari template default perusahaan
+        // setelah employee berhasil di-hire.
+        if (! empty($insert['employment_status'])) {
+            try {
+                $this->autoGenerateContract($employeeId, $cand, $insert, $autoResult);
+            } catch (\Throwable $e) {
+                log_message('warning', "Auto-generate contract failed for employee #{$employeeId}: " . $e->getMessage());
+            }
+        }
+
         // Update job_postings status kalau headcount terpenuhi
         $hiredCount = $db->table('candidates')
             ->where('job_posting_id', (int) $cand['job_posting_id'])
@@ -399,5 +409,119 @@ class RecruitmentService
             if (isset($stats[$r['current_stage']])) $stats[$r['current_stage']] = (int) $r['total'];
         }
         return $stats;
+    }
+
+    /**
+     * Auto-generate kontrak kerja dari template default perusahaan
+     * saat kandidat di-hire. Membuat employee_contracts + generated_contracts
+     * dengan status SENT, lalu kirim notifikasi ke karyawan.
+     */
+    private function autoGenerateContract(int $employeeId, array $candidate, array $empInsert, array $autoResult): void
+    {
+        $db = \Config\Database::connect();
+        $companyId = (int) $empInsert['company_id'];
+
+        // Cari template kontrak default untuk tipe employment
+        $template = $db->table('contract_templates')
+            ->where('company_id', $companyId)
+            ->where('is_active', 1)
+            ->groupStart()
+                ->where('is_default', 1)
+                ->where('contract_type', $empInsert['employment_status'] ?? 'PKWTT')
+            ->groupEnd()
+            ->orderBy('is_default', 'DESC')
+            ->orderBy('id', 'ASC')
+            ->limit(1)
+            ->get()->getRowArray();
+
+        if (! $template) {
+            $template = $db->table('contract_templates')
+                ->where('company_id', $companyId)
+                ->where('contract_type', $empInsert['employment_status'] ?? 'PKWTT')
+                ->where('is_active', 1)
+                ->orderBy('id', 'ASC')
+                ->limit(1)
+                ->get()->getRowArray();
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $contractNumber = 'CT-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+        $startDate = $empInsert['join_date'] ?? date('Y-m-d');
+        $endDate = null;
+        if (in_array($empInsert['employment_status'] ?? '', ['PKWT', 'PROBATION', 'MAGANG'], true)) {
+            $endDate = date('Y-m-d', strtotime($startDate . ' +1 year'));
+        }
+
+        // Update employee record dengan contract dates
+        $employeeUpdate = ['updated_at' => $now];
+        if ($endDate) $employeeUpdate['contract_end_date'] = $endDate;
+        $db->table('employees')->where('id', $employeeId)->update($employeeUpdate);
+
+        // Insert employee_contracts
+        $db->table('employee_contracts')->insert([
+            'company_id'      => $companyId,
+            'employee_id'     => $employeeId,
+            'contract_number' => $contractNumber,
+            'contract_type'   => $empInsert['employment_status'] ?? 'PKWTT',
+            'start_date'      => $startDate,
+            'end_date'        => $endDate,
+            'basic_salary'    => $empInsert['basic_salary'] ?? 0,
+            'position_id'     => $empInsert['position_id'] ?? null,
+            'department_id'   => $empInsert['department_id'] ?? null,
+            'created_at'      => $now,
+            'updated_at'      => $now,
+        ]);
+        $contractId = (int) $db->insertID();
+
+        // Render kontrak dari template (atau fallback minimal)
+        if ($template) {
+            $renderer = new \App\Libraries\ContractRenderer();
+            $context = $renderer->buildContext($employeeId, $contractId);
+            $renderedHtml = $renderer->render($template, $context);
+        } else {
+            $context = ['generated_at' => $now, 'note' => 'Template tidak ditemukan — kontrak dibuat otomatis saat hire.'];
+            $renderedHtml = '<p>Kontrak kerja ' . htmlspecialchars($empInsert['full_name'] ?? 'Karyawan', ENT_QUOTES, 'UTF-8')
+                . ' — ' . $contractNumber . '. Silakan hubungi HR untuk template kontrak resmi.</p>';
+        }
+
+        // Insert generated_contracts dengan status SENT (langsung dikirim)
+        $db->table('generated_contracts')->insert([
+            'company_id'           => $companyId,
+            'employee_id'          => $employeeId,
+            'employee_contract_id' => $contractId,
+            'template_id'          => $template ? (int) $template['id'] : null,
+            'contract_number'      => $contractNumber,
+            'subject'              => 'Kontrak Kerja - ' . ($empInsert['full_name'] ?? ''),
+            'rendered_html'        => $renderedHtml,
+            'variables_snapshot'   => json_encode($context, JSON_UNESCAPED_UNICODE),
+            'status'               => 'SENT',
+            'sent_at'              => $now,
+            'created_by'           => null,
+            'created_at'           => $now,
+            'updated_at'           => $now,
+        ]);
+        $generatedId = (int) $db->insertID();
+
+        // Kirim notifikasi ke employee user
+        $userId = $autoResult['user_created'] ?? null;
+        if ($userId) {
+            try {
+                Services::notification()->send(
+                    userId: $userId,
+                    companyId: $companyId,
+                    type: 'contract.sign',
+                    title: 'Kontrak Kerja Siap Ditandatangani',
+                    message: 'Selamat! Kontrak kerja Anda telah terbit. Silakan tanda tangan digital untuk menyelesaikan proses onboarding.',
+                    data: [
+                        'contract_id'   => $generatedId,
+                        'contract_number' => $contractNumber,
+                        'employee_id'   => $employeeId,
+                    ],
+                    linkUrl: '/employee/contracts/sign/' . $generatedId,
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', "Contract sign notification failed for employee #{$employeeId}: " . $e->getMessage());
+            }
+        }
     }
 }

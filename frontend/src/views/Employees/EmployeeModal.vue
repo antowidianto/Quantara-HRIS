@@ -177,13 +177,37 @@ async function loadEmployee() {
       form.value = { ...blankForm(), ...employee.value }
     }
     if (bal.status === 'fulfilled') balances.value = bal.value.data.data || []
-    if (ctr.status === 'fulfilled') contracts.value = ctr.value.data.data || []
+    if (ctr.status === 'fulfilled') {
+      const raw = ctr.value.data?.data
+      contracts.value = Array.isArray(raw) ? raw.filter(Boolean) : []
+    } else { console.warn('Gagal load employee_contracts:', ctr.reason?.response?.data || ctr.reason) }
     if (alw.status === 'fulfilled') allowances.value = alw.value.data.data || []
-    if (gen.status === 'fulfilled') generatedContracts.value = gen.value.data.data || []
+    if (gen.status === 'fulfilled') {
+      const raw = gen.value.data?.data
+      generatedContracts.value = Array.isArray(raw) ? raw.filter(Boolean) : []
+    } else { console.warn('Gagal load generated_contracts:', gen.reason?.response?.data || gen.reason) }
   } catch (e) {
     toast.error('Gagal memuat data karyawan')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadContractData() {
+  if (! props.employeeId) return
+  try {
+    const [ctr, gen] = await Promise.all([
+      api.get(`/employees/${props.employeeId}/contracts`),
+      api.get('/generated-contracts', { params: { employee_id: props.employeeId } }),
+    ])
+    const rawCtr = ctr.data?.data
+    const rawGen = gen.data?.data
+    console.log('DEBUG contracts API:', rawCtr, 'type:', typeof rawCtr, 'isArray:', Array.isArray(rawCtr))
+    console.log('DEBUG generated API:', rawGen, 'type:', typeof rawGen, 'isArray:', Array.isArray(rawGen))
+    contracts.value = Array.isArray(rawCtr) ? rawCtr.filter(Boolean) : []
+    generatedContracts.value = Array.isArray(rawGen) ? rawGen.filter(Boolean) : []
+  } catch (e) {
+    toast.error('Gagal memuat data kontrak: ' + (e.response?.data?.message || e.message))
   }
 }
 
@@ -384,7 +408,10 @@ const tabGroups = computed(() => {
 })
 
 const activeTab = ref('general')
-watch(activeTab, (val) => { if (val === 'history') loadHistoryTab() })
+watch(activeTab, (val) => {
+  if (val === 'history') loadHistoryTab()
+  if (val === 'contracts') loadContractData()
+})
 
 const allTabs = computed(() => tabGroups.value.flatMap(g => g.tabs))
 const currentTabLabel = computed(() => allTabs.value.find(t => t.id === activeTab.value)?.label || '')
@@ -419,7 +446,7 @@ function statusBadgeClass(s) {
 <template>
   <div class="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm"
        @click.self="emit('close')">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[86vh] flex flex-col overflow-hidden">
       <!-- ─── Header ──────────────────────────────────────────── -->
       <div class="border-b border-gray-200 bg-gradient-to-r from-primary-50/40 via-white to-white">
         <div class="px-6 py-4 flex items-start justify-between gap-4">
@@ -1154,6 +1181,12 @@ function statusBadgeClass(s) {
 
             <!-- ── KONTRAK ───────────────────────────────────── -->
             <div v-else-if="activeTab === 'contracts'" class="space-y-6">
+              <!-- Debug: tampilkan jumlah data -->
+              <div class="text-xs text-gray-400 space-y-1 mb-2 p-2 bg-gray-50 rounded">
+                <div>contracts length: {{ contracts?.length ?? 'N/A' }}</div>
+                <div>generatedContracts length: {{ generatedContracts?.length ?? 'N/A' }}</div>
+              </div>
+
               <div>
                 <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Kontrak Kerja</h4>
                 <div class="rounded-lg border border-gray-200 overflow-hidden">
@@ -1162,15 +1195,15 @@ function statusBadgeClass(s) {
                       <tr><th>No</th><th>Tipe</th><th>Mulai</th><th>Berakhir</th><th class="text-right">Gaji</th></tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
-                      <tr v-if="contracts.length === 0">
+                      <tr v-if="!contracts || contracts.length === 0">
                         <td colspan="5" class="text-center py-6 text-gray-400 text-sm">Belum ada kontrak</td>
                       </tr>
-                      <tr v-for="c in contracts" :key="c.id">
-                        <td class="font-mono text-sm">{{ c.contract_number }}</td>
-                        <td><span class="badge-blue">{{ c.contract_type }}</span></td>
-                        <td class="text-sm">{{ fmtDate(c.start_date) }}</td>
-                        <td class="text-sm">{{ fmtDate(c.end_date) }}</td>
-                        <td class="text-right font-medium tabular-nums">{{ fmtCurrency(c.basic_salary) }}</td>
+                      <tr v-for="(c, ci) in contracts" :key="c?.id ?? ci">
+                        <td class="font-mono text-sm">{{ c?.contract_number }}</td>
+                        <td><span class="badge-blue">{{ c?.contract_type }}</span></td>
+                        <td class="text-sm">{{ fmtDate(c?.start_date) }}</td>
+                        <td class="text-sm">{{ fmtDate(c?.end_date) }}</td>
+                        <td class="text-right font-medium tabular-nums">{{ fmtCurrency(c?.basic_salary) }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1194,18 +1227,18 @@ function statusBadgeClass(s) {
                       <tr><th>No Kontrak</th><th>Subject</th><th>Template</th><th>Status</th><th>Dibuat</th><th></th></tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
-                      <tr v-if="generatedContracts.length === 0">
+                      <tr v-if="!generatedContracts || generatedContracts.length === 0">
                         <td colspan="6" class="text-center py-6 text-gray-400 text-sm">Belum ada kontrak digenerate</td>
                       </tr>
-                      <tr v-for="g in generatedContracts" :key="g.id">
-                        <td class="font-mono text-sm">{{ g.contract_number }}</td>
-                        <td class="text-sm">{{ g.subject || '—' }}</td>
+                      <tr v-for="(g, gi) in generatedContracts" :key="g?.id ?? gi">
+                        <td class="font-mono text-sm">{{ g?.contract_number }}</td>
+                        <td class="text-sm">{{ g?.subject || '—' }}</td>
                         <td class="text-sm">
-                          {{ g.template_name || '—' }}
-                          <span class="text-xs text-gray-500">({{ g.template_type }})</span>
+                          {{ g?.template_name || '—' }}
+                          <span class="text-xs text-gray-500">({{ g?.template_type }})</span>
                         </td>
-                        <td><span class="badge-blue">{{ g.status }}</span></td>
-                        <td class="text-sm">{{ fmtDate(g.created_at) }}</td>
+                        <td><span class="badge-blue">{{ g?.status }}</span></td>
+                        <td class="text-sm">{{ fmtDate(g?.created_at) }}</td>
                         <td class="text-right">
                           <button class="btn-secondary text-xs" @click="openGeneratedContract(g)">
                             <EyeIcon class="w-3.5 h-3.5" /> Buka
@@ -1392,9 +1425,9 @@ function statusBadgeClass(s) {
 
     <!-- ─── Generate Contract Modal ────────────────────────────── -->
     <div v-if="showGenerateModal"
-         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-         @click.self="showGenerateModal = false">
-      <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      @click.self="showGenerateModal = false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
           <h3 class="font-semibold">Generate Kontrak — {{ employee?.full_name }}</h3>
           <button class="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700"
