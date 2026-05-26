@@ -74,6 +74,35 @@ function badgeColor(b) {
   return 'bg-emerald-50 text-emerald-700 border-emerald-200'
 }
 
+/**
+ * Sprint 7 / H1.2 — Carry-over cap warning.
+ *
+ * Hitung berapa hari yang akan hangus saat year-end carry-over berjalan
+ * (1 Januari tahun depan), berdasarkan `remaining` saat ini vs cap di
+ * config `carry_over_max_days`. Hanya relevan saat:
+ *   - is_carry_over_allowed = true
+ *   - carry_over_max_days di-set (NULL = unlimited, tidak perlu warning)
+ *   - remaining > cap
+ *
+ * Return 0 kalau tidak ada risiko hangus.
+ */
+function atRiskDays(b) {
+  if (! b.config?.is_carry_over_allowed) return 0
+  const cap = b.config.carry_over_max_days
+  if (cap === null || cap === undefined) return 0
+  const diff = (b.remaining || 0) - Number(cap)
+  return diff > 0 ? Math.round(diff * 10) / 10 : 0
+}
+
+/**
+ * Total hari berisiko hangus untuk semua leave types karyawan ini.
+ * Dipakai untuk banner peringatan di atas tabel.
+ */
+const totalAtRisk = computed(() => {
+  if (! data.value?.balances) return 0
+  return data.value.balances.reduce((sum, b) => sum + atRiskDays(b), 0)
+})
+
 function categoryLabel(c) {
   const map = {
     ANNUAL: 'Tahunan', SICK: 'Sakit', MATERNITY: 'Melahirkan',
@@ -125,6 +154,22 @@ const totals = computed(() => {
               {{ y }}
             </option>
           </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sprint 7 / H1.2 — Banner peringatan carry-over cap -->
+    <div v-if="totalAtRisk > 0"
+      class="mb-4 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+      <ExclamationTriangleIcon class="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+      <div class="flex-1">
+        <div class="font-semibold text-amber-900">
+          {{ fmtDays(totalAtRisk) }} hari cuti akan hangus 1 Januari {{ filters.year + 1 }}
+        </div>
+        <div class="text-sm text-amber-800 mt-1">
+          Saldo tahun ini melebihi batas yang bisa di-carry-over ke tahun depan.
+          Silakan ajukan cuti sebelum akhir tahun supaya saldo tidak hangus.
+          Detail per tipe cuti ada di tabel di bawah.
         </div>
       </div>
     </div>
@@ -193,6 +238,13 @@ const totals = computed(() => {
                 </span>
               </td>
               <td class="text-xs">
+                <!-- Risiko hangus karena melebihi cap (Sprint 7 / H1.2) -->
+                <div v-if="atRiskDays(b) > 0"
+                  class="flex items-center gap-1 text-amber-700 font-medium mb-1"
+                  :title="`Sisa ${fmtDays(b.remaining)} hari, cap carry-over ${b.config.carry_over_max_days} hari`">
+                  <ExclamationTriangleIcon class="w-3.5 h-3.5" />
+                  {{ fmtDays(atRiskDays(b)) }} hari akan hangus 1 Jan {{ filters.year + 1 }}
+                </div>
                 <div v-if="b.expires_at" class="flex items-center gap-1"
                   :class="b.is_expired ? 'text-red-600' : 'text-gray-500'">
                   <ExclamationTriangleIcon v-if="b.is_expired" class="w-3.5 h-3.5" />

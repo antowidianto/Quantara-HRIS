@@ -320,6 +320,105 @@ class ApprovalChainController extends ApiController
     }
 
     /**
+     * Bulk approve (Sprint 7 / H1.1).
+     *
+     * Body:
+     *   { "approval_ids": [1, 2, 3, ...], "note": "optional" }
+     *
+     * Aturan:
+     *   - Max 50 ID per request.
+     *   - Setiap item diproses individual; gagal di 1 ID tidak rollback yang lain.
+     *   - Audit log per-item TETAP individual (lewat ApprovalEngine.approve →
+     *     decide → finalize). Plus 1 audit log batch untuk traceability.
+     *
+     * Response: { success: int[], failed: [{id, reason}] }
+     */
+    public function bulkApprove()
+    {
+        return $this->bulkDecide('APPROVED');
+    }
+
+    /**
+     * Bulk reject. Sama dengan bulkApprove tapi note WAJIB diisi.
+     */
+    public function bulkReject()
+    {
+        return $this->bulkDecide('REJECTED');
+    }
+
+    private function bulkDecide(string $decision)
+    {
+        $data = $this->getJsonInput();
+        $ids  = $data['approval_ids'] ?? [];
+        $note = trim((string) ($data['note'] ?? ''));
+
+        if (! is_array($ids) || empty($ids)) {
+            return $this->fail('approval_ids wajib berupa array tidak kosong', 422, 'INVALID_INPUT');
+        }
+        if (count($ids) > 50) {
+            return $this->fail('Maksimal 50 approval per request', 422, 'TOO_MANY_ITEMS');
+        }
+        if ($decision === 'REJECTED' && $note === '') {
+            return $this->fail('Alasan penolakan wajib diisi untuk bulk reject', 422, 'REASON_REQUIRED');
+        }
+
+        // Normalisasi & dedup
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        $ids = array_values(array_filter($ids, fn ($v) => $v > 0));
+
+        $userId = (int) $this->userId();
+        $service = Services::approval();
+        $success = [];
+        $failed  = [];
+
+        foreach ($ids as $id) {
+            try {
+                if ($decision === 'APPROVED') {
+                    $res = $service->approve($id, $userId, $note);
+                } else {
+                    $res = $service->reject($id, $userId, $note);
+                }
+                $success[] = ['id' => $id, 'status' => $res['status'] ?? 'PENDING', 'final' => (bool) ($res['final'] ?? false)];
+            } catch (\Throwable $e) {
+                $failed[] = ['id' => $id, 'reason' => $e->getMessage()];
+            }
+        }
+
+        // Audit log batch — per-item log sudah dibuat oleh ApprovalEngine.
+        Services::audit()
+            ->forModule('APPROVAL')
+            ->log(
+                action: $decision === 'APPROVED' ? 'approval.bulk_approve' : 'approval.bulk_reject',
+                entity: 'approval_request',
+                entityId: 0,
+                after: [
+                    'requested' => count($ids),
+                    'success'   => count($success),
+                    'failed'    => count($failed),
+                    'note'      => $note,
+                    'success_ids' => array_column($success, 'id'),
+                    'failed_ids'  => array_column($failed, 'id'),
+                ],
+                description: sprintf(
+                    'Bulk %s: %d/%d berhasil',
+                    $decision === 'APPROVED' ? 'approve' : 'reject',
+                    count($success), count($ids)
+                ),
+                severity: 'NOTICE',
+            );
+
+        return $this->ok([
+            'success' => $success,
+            'failed'  => $failed,
+            'summary' => [
+                'requested' => count($ids),
+                'success'   => count($success),
+                'failed'    => count($failed),
+            ],
+        ], sprintf('%d berhasil, %d gagal', count($success), count($failed)));
+    }
+
+    /**
      * Replace semua step di sebuah chain dengan input baru.
      * Format input:
      *   [
@@ -332,7 +431,18 @@ class ApprovalChainController extends ApiController
         $db = \Config\Database::connect();
         $db->table('approval_chain_steps')->where('chain_id', $chainId)->delete();
         $now = date('Y-m-d H:i:s');
+        // Sprint 9 / H1.3 — terima condition_type + condition_value_json baru.
+        // Validasi config kalau di-set, supaya tidak masuk DB dengan format ngaco.
+        $evaluator = new \App\Libraries\ApprovalConditionEvaluator();
         foreach (array_values($steps) as $i => $s) {
+            $conditionType = $s['condition_type'] ?? null;
+            $conditionConfig = $s['condition_value_json'] ?? null;
+            if ($conditionType !== null && $conditionType !== '') {
+                $err = $evaluator->validateConfig($conditionType, $conditionConfig);
+                if ($err !== null) {
+                    throw new \RuntimeException("Step #{$i}: {$err}");
+                }
+            }
             $db->table('approval_chain_steps')->insert([
                 'company_id'           => $companyId,
                 'chain_id'             => $chainId,
@@ -345,6 +455,11 @@ class ApprovalChainController extends ApiController
                 'condition_field'      => $s['condition_field'] ?? null,
                 'condition_op'         => $s['condition_op'] ?? null,
                 'condition_value'      => isset($s['condition_value']) ? (float) $s['condition_value'] : null,
+                // Kondisi baru (H1.3)
+                'condition_type'       => $conditionType ?: null,
+                'condition_value_json' => $conditionConfig !== null
+                    ? (is_string($conditionConfig) ? $conditionConfig : json_encode($conditionConfig))
+                    : null,
                 'is_required'          => (int) ($s['is_required'] ?? 1),
                 'allow_skip_if_self'   => (int) ($s['allow_skip_if_self'] ?? 1),
                 'sla_hours'            => isset($s['sla_hours']) ? (int) $s['sla_hours'] : null,

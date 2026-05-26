@@ -143,7 +143,113 @@ class RecruitmentService
             'updated_at'    => $now,
         ]);
 
+        // Sprint 9 / H1.4 — Time-in-Stage tracking.
+        // Tutup row history yang masih open untuk kandidat ini, lalu buka row
+        // baru dengan stage baru. Tabel `candidate_stage_history` dipakai
+        // untuk metrik funnel: rata-rata jam per stage, identifikasi bottleneck,
+        // alert kandidat stagnan > N hari.
+        if ($db->tableExists('candidate_stage_history')) {
+            // Tutup yang masih open
+            $openRow = $db->table('candidate_stage_history')
+                ->where('candidate_id', $candidateId)
+                ->where('exited_at IS NULL')
+                ->orderBy('id', 'DESC')
+                ->limit(1)->get()->getRowArray();
+            if ($openRow) {
+                $enteredTs = strtotime((string) $openRow['entered_at']);
+                $duration = $enteredTs > 0 ? round((time() - $enteredTs) / 3600, 2) : null;
+                $db->table('candidate_stage_history')
+                    ->where('id', (int) $openRow['id'])
+                    ->update([
+                        'exited_at'      => $now,
+                        'duration_hours' => $duration,
+                    ]);
+            }
+            // Buka row baru
+            $db->table('candidate_stage_history')->insert([
+                'company_id'   => (int) $cand['company_id'],
+                'candidate_id' => $candidateId,
+                'stage'        => $newStage,
+                'entered_at'   => $now,
+                'by_user_id'   => $params['created_by'] ?? null,
+                'note'         => $params['feedback'] ?? null,
+                'created_at'   => $now,
+            ]);
+        }
+
         return $stageId;
+    }
+
+    /**
+     * Sprint 9 / H1.4 — Funnel metrics per job_posting atau global.
+     *
+     * Ambil rata-rata `duration_hours` per stage dari `candidate_stage_history`
+     * untuk kandidat dalam `job_posting_id` atau company tertentu (dalam
+     * rentang tanggal opsional).
+     *
+     * @param int|null    $jobPostingId Filter ke job posting tertentu
+     * @param int|null    $companyId    Filter ke company (wajib kalau jobPostingId NULL)
+     * @param string|null $since        ISO date YYYY-MM-DD, default 90 hari ke belakang
+     *
+     * @return array<int, array{stage: string, sample: int, avg_hours: float, max_hours: float}>
+     */
+    public function funnelMetrics(?int $jobPostingId, ?int $companyId, ?string $since = null): array
+    {
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('candidate_stage_history')) return [];
+
+        $since = $since ?: date('Y-m-d', strtotime('-90 days'));
+        $b = $db->table('candidate_stage_history h')
+            ->select('h.stage,'
+                . ' COUNT(*) AS sample,'
+                . ' AVG(h.duration_hours) AS avg_hours,'
+                . ' MAX(h.duration_hours) AS max_hours')
+            ->join('candidates c', 'c.id = h.candidate_id')
+            ->where('h.exited_at IS NOT NULL')
+            ->where('h.entered_at >=', $since . ' 00:00:00')
+            ->groupBy('h.stage');
+        if ($jobPostingId !== null) {
+            $b->where('c.job_posting_id', $jobPostingId);
+        } elseif ($companyId !== null) {
+            $b->where('h.company_id', $companyId);
+        }
+        $rows = $b->get()->getResultArray();
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'stage'      => (string) $r['stage'],
+                'sample'     => (int) $r['sample'],
+                'avg_hours'  => round((float) $r['avg_hours'], 2),
+                'max_hours'  => round((float) $r['max_hours'], 2),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Sprint 9 / H1.4 — kandidat yang stagnan > $thresholdDays hari di stage
+     * non-terminal saat ini. Dipakai command notifikasi recruiter +
+     * dashboard alert.
+     *
+     * @return array<int, array<string,mixed>>
+     */
+    public function staleCandidates(int $companyId, int $thresholdDays = 7): array
+    {
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('candidate_stage_history')) return [];
+        $cutoff = date('Y-m-d H:i:s', strtotime("-{$thresholdDays} days"));
+        return $db->table('candidate_stage_history h')
+            ->select('h.id, h.candidate_id, h.stage, h.entered_at,'
+                . ' c.full_name, c.email, c.job_posting_id,'
+                . ' jp.title AS job_title')
+            ->join('candidates c', 'c.id = h.candidate_id')
+            ->join('job_postings jp', 'jp.id = c.job_posting_id', 'left')
+            ->where('h.company_id', $companyId)
+            ->where('h.exited_at IS NULL')
+            ->where('h.entered_at <', $cutoff)
+            ->whereNotIn('h.stage', self::TERMINAL_STAGES)
+            ->orderBy('h.entered_at', 'ASC')
+            ->get()->getResultArray();
     }
 
     /**
