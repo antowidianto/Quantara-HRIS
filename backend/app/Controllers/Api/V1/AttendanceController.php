@@ -278,6 +278,24 @@ class AttendanceController extends ApiController
             if ($lateMin > 0) $status = 'LATE';
         }
 
+        // Sprint 8 / H1.5 — WFH mode resolution.
+        // Karyawan dengan WFH approved untuk hari ini → skip geofence enforcement.
+        // work_type otomatis = 'WFH'. Kalau client kirim work_type explicit
+        // (mis. 'OFFSITE' untuk client visit), respect itu — TAPI hanya kalau
+        // tidak conflict dengan WFH approved.
+        $wfhService = new \App\Libraries\WfhRequestService();
+        $isWfhApproved = $wfhService->isApprovedFor($employeeId, $workDate);
+        $clientWorkType = strtoupper((string) ($data['work_type'] ?? ''));
+        $workType = 'ONSITE';
+        if ($isWfhApproved) {
+            $workType = 'WFH';
+        } elseif (in_array($clientWorkType, ['OFFSITE'], true)) {
+            // OFFSITE diperbolehkan tanpa pre-approval (mis. client visit
+            // ad-hoc). WFH tanpa approval TIDAK diperbolehkan supaya karyawan
+            // tidak bypass aturan dengan ngaku WFH.
+            $workType = 'OFFSITE';
+        }
+
         // Geofence (optional) — track distance untuk anti-cheat juga
         $distanceToBranch = null;
         $geofenceRadius = null;
@@ -287,7 +305,9 @@ class AttendanceController extends ApiController
             if ($branch && $branch['lat'] && $branch['lng'] && $branch['geofence_radius_m']) {
                 $distanceToBranch = $this->haversine((float) $branch['lat'], (float) $branch['lng'], (float) $data['lat'], (float) $data['lng']);
                 $geofenceRadius = (float) $branch['geofence_radius_m'];
-                if ($distanceToBranch > $geofenceRadius) {
+                // Skip geofence enforcement untuk WFH/OFFSITE (jarak tetap
+                // dicatat untuk anti-cheat scoring di bawah).
+                if ($workType === 'ONSITE' && $distanceToBranch > $geofenceRadius) {
                     return $this->fail('Outside allowed clock-in radius (' . round($distanceToBranch) . 'm > ' . $branch['geofence_radius_m'] . 'm)', 422, 'OUTSIDE_GEOFENCE');
                 }
             }
@@ -335,6 +355,7 @@ class AttendanceController extends ApiController
             'company_id'   => $companyId,
             'employee_id'  => $employeeId,
             'shift_id'     => $shiftId,
+            'work_type'    => $workType, // Sprint 8 / H1.5
             'work_date'    => $workDate,
             'clock_in_at'  => date('Y-m-d H:i:s'),
             'clock_in_lat' => $data['lat'] ?? null,

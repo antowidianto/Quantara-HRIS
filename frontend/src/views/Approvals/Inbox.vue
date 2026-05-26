@@ -130,12 +130,22 @@ async function decide(action) {
 }
 
 /**
- * Bulk approve/reject. Sequential supaya backend tidak overloaded dan kalau
- * ada satu yang gagal, sisanya masih lanjut. Setiap success/failure di-summary
- * di toast akhir; detail per-id bisa dilihat di audit log kalau perlu.
+ * Bulk approve/reject (Sprint 7 / H1.1).
+ *
+ * Pakai endpoint server `/approval-requests/bulk-approve|bulk-reject` yang
+ * memproses semua ID dalam 1 request. Server menjamin per-item gagal tidak
+ * menggagalkan yang lain dan mengembalikan summary { success, failed }.
+ *
+ * Batas server: max 50 ID per request. UI batasi sama supaya tidak ditolak.
  */
+const BULK_MAX = 50
+
 async function bulkDecide(action) {
   if (bulkSelected.value.size === 0) return
+  if (bulkSelected.value.size > BULK_MAX) {
+    toast.warning(`Maksimal ${BULK_MAX} approval per bulk action. Saat ini dipilih ${bulkSelected.value.size}.`)
+    return
+  }
   let bulkNote = ''
   if (action === 'reject') {
     const promptResult = window.prompt('Alasan penolakan (akan dipakai untuk semua):', '')
@@ -149,21 +159,28 @@ async function bulkDecide(action) {
   }
   bulkProcessing.value = true
   const ids = Array.from(bulkSelected.value)
-  let ok = 0, fail = 0
-  for (const id of ids) {
-    try {
-      await api.post(`/approval-requests/${id}/${action}`, { note: bulkNote })
-      ok++
-    } catch (_) {
-      fail++
+  try {
+    const endpoint = action === 'approve' ? '/approval-requests/bulk-approve' : '/approval-requests/bulk-reject'
+    const res = await api.post(endpoint, { approval_ids: ids, note: bulkNote })
+    const summary = res.data?.data?.summary || { success: 0, failed: 0 }
+    const failed = res.data?.data?.failed || []
+    if (summary.failed === 0) {
+      toast.success(`${summary.success} permintaan ${action === 'approve' ? 'disetujui' : 'ditolak'}`)
+    } else if (summary.success > 0) {
+      // Tampilkan reason gagal pertama supaya user dapat petunjuk konkrit.
+      const firstReason = failed[0]?.reason ? ` (contoh: ${failed[0].reason})` : ''
+      toast.warning(`${summary.success} berhasil, ${summary.failed} gagal${firstReason}`)
+    } else {
+      const firstReason = failed[0]?.reason ? `: ${failed[0].reason}` : ''
+      toast.error(`Semua ${summary.failed} permintaan gagal diproses${firstReason}`)
     }
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal memproses bulk action')
+  } finally {
+    bulkProcessing.value = false
+    bulkSelected.value = new Set()
+    fetchData()
   }
-  bulkProcessing.value = false
-  bulkSelected.value = new Set()
-  if (ok > 0 && fail === 0) toast.success(`${ok} permintaan ${action === 'approve' ? 'disetujui' : 'ditolak'}`)
-  else if (ok > 0 && fail > 0) toast.warning(`${ok} berhasil, ${fail} gagal. Cek detail.`)
-  else toast.error(`Semua ${fail} permintaan gagal diproses`)
-  fetchData()
 }
 
 onMounted(() => fetchData())

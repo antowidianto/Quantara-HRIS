@@ -41,6 +41,46 @@ class RecruitmentController extends ApiController
     private const SOURCES = ['WEBSITE','LINKEDIN','JOBSTREET','REFERRAL','WALK_IN','OTHER'];
     private const DOC_TYPES = ['CV','KTP','IJAZAH','TRANSKRIP','SERTIFIKAT','PORTFOLIO','OTHER'];
 
+    /**
+     * GET /recruitment/funnel-metrics (Sprint 9 / H1.4).
+     *
+     * Query: job_posting_id (optional), since=YYYY-MM-DD (optional).
+     * Tanpa job_posting_id → metrics global di company user.
+     */
+    public function funnelMetrics()
+    {
+        $jobPostingId = (int) ($this->request->getGet('job_posting_id') ?? 0) ?: null;
+        $since = (string) ($this->request->getGet('since') ?? '') ?: null;
+        if ($since !== null && ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $since)) {
+            return $this->fail('Format since: YYYY-MM-DD', 422);
+        }
+        $companyId = $this->companyId();
+        $rows = Services::recruitment()->funnelMetrics($jobPostingId, $companyId ?: null, $since);
+        return $this->ok([
+            'job_posting_id' => $jobPostingId,
+            'since'          => $since ?? date('Y-m-d', strtotime('-90 days')),
+            'metrics'        => $rows,
+        ]);
+    }
+
+    /**
+     * GET /recruitment/stale-candidates (Sprint 9 / H1.4).
+     *
+     * Query: threshold_days (default 7).
+     */
+    public function staleCandidates()
+    {
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context tidak terdeteksi', 400);
+        $threshold = max(1, min(60, (int) ($this->request->getGet('threshold_days') ?? 7)));
+        $rows = Services::recruitment()->staleCandidates($companyId, $threshold);
+        return $this->ok([
+            'threshold_days' => $threshold,
+            'count'          => count($rows),
+            'candidates'     => $rows,
+        ]);
+    }
+
     // ────────────────────────────────────────────────────────────────
     // Job postings
     // ────────────────────────────────────────────────────────────────

@@ -195,6 +195,153 @@ class OvertimeController extends ApiController
         return $this->fail('Cannot update overtime requests directly', 405);
     }
 
+    /**
+     * POST /overtimes/plan (Sprint 8 / H1.6).
+     *
+     * Submit rencana lembur (PRE-APPROVAL) sesuai PP 35/2021.
+     * Body: { work_date, start_time, end_time, reason, employee_id? }
+     *
+     * Beda dengan /overtimes (POST) yang langsung PENDING:
+     *   - Plan disubmit SEBELUM lembur dilakukan.
+     *   - Saat di-approve oleh atasan → status = APPROVED (bukan PENDING).
+     *   - Saat lembur dilakukan, karyawan kirim POST /overtimes/{id}/realize
+     *     dengan actual hours. Variance dengan planned > 50% wajib catatan.
+     *
+     * Cara kerja: re-use endpoint create() yang sudah ada, tapi tandai
+     * planned_hours + planned_at supaya alur audit jelas. Ini menjaga
+     * single source of truth flow approval.
+     */
+    public function plan()
+    {
+        $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'work_date'  => 'required|valid_date',
+            'start_time' => 'required',
+            'end_time'   => 'required',
+            'reason'     => 'required|max_length[1000]',
+        ]);
+        if (! $valid) return null;
+
+        $employeeId = (int) ($data['employee_id'] ?? $this->tenant()->getEmployeeId());
+        if (! $employeeId) return $this->fail('Employee not specified', 400);
+
+        $startTs = strtotime($data['start_time']);
+        $endTs   = strtotime($data['end_time']);
+        if ($endTs <= $startTs) return $this->fail('End time must be after start time', 422);
+
+        // Plan harus untuk hari ini atau ke depan — H1.6 mensyaratkan
+        // pre-approval, jadi tanggal masa lalu otomatis ditolak.
+        $today = date('Y-m-d');
+        if ($data['work_date'] < $today) {
+            return $this->fail(
+                'Plan lembur tidak boleh untuk tanggal masa lalu. '
+                . 'Untuk realisasi lembur yang sudah terjadi, gunakan endpoint /overtimes biasa.',
+                422,
+                'PAST_DATE_NOT_ALLOWED'
+            );
+        }
+
+        $hours = round(($endTs - $startTs) / 3600, 2);
+
+        // Re-use create() lewat manipulasi request body. Sebenarnya cukup
+        // panggil logic-nya secara langsung — di sini kita inject planned_*
+        // setelah insert berhasil supaya audit log konsisten.
+        $response = $this->create();
+        // create() sudah send response via $this->ok(...). Kita ambil ID
+        // dari last insert sebagai cara paling aman (tidak meleset karena
+        // create selalu insert satu row di atas berdasarkan request kita).
+        $db = \Config\Database::connect();
+        $newId = (int) $db->insertID();
+        if ($newId > 0) {
+            $db->table('overtimes')->where('id', $newId)->update([
+                'planned_hours' => $hours,
+                'planned_at'    => date('Y-m-d H:i:s'),
+            ]);
+        }
+        return $response;
+    }
+
+    /**
+     * POST /overtimes/(:num)/realize (Sprint 8 / H1.6).
+     *
+     * Realisasi lembur yang sudah pre-approved.
+     * Body: { actual_hours: float, variance_note?: string }
+     *
+     * Aturan:
+     *   - Hanya overtime ber-status APPROVED yang bisa di-realize.
+     *   - Kalau actual_hours berbeda > 50% dari planned_hours, variance_note
+     *     wajib diisi (justifikasi).
+     *   - Setelah realize, status di-set ke REALIZED. Payroll yang ambil
+     *     `status IN (APPROVED, REALIZED)` tetap bekerja seperti sebelumnya.
+     */
+    public function realize($id = null)
+    {
+        $id = (int) $id;
+        $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'actual_hours' => 'required|numeric|greater_than[0]',
+        ]);
+        if (! $valid) return null;
+
+        $db = \Config\Database::connect();
+        $row = $db->table('overtimes')->where('id', $id)->get()->getRowArray();
+        if (! $row) return $this->fail('Not found', 404);
+        if (! $this->privacy()->canAccessRow($row, 'overtime')) {
+            return $this->fail('Forbidden', 403);
+        }
+        if ($row['status'] !== 'APPROVED') {
+            return $this->fail('Hanya overtime APPROVED yang bisa di-realize', 422, 'INVALID_STATUS');
+        }
+
+        $actualHours = (float) $data['actual_hours'];
+        $plannedHours = (float) ($row['planned_hours'] ?? $row['hours'] ?? 0);
+        $varianceNote = trim((string) ($data['variance_note'] ?? ''));
+
+        // Kalau ada planned_hours dan variance > 50%, wajib justifikasi.
+        if ($plannedHours > 0) {
+            $delta = abs($actualHours - $plannedHours);
+            $variancePct = $plannedHours > 0 ? ($delta / $plannedHours) : 0;
+            if ($variancePct > 0.5 && $varianceNote === '') {
+                return $this->fail(
+                    sprintf(
+                        'Selisih actual (%.2f jam) vs planned (%.2f jam) > 50%%. Variance note wajib diisi.',
+                        $actualHours, $plannedHours
+                    ),
+                    422,
+                    'VARIANCE_TOO_LARGE'
+                );
+            }
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $update = [
+            'hours'         => $actualHours,
+            'status'        => 'REALIZED',
+            'variance_note' => $varianceNote !== '' ? $varianceNote : null,
+            'updated_at'    => $now,
+        ];
+        $db->table('overtimes')->where('id', $id)->update($update);
+
+        Services::audit()->forModule('OVERTIME')->log(
+            action: 'overtime.realize',
+            entity: 'overtimes',
+            entityId: $id,
+            before: $row,
+            after: array_merge($row, $update),
+            description: sprintf('Realisasi lembur #%d: planned %.2f → actual %.2f jam',
+                $id, $plannedHours, $actualHours
+            ),
+            severity: 'NOTICE',
+        );
+
+        return $this->ok([
+            'id'            => $id,
+            'planned_hours' => $plannedHours,
+            'actual_hours'  => $actualHours,
+            'status'        => 'REALIZED',
+        ], 'Realisasi tercatat');
+    }
+
     public function delete($id = null)
     {
         $id = (int) $id;

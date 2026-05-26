@@ -167,6 +167,16 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('attendance/my', 'AttendanceController::my');
         $routes->get('attendance/calendar/(:num)', 'AttendanceController::calendar/$1');
 
+        // ─── WFH Requests (Sprint 8 / H1.5) ─────────────────────────
+        // Pengajuan WFH dengan flow PENDING → APPROVED/REJECTED yang
+        // dipakai AttendanceController untuk skip geofence saat clock-in.
+        $routes->get('wfh-requests',                       'WfhRequestController::index');
+        $routes->post('wfh-requests',                      'WfhRequestController::create');
+        $routes->get('wfh-requests/(:num)',                'WfhRequestController::show/$1');
+        $routes->post('wfh-requests/(:num)/approve',       'WfhRequestController::approve/$1');
+        $routes->post('wfh-requests/(:num)/reject',        'WfhRequestController::reject/$1');
+        $routes->post('wfh-requests/(:num)/cancel',        'WfhRequestController::cancel/$1');
+
         // Attendance change requests (pengajuan perubahan + approval)
         // Catatan: definisikan SEBELUM route catch-all `attendance/(:num)`
         // supaya path /attendance/change-requests tidak nyangkut sebagai id.
@@ -224,9 +234,13 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('leave-balances/(:num)', 'LeaveController::balance/$1');
 
         // Overtime
+        // H1.6 — pre-approval flow (plan + realize). Dideklarasikan di atas
+        // resource() supaya path /overtimes/plan tidak ke-trap sebagai numeric id.
+        $routes->post('overtimes/plan', 'OvertimeController::plan');
         $routes->resource('overtimes', ['controller' => 'OvertimeController']);
         $routes->post('overtimes/(:num)/approve', 'OvertimeController::approve/$1');
         $routes->post('overtimes/(:num)/reject', 'OvertimeController::reject/$1');
+        $routes->post('overtimes/(:num)/realize', 'OvertimeController::realize/$1');
 
         // Payroll
         $routes->resource('payroll-components', ['controller' => 'PayrollComponentController']);
@@ -254,6 +268,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('payslips/(:num)/pdf', 'PayslipController::pdf/$1');
         $routes->get('payslips/(:num)/bukti-potong', 'PayslipController::buktiPotong/$1');
         $routes->post('payroll/thr', 'PayrollController::generateThr');
+        // Sprint 9 / H1.8 — THR Planning Dashboard
+        $routes->get('thr/projection', 'PayrollController::thrProjection');
 
         // Reimbursement & Loans
         $routes->resource('reimbursements', ['controller' => 'ReimbursementController']);
@@ -472,6 +488,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
 
         // ─── Recruitment / ATS ─────────────────────────────────────
         $routes->get('recruitment/pipeline-stats',  'RecruitmentController::pipelineStats');
+        // Sprint 9 / H1.4 — Time-in-Stage tracking
+        $routes->get('recruitment/funnel-metrics',   'RecruitmentController::funnelMetrics');
+        $routes->get('recruitment/stale-candidates', 'RecruitmentController::staleCandidates');
         $routes->get('job-postings',                'RecruitmentController::indexJobs');
         $routes->post('job-postings',               'RecruitmentController::createJob');
         $routes->get('job-postings/(:num)',         'RecruitmentController::showJob/$1');
@@ -687,6 +706,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->delete('approval-assignments/(:num)', 'ApprovalChainController::deleteAssignment/$1');
         // Inbox + decision
         $routes->get('approval-requests/inbox',         'ApprovalChainController::inbox');
+        // Bulk endpoints (Sprint 7 / H1.1) — harus didefinisikan SEBELUM
+        // /(:num)/approve & /(:num)/reject supaya path /bulk-approve tidak
+        // di-resolve sebagai numeric id.
+        $routes->post('approval-requests/bulk-approve', 'ApprovalChainController::bulkApprove');
+        $routes->post('approval-requests/bulk-reject',  'ApprovalChainController::bulkReject');
         $routes->get('approval-requests/(:num)',        'ApprovalChainController::showRequest/$1');
         $routes->post('approval-requests/(:num)/approve','ApprovalChainController::approveRequest/$1');
         $routes->post('approval-requests/(:num)/reject', 'ApprovalChainController::rejectRequest/$1');

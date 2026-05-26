@@ -255,6 +255,9 @@ class ApprovalEngine
         // terpenuhi serta tidak di-skip karena allow_skip_if_self.
         foreach ($steps as $step) {
             if ((int) $step['step_order'] <= $lastStepOrder) continue;
+            // Sprint 9 / H1.3 — sisipkan employee_id ke step row supaya
+            // ApprovalConditionEvaluator bisa lookup department/branch/level.
+            $step['__request_employee_id'] = (int) $req['employee_id'];
             if (! $this->stepConditionMet($step, $meta)) {
                 $this->logSkip($requestId, $step, 'Condition not met');
                 continue;
@@ -427,6 +430,33 @@ class ApprovalEngine
 
     private function stepConditionMet(array $step, array $meta): bool
     {
+        // Sprint 9 / H1.3 — kondisi tipe baru via condition_type +
+        // condition_value_json. Kalau di-set, evaluasi pakai
+        // ApprovalConditionEvaluator. Hasil di-AND dengan kondisi legacy
+        // di bawah supaya backward compatible.
+        if (! empty($step['condition_type'])) {
+            $evaluator = new \App\Libraries\ApprovalConditionEvaluator();
+            $employee = [];
+            $empId = (int) ($step['__request_employee_id'] ?? 0);
+            if ($empId > 0) {
+                $emp = \Config\Database::connect()
+                    ->table('employees e')
+                    ->select('e.department_id, e.branch_id, e.job_grade_id, g.level AS job_grade_level')
+                    ->join('job_grades g', 'g.id = e.job_grade_id', 'left')
+                    ->where('e.id', $empId)
+                    ->get()->getRowArray();
+                if ($emp) $employee = $emp;
+            }
+            $rawConfig = $step['condition_value_json'] ?? null;
+            $contextOk = $evaluator->evaluate(
+                (string) $step['condition_type'],
+                $rawConfig,
+                ['meta' => $meta, 'employee' => $employee],
+            );
+            if (! $contextOk) return false;
+        }
+
+        // Legacy condition: condition_field/op/value (numeric only).
         if (empty($step['condition_field'])) return true;
         $field = $step['condition_field'];
         $op    = $step['condition_op'];

@@ -281,4 +281,131 @@ class PayrollController extends ApiController
             'count'           => $countIncluded,
         ], 'THR generated', 201);
     }
+
+    /**
+     * GET /thr/projection?year=YYYY&pay_date=YYYY-MM-DD (Sprint 9 / H1.8).
+     *
+     * Projeksi total biaya THR sebelum di-generate. Tidak menulis ke DB —
+     * hanya hitung tenure_months × monthly_salary tiap karyawan aktif (atau
+     * resign mid-year) lalu agregasi per department / cost center.
+     *
+     * Query params:
+     *   - year (required): tahun THR (default: tahun berjalan)
+     *   - pay_date (optional): tanggal bayar simulasi, default H-7 sebelum
+     *     Idul Fitri tahun ybs. Karena tabel hari libur belum tentu meng-cover
+     *     Idul Fitri secara akurat, default sederhana = 1 April tahun ybs.
+     *
+     * Output:
+     *   {
+     *     year, pay_date, count, total_gross,
+     *     by_department: [{id, name, count, total}],
+     *     by_cost_center: [{id, name, total}],
+     *     top_employees: [{employee_number, full_name, tenure_months, amount}],
+     *   }
+     */
+    public function thrProjection()
+    {
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+
+        $year = (int) ($this->request->getGet('year') ?? date('Y'));
+        if ($year < 2000 || $year > 2100) {
+            return $this->fail('Tahun tidak valid', 422);
+        }
+        $payDate = (string) ($this->request->getGet('pay_date') ?? "{$year}-04-01");
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $payDate)) {
+            return $this->fail('Format pay_date: YYYY-MM-DD', 422);
+        }
+        $startDate = "{$year}-01-01";
+
+        $db = \Config\Database::connect();
+        $employees = $db->table('employees e')
+            ->select('e.id, e.employee_number, e.full_name, e.basic_salary,'
+                . ' e.join_date, e.resign_date, e.department_id, e.cost_center_id,'
+                . ' d.name AS department_name, cc.name AS cost_center_name')
+            ->join('departments d', 'd.id = e.department_id', 'left')
+            ->join('cost_centers cc', 'cc.id = e.cost_center_id', 'left')
+            ->where('e.company_id', $companyId)
+            ->where('e.deleted_at IS NULL')
+            ->where('e.join_date <=', $payDate)
+            ->groupStart()
+                ->where('e.resign_date IS NULL')
+                ->orWhere('e.resign_date >=', $startDate)
+            ->groupEnd()
+            ->get()->getResultArray();
+
+        $byDept = [];
+        $byCc = [];
+        $rowsForTop = [];
+        $total = 0.0;
+        $count = 0;
+
+        foreach ($employees as $emp) {
+            $tenure = self::computeTenureMonths(
+                (string) $emp['join_date'],
+                ! empty($emp['resign_date']) ? (string) $emp['resign_date'] : null,
+                $payDate,
+                $startDate
+            );
+            if ($tenure < 1) continue;
+            $monthly = (float) ($emp['basic_salary'] ?? 0);
+            $amount = self::computeThrAmount($monthly, $tenure);
+            if ($amount <= 0) continue;
+
+            $count++;
+            $total += $amount;
+            $rowsForTop[] = [
+                'employee_id'     => (int) $emp['id'],
+                'employee_number' => $emp['employee_number'],
+                'full_name'       => $emp['full_name'],
+                'tenure_months'   => $tenure,
+                'amount'          => $amount,
+            ];
+
+            $deptKey = (int) ($emp['department_id'] ?? 0);
+            if (! isset($byDept[$deptKey])) {
+                $byDept[$deptKey] = [
+                    'id'    => $deptKey ?: null,
+                    'name'  => $emp['department_name'] ?? '— Tanpa Department —',
+                    'count' => 0,
+                    'total' => 0.0,
+                ];
+            }
+            $byDept[$deptKey]['count']++;
+            $byDept[$deptKey]['total'] += $amount;
+
+            $ccKey = (int) ($emp['cost_center_id'] ?? 0);
+            if (! isset($byCc[$ccKey])) {
+                $byCc[$ccKey] = [
+                    'id'    => $ccKey ?: null,
+                    'name'  => $emp['cost_center_name'] ?? '— Tanpa Cost Center —',
+                    'count' => 0,
+                    'total' => 0.0,
+                ];
+            }
+            $byCc[$ccKey]['count']++;
+            $byCc[$ccKey]['total'] += $amount;
+        }
+
+        // Sort top karyawan by amount DESC, ambil top 10
+        usort($rowsForTop, fn ($a, $b) => $b['amount'] <=> $a['amount']);
+        $top = array_slice($rowsForTop, 0, 10);
+
+        // Convert assoc array → indexed for JSON output
+        $byDept = array_values($byDept);
+        $byCc = array_values($byCc);
+        usort($byDept, fn ($a, $b) => $b['total'] <=> $a['total']);
+        usort($byCc, fn ($a, $b) => $b['total'] <=> $a['total']);
+
+        return $this->ok([
+            'year'           => $year,
+            'pay_date'       => $payDate,
+            'period_start'   => $startDate,
+            'count'          => $count,
+            'total_gross'    => round($total, 2),
+            'by_department'  => $byDept,
+            'by_cost_center' => $byCc,
+            'top_employees'  => $top,
+        ]);
+    }
 }
