@@ -43,7 +43,11 @@ class AssetController extends ApiController
         if ($eid > 0) return $eid;
         $userId = (int) $this->tenant()->getUserId();
         if (! $userId) return null;
-        $emp = $this->db()->table('employees')->where('user_id', $userId)
+        // Bug fix: ApiController tidak punya method `db()`. Pakai pola
+        // yang sama dengan method-method lain di file ini, langsung
+        // resolve via Config\Database::connect().
+        $emp = \Config\Database::connect()->table('employees')
+            ->where('user_id', $userId)
             ->where('deleted_at IS NULL')->limit(1)->get()->getRowArray();
         return $emp ? (int) $emp['id'] : null;
     }

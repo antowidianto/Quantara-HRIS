@@ -54,25 +54,93 @@ const EDU_LEVELS = ['SMA','SMK','D1','D2','D3','D4','S1','S2','S3']
 const GENDERS = [['M','Laki-laki'], ['F','Perempuan']]
 
 const STEPS = [
-  { key: 1, label: 'Profil Diri',     short: 'Profil' },
-  { key: 2, label: 'Identitas',       short: 'KTP/NPWP' },
-  { key: 3, label: 'Pendidikan',      short: 'Edu/Karir' },
-  { key: 4, label: 'Dokumen & Kirim', short: 'Dokumen' },
+  { key: 1, label: 'Profil Diri',                 short: 'Profil' },
+  { key: 2, label: 'Identitas Kepegawaian',       short: 'KTP/NPWP' },
+  { key: 3, label: 'Data Payroll',                short: 'Bank/PTKP' },
+  { key: 4, label: 'Pendidikan & Pengalaman',     short: 'Edu/Karir' },
+  { key: 5, label: 'Dokumen & Kirim',             short: 'Dokumen' },
 ]
+
+const RELATIONS = [
+  ['ORANG_TUA', 'Orang Tua'],
+  ['PASANGAN',  'Suami / Istri'],
+  ['SAUDARA',   'Saudara Kandung'],
+  ['ANAK',      'Anak'],
+  ['LAINNYA',   'Lainnya'],
+]
+const BLOOD_TYPES = ['A','A+','A-','B','B+','B-','AB','AB+','AB-','O','O+','O-']
+const DRIVING_LICENSES = [
+  ['A',  'SIM A — Mobil pribadi'],
+  ['B1', 'SIM B1 — Mobil > 3.500 kg'],
+  ['B2', 'SIM B2 — Trailer / kendaraan berat'],
+  ['C',  'SIM C — Sepeda motor'],
+  ['D',  'SIM D — Penyandang disabilitas'],
+]
+const VEHICLES = [
+  ['MOTOR',  'Sepeda motor'],
+  ['MOBIL',  'Mobil'],
+  ['SEPEDA', 'Sepeda'],
+]
+const DISABILITIES = [
+  ['NONE',         'Tidak ada disabilitas'],
+  ['PHYSICAL',     'Fisik'],
+  ['SENSORY',      'Sensorik (penglihatan/pendengaran)'],
+  ['INTELLECTUAL', 'Intelektual'],
+  ['MENTAL',       'Mental'],
+  ['MULTIPLE',     'Multiple / kombinasi'],
+]
+const PTKP_OPTIONS_FORM = [
+  { value: 'TK0', label: 'TK/0 — Belum kawin, tanpa tanggungan' },
+  { value: 'TK1', label: 'TK/1 — Belum kawin, 1 tanggungan' },
+  { value: 'TK2', label: 'TK/2 — Belum kawin, 2 tanggungan' },
+  { value: 'TK3', label: 'TK/3 — Belum kawin, 3 tanggungan' },
+  { value: 'K0',  label: 'K/0 — Kawin, tanpa tanggungan' },
+  { value: 'K1',  label: 'K/1 — Kawin, 1 tanggungan' },
+  { value: 'K2',  label: 'K/2 — Kawin, 2 tanggungan' },
+  { value: 'K3',  label: 'K/3 — Kawin, 3 tanggungan' },
+  { value: 'HB0', label: 'HB/0 — Penghasilan istri digabung, tanpa tanggungan' },
+  { value: 'HB1', label: 'HB/1' },
+  { value: 'HB2', label: 'HB/2' },
+  { value: 'HB3', label: 'HB/3' },
+]
+const BANK_OPTIONS_FORM = ['BCA','MANDIRI','BNI','BRI','CIMB','PERMATA','DANAMON','BTN','BSI','OCBC','MAYBANK','PANIN','MEGA','BTPN','LAINNYA']
 
 // ─── Form state ─────────────────────────────────────────────────
 const form = reactive({
+  // Step 1 — Profil
   full_name: '', email: '', phone: '',
   birth_place: '', birth_date: '', gender: '',
   nationality: 'WNI', marital_status: '', religion: '',
+  blood_type: '',
+  // Step 2 — Identitas
   nik: '', npwp: '', kk_number: '',
   bpjs_kesehatan_no: '', bpjs_tk_no: '',
-  address: '', city: '', province: '',
+  passport_number: '',
+  address: '', city: '', province: '', postal_code: '',
+  // Step 3 — Payroll & data pendukung
+  ptkp_status: '', dependents_count: 0,
+  bank_name: '', bank_account_number: '', bank_account_holder: '',
+  emergency_contact_name: '', emergency_contact_phone: '', emergency_contact_relation: '',
+  // Sprint 23+ — keluarga (untuk PTKP HB & BPJS family)
+  spouse_name: '', spouse_occupation: '', spouse_workplace: '',
+  children_count: 0,
+  // Disabilitas & kesehatan
+  disability_status: 'NONE', disability_notes: '',
+  health_conditions: '',
+  // Step 4 — Pendidikan & pengalaman
   last_education_level: '', last_education_institution: '',
   last_education_major: '', last_education_year: '', gpa: '',
   current_position: '', current_company: '',
   years_experience: '', expected_salary: '', available_from: '',
-  linkedin_url: '', portfolio_url: '',
+  linkedin_url: '', portfolio_url: '', github_url: '',
+  // Skills, sertifikasi, bahasa
+  languages: '', professional_skills: '', certifications: '',
+  // Mobilitas (relevan untuk role lapangan / sales)
+  driving_license: [], vehicle_owned: [],
+  // Referensi profesional
+  reference_contacts: [],
+  referral_source_detail: '',
+  // Step 5 — Dokumen
   cv_path: '', cv_name: '',
   ktp_path: '', ktp_name: '',
   ijazah_path: '', ijazah_name: '',
@@ -81,6 +149,40 @@ const form = reactive({
   extra_answers: {},
   consent: false,
 })
+
+// Helper: tambah / hapus referensi profesional dinamis
+function addReference() {
+  if (form.reference_contacts.length >= 5) {
+    toast.warning('Maksimal 5 referensi')
+    return
+  }
+  form.reference_contacts.push({
+    name: '', position: '', company: '', phone: '', relation: '',
+  })
+}
+function removeReference(idx) {
+  form.reference_contacts.splice(idx, 1)
+}
+
+// Auto-derive PTKP suggestion dari marital_status & dependents_count.
+// Hanya update kalau user belum pilih manual (heuristik: kalau format
+// sesuai pola yang ter-derive sebelumnya).
+watch(
+  () => [form.marital_status, form.dependents_count],
+  ([marital, dep]) => {
+    if (! marital) return
+    const cnt = Math.max(0, Math.min(3, parseInt(dep || 0, 10) || 0))
+    let prefix = 'TK'
+    if (marital === 'KAWIN') prefix = 'K'
+    if (marital === 'CERAI_HIDUP' || marital === 'CERAI_MATI') prefix = 'TK'
+    const derived = `${prefix}${cnt}`
+    // Only auto-set kalau current value masih default atau hasil derive
+    // sebelumnya. Kalau user sudah explicit pilih HB*, biarkan.
+    if (! form.ptkp_status || /^(TK|K)\d$/.test(form.ptkp_status)) {
+      form.ptkp_status = derived
+    }
+  },
+)
 
 const step = ref(1)
 const errors = ref({})
@@ -126,7 +228,7 @@ function applyDraft(draft) {
       form[k] = draft[k]
     }
   })
-  if (draft._step >= 1 && draft._step <= 4) step.value = draft._step
+  if (draft._step >= 1 && draft._step <= STEPS.length) step.value = draft._step
   draftSavedAt.value = draft._saved_at
   toast.success('Draft sebelumnya dipulihkan')
 }
@@ -293,10 +395,40 @@ function validateStep(s) {
     if (form.kk_number && ! /^\d{16}$/.test(form.kk_number.replace(/\D/g, ''))) {
       errors.value.kk_number = 'No KK harus 16 digit angka'
     }
+    if (form.postal_code && ! /^\d{5}$/.test(form.postal_code.replace(/\D/g, ''))) {
+      errors.value.postal_code = 'Kode pos harus 5 digit angka'
+    }
     if (! form.address.trim()) errors.value.address = 'Alamat wajib diisi'
     if (! form.city.trim()) errors.value.city = 'Kota wajib diisi'
   }
   if (s === 3) {
+    // Step 3 — Data Payroll: semua field opsional, hanya validasi format
+    // bila diisi. Tujuan: kalau pelamar lengkapi sekarang, profil HR
+    // langsung ready saat hire (no chase data).
+    if (form.bank_account_number && ! /^\d{8,20}$/.test(form.bank_account_number.replace(/\D/g, ''))) {
+      errors.value.bank_account_number = 'No rekening 8–20 digit angka'
+    }
+    if (form.bank_name && ! form.bank_account_number) {
+      errors.value.bank_account_number = 'Lengkapi no rekening kalau bank dipilih'
+    }
+    if (form.bank_account_number && ! form.bank_name) {
+      errors.value.bank_name = 'Pilih bank kalau no rekening diisi'
+    }
+    if (form.emergency_contact_phone
+      && ! /^(\+?62|0)[\d\s-]{8,15}$/.test(form.emergency_contact_phone.replace(/\s/g, ''))) {
+      errors.value.emergency_contact_phone = 'Format HP tidak valid'
+    }
+    if (form.emergency_contact_name && ! form.emergency_contact_phone) {
+      errors.value.emergency_contact_phone = 'Lengkapi nomor HP kontak darurat'
+    }
+    if (form.dependents_count !== '' && form.dependents_count !== null) {
+      const d = parseInt(form.dependents_count, 10)
+      if (Number.isNaN(d) || d < 0 || d > 3) {
+        errors.value.dependents_count = 'Jumlah tanggungan 0–3 (sesuai aturan PTKP)'
+      }
+    }
+  }
+  if (s === 4) {
     if (! form.last_education_level) errors.value.last_education_level = 'Pendidikan terakhir wajib diisi'
     if (form.gpa !== '' && form.gpa !== null) {
       const g = parseFloat(form.gpa)
@@ -317,7 +449,7 @@ function validateStep(s) {
       }
     }
   }
-  if (s === 4) {
+  if (s === 5) {
     if (! form.cv_path) errors.value.cv_path = 'CV wajib diunggah'
     for (const q of extraQuestions.value) {
       if (q.required && ! form.extra_answers[q.key]) {
@@ -337,7 +469,7 @@ async function scrollToFirstError() {
 
 function nextStep() {
   if (validateStep(step.value)) {
-    step.value++
+    step.value = Math.min(STEPS.length, step.value + 1)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   } else {
     scrollToFirstError()
@@ -359,7 +491,7 @@ function goToStep(target) {
 
 // ─── Submit ─────────────────────────────────────────────────────
 function openConfirm() {
-  if (validateStep(4)) {
+  if (validateStep(STEPS.length)) {
     showConfirmModal.value = true
   } else {
     scrollToFirstError()
@@ -576,12 +708,45 @@ function fmtSize(bytes) {
               </select>
             </div>
           </div>
-          <div>
-            <label class="cp-label">Kewarganegaraan</label>
-            <select v-model="form.nationality" class="cp-input max-w-xs">
-              <option value="WNI">WNI</option>
-              <option value="WNA">WNA</option>
-            </select>
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="cp-label">Kewarganegaraan</label>
+              <select v-model="form.nationality" class="cp-input">
+                <option value="WNI">WNI</option>
+                <option value="WNA">WNA</option>
+              </select>
+            </div>
+            <div>
+              <label class="cp-label">Golongan Darah <span class="text-slate-400">(opsional)</span></label>
+              <select v-model="form.blood_type" class="cp-input">
+                <option value="">— Tidak diisi —</option>
+                <option v-for="b in BLOOD_TYPES" :key="b" :value="b">{{ b }}</option>
+              </select>
+              <p class="text-xs text-slate-500 mt-1">Disimpan untuk situasi darurat medis di tempat kerja.</p>
+            </div>
+          </div>
+
+          <!-- Disabilitas (HR compliance — opt-in) -->
+          <div class="border border-slate-200 rounded-lg p-4 bg-slate-50/50">
+            <h3 class="font-semibold mb-2 text-sm text-slate-800">Status Disabilitas
+              <span class="font-normal text-slate-500">(opsional, tetapi sangat membantu)</span>
+            </h3>
+            <p class="text-xs text-slate-600 mb-3">
+              Kami berkomitmen pada lingkungan kerja inklusif. Mengisi data ini membantu kami menyiapkan akomodasi kerja yang sesuai. Tidak akan mempengaruhi keputusan rekrutmen.
+            </p>
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="cp-label">Status</label>
+                <select v-model="form.disability_status" class="cp-input">
+                  <option v-for="[v, l] in DISABILITIES" :key="v" :value="v">{{ l }}</option>
+                </select>
+              </div>
+              <div v-if="form.disability_status && form.disability_status !== 'NONE'">
+                <label class="cp-label">Akomodasi yang dibutuhkan</label>
+                <input v-model="form.disability_notes" type="text" class="cp-input"
+                  placeholder="mis. akses kursi roda, font besar, jadwal fleksibel" />
+              </div>
+            </div>
           </div>
         </section>
 
@@ -609,6 +774,10 @@ function fmtSize(bytes) {
               <p v-if="errors.kk_number" class="cp-err">{{ errors.kk_number }}</p>
             </div>
             <div>
+              <label class="cp-label">No Paspor <span class="text-slate-400">(WNA / wajib travel)</span></label>
+              <input v-model="form.passport_number" type="text" class="cp-input" placeholder="mis. A1234567" maxlength="32" />
+            </div>
+            <div>
               <label class="cp-label">No BPJS Kesehatan</label>
               <input v-model="form.bpjs_kesehatan_no" type="text" class="cp-input" placeholder="Opsional" />
             </div>
@@ -622,21 +791,208 @@ function fmtSize(bytes) {
             <textarea v-model="form.address" rows="3" class="cp-input" :class="errors.address && 'cp-error-mark'" placeholder="Jalan, RT/RW, Kelurahan, Kecamatan"></textarea>
             <p v-if="errors.address" class="cp-err">{{ errors.address }}</p>
           </div>
-          <div class="grid sm:grid-cols-2 gap-4">
-            <div>
+          <div class="grid sm:grid-cols-3 gap-4">
+            <div class="sm:col-span-1">
               <label class="cp-label">Kota <span class="text-red-500">*</span></label>
               <input v-model="form.city" type="text" class="cp-input" :class="errors.city && 'cp-error-mark'" placeholder="mis. Jakarta Selatan" />
               <p v-if="errors.city" class="cp-err">{{ errors.city }}</p>
             </div>
-            <div>
+            <div class="sm:col-span-1">
               <label class="cp-label">Provinsi</label>
               <input v-model="form.province" type="text" class="cp-input" placeholder="mis. DKI Jakarta" />
+            </div>
+            <div class="sm:col-span-1">
+              <label class="cp-label">Kode Pos</label>
+              <input v-model="form.postal_code" type="text" class="cp-input" :class="errors.postal_code && 'cp-error-mark'" placeholder="5 digit" maxlength="5" inputmode="numeric" />
+              <p v-if="errors.postal_code" class="cp-err">{{ errors.postal_code }}</p>
             </div>
           </div>
         </section>
 
-        <!-- STEP 3 ─────────────────────────────────────────── -->
+        <!-- STEP 3 — Data Payroll ──────────────────────────── -->
         <section v-if="step === 3" class="space-y-4">
+          <header>
+            <h2 class="text-lg font-bold">Data Payroll & Kontak Darurat</h2>
+            <p class="text-sm text-slate-500 mt-0.5">
+              Data ini bersifat <strong>opsional</strong> di tahap lamaran. Bila Anda
+              isi sekarang, proses payroll bulan pertama (kalau diterima) bisa
+              langsung berjalan tanpa kami harus menunggu data Anda.
+            </p>
+            <div class="mt-3 bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-800">
+              <strong>Privasi & keamanan:</strong> nomor rekening akan disimpan terenkripsi
+              di sistem dan hanya dipakai untuk proses payroll bila Anda diterima bekerja.
+              Tidak akan digunakan untuk keperluan lain.
+            </div>
+          </header>
+
+          <!-- PTKP / Pajak -->
+          <div class="border border-amber-200 rounded-lg p-4 bg-amber-50/30">
+            <h3 class="font-semibold mb-3 text-slate-800 flex items-center gap-2">
+              <svg class="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+              </svg>
+              Pajak Penghasilan (PPh21)
+            </h3>
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="cp-label">Jumlah Tanggungan</label>
+                <select v-model.number="form.dependents_count" class="cp-input"
+                  :class="errors.dependents_count && 'cp-error-mark'">
+                  <option :value="0">0 — Tanpa tanggungan</option>
+                  <option :value="1">1 tanggungan</option>
+                  <option :value="2">2 tanggungan</option>
+                  <option :value="3">3 tanggungan (max)</option>
+                </select>
+                <p class="text-xs text-slate-500 mt-1">
+                  Anak / orang tua yang Anda biayai. Maksimal 3 orang sesuai aturan PTKP.
+                </p>
+                <p v-if="errors.dependents_count" class="cp-err">{{ errors.dependents_count }}</p>
+              </div>
+              <div>
+                <label class="cp-label">Status PTKP</label>
+                <select v-model="form.ptkp_status" class="cp-input">
+                  <option value="">— Otomatis dari status & tanggungan —</option>
+                  <option v-for="o in PTKP_OPTIONS_FORM" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+                <p class="text-xs text-slate-500 mt-1">
+                  Otomatis terisi berdasarkan status nikah & tanggungan, bisa diubah manual.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rekening Bank -->
+          <div class="border border-emerald-200 rounded-lg p-4 bg-emerald-50/30">
+            <h3 class="font-semibold mb-3 text-slate-800 flex items-center gap-2">
+              <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+              </svg>
+              Rekening Bank Penerimaan Gaji
+            </h3>
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="cp-label">Bank</label>
+                <select v-model="form.bank_name" class="cp-input"
+                  :class="errors.bank_name && 'cp-error-mark'">
+                  <option value="">— Pilih bank —</option>
+                  <option v-for="b in BANK_OPTIONS_FORM" :key="b" :value="b">{{ b }}</option>
+                </select>
+                <p v-if="errors.bank_name" class="cp-err">{{ errors.bank_name }}</p>
+              </div>
+              <div>
+                <label class="cp-label">No. Rekening</label>
+                <input v-model="form.bank_account_number" type="text"
+                  class="cp-input font-mono"
+                  :class="errors.bank_account_number && 'cp-error-mark'"
+                  placeholder="mis. 1234567890" maxlength="32" inputmode="numeric" />
+                <p v-if="errors.bank_account_number" class="cp-err">{{ errors.bank_account_number }}</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="cp-label">Nama Pemilik Rekening</label>
+                <input v-model="form.bank_account_holder" type="text" class="cp-input"
+                  placeholder="Sesuai buku tabungan / m-banking" maxlength="200" />
+                <p class="text-xs text-slate-500 mt-1">
+                  Wajib sama persis dengan nama di rekening — bedanya bisa membuat transfer
+                  payroll ditolak oleh bank.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kontak Darurat -->
+          <div class="border border-rose-200 rounded-lg p-4 bg-rose-50/30">
+            <h3 class="font-semibold mb-3 text-slate-800 flex items-center gap-2">
+              <svg class="w-4 h-4 text-rose-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+              </svg>
+              Kontak Darurat
+            </h3>
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="cp-label">Nama Lengkap</label>
+                <input v-model="form.emergency_contact_name" type="text" class="cp-input"
+                  placeholder="mis. Budi Santoso" maxlength="200" />
+              </div>
+              <div>
+                <label class="cp-label">Hubungan</label>
+                <select v-model="form.emergency_contact_relation" class="cp-input">
+                  <option value="">— Pilih —</option>
+                  <option v-for="[v, l] in RELATIONS" :key="v" :value="v">{{ l }}</option>
+                </select>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="cp-label">Nomor HP</label>
+                <input v-model="form.emergency_contact_phone" type="tel"
+                  class="cp-input"
+                  :class="errors.emergency_contact_phone && 'cp-error-mark'"
+                  placeholder="0812 3456 7890" />
+                <p v-if="errors.emergency_contact_phone" class="cp-err">{{ errors.emergency_contact_phone }}</p>
+                <p class="text-xs text-slate-500 mt-1">
+                  Akan dihubungi hanya dalam keadaan darurat (mis. kecelakaan kerja).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Keluarga (untuk PTKP HB & BPJS family inclusion) -->
+          <div v-if="form.marital_status === 'KAWIN'" class="border border-purple-200 rounded-lg p-4 bg-purple-50/30">
+            <h3 class="font-semibold mb-3 text-slate-800 flex items-center gap-2">
+              <svg class="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+              </svg>
+              Data Keluarga
+            </h3>
+            <p class="text-xs text-slate-600 mb-3">
+              Data pasangan & jumlah anak dipakai untuk hitung PTKP yang akurat
+              dan bantuan pendaftaran BPJS keluarga.
+            </p>
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="cp-label">Nama Pasangan</label>
+                <input v-model="form.spouse_name" type="text" class="cp-input"
+                  placeholder="Nama lengkap suami / istri" maxlength="200" />
+              </div>
+              <div>
+                <label class="cp-label">Pekerjaan Pasangan</label>
+                <input v-model="form.spouse_occupation" type="text" class="cp-input"
+                  placeholder="mis. Wiraswasta, IRT" maxlength="200" />
+              </div>
+              <div class="sm:col-span-2">
+                <label class="cp-label">Tempat Kerja Pasangan</label>
+                <input v-model="form.spouse_workplace" type="text" class="cp-input"
+                  placeholder="Kosongkan kalau IRT / wiraswasta" maxlength="200" />
+                <p class="text-xs text-slate-500 mt-1">
+                  Kalau pasangan juga bekerja & punya NPWP sendiri, ini relevan untuk PTKP HB (penghasilan digabung).
+                </p>
+              </div>
+              <div>
+                <label class="cp-label">Jumlah Anak</label>
+                <input v-model.number="form.children_count" type="number" min="0" max="20"
+                  class="cp-input max-w-[10rem]" />
+                <p class="text-xs text-slate-500 mt-1">
+                  Untuk daftar tanggungan BPJS keluarga (max 5 di-cover BPJS).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Riwayat kesehatan (opt-in, untuk emergency) -->
+          <div class="border border-slate-200 rounded-lg p-4 bg-slate-50/50">
+            <h3 class="font-semibold mb-2 text-sm text-slate-800">Riwayat Kesehatan
+              <span class="font-normal text-slate-500">(opsional, untuk situasi darurat)</span>
+            </h3>
+            <p class="text-xs text-slate-600 mb-3">
+              Cantumkan alergi obat / makanan, kondisi kronis (asma, diabetes), atau
+              hal yang perlu diketahui rekan kerja saat kondisi darurat. Hanya HR &
+              tenaga medis yang akan akses data ini. Boleh kosong.
+            </p>
+            <textarea v-model="form.health_conditions" rows="3" class="cp-input"
+              placeholder="mis. Alergi penisilin, asma ringan terkontrol"></textarea>
+          </div>
+        </section>
+
+        <!-- STEP 4 — Pendidikan & Pengalaman ────────────────── -->
+        <section v-if="step === 4" class="space-y-4">
           <header>
             <h2 class="text-lg font-bold">Pendidikan & Pengalaman</h2>
             <p v-if="job.min_education" class="text-sm text-slate-500 mt-0.5">
@@ -699,21 +1055,141 @@ function fmtSize(bytes) {
                 <input v-model="form.available_from" type="date" class="cp-input" />
               </div>
             </div>
-            <div class="grid sm:grid-cols-2 gap-4 mt-4">
+            <div class="grid sm:grid-cols-3 gap-4 mt-4">
               <div>
                 <label class="cp-label">LinkedIn</label>
                 <input v-model="form.linkedin_url" type="text" class="cp-input" placeholder="linkedin.com/in/anda" />
               </div>
               <div>
                 <label class="cp-label">Portfolio / Website</label>
-                <input v-model="form.portfolio_url" type="text" class="cp-input" placeholder="github.com/anda" />
+                <input v-model="form.portfolio_url" type="text" class="cp-input" placeholder="anda.dev" />
+              </div>
+              <div>
+                <label class="cp-label">GitHub <span class="text-slate-400">(IT)</span></label>
+                <input v-model="form.github_url" type="text" class="cp-input" placeholder="github.com/anda" />
               </div>
             </div>
           </div>
+
+          <!-- Skill, Bahasa, Sertifikasi -->
+          <div class="border-t border-slate-100 pt-4 mt-4">
+            <h3 class="font-semibold mb-3 text-slate-800">Skill, Bahasa & Sertifikasi
+              <span class="font-normal text-slate-500 text-sm">(opsional)</span>
+            </h3>
+            <div class="space-y-3">
+              <div>
+                <label class="cp-label">Bahasa yang Dikuasai</label>
+                <input v-model="form.languages" type="text" class="cp-input"
+                  placeholder="mis. Indonesia (native), English (advanced), Mandarin (basic)" />
+                <p class="text-xs text-slate-500 mt-1">
+                  Sebutkan bahasa + tingkat (native / fluent / advanced / intermediate / basic).
+                </p>
+              </div>
+              <div>
+                <label class="cp-label">Keahlian / Skills</label>
+                <textarea v-model="form.professional_skills" rows="2" class="cp-input"
+                  placeholder="mis. Excel advanced, presentasi publik, leadership, AutoCAD"></textarea>
+              </div>
+              <div>
+                <label class="cp-label">Sertifikasi Profesional</label>
+                <textarea v-model="form.certifications" rows="2" class="cp-input"
+                  placeholder="mis. AWS Solutions Architect (2023), Brevet Pajak A&B (2022)"></textarea>
+                <p class="text-xs text-slate-500 mt-1">
+                  Cantumkan nama sertifikasi + tahun terbit / berakhir.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mobilitas (untuk role lapangan / sales / driver) -->
+          <div class="border-t border-slate-100 pt-4 mt-4">
+            <h3 class="font-semibold mb-3 text-slate-800">Mobilitas
+              <span class="font-normal text-slate-500 text-sm">(opsional, relevan untuk role lapangan)</span>
+            </h3>
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="cp-label">SIM yang Dimiliki</label>
+                <div class="space-y-1.5">
+                  <label v-for="[v, l] in DRIVING_LICENSES" :key="v"
+                    class="flex items-start gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" v-model="form.driving_license" :value="v"
+                      class="mt-0.5 w-4 h-4 accent-[var(--brand-color,#0F62FE)]" />
+                    <span>{{ l }}</span>
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label class="cp-label">Kendaraan Pribadi</label>
+                <div class="space-y-1.5">
+                  <label v-for="[v, l] in VEHICLES" :key="v"
+                    class="flex items-start gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" v-model="form.vehicle_owned" :value="v"
+                      class="mt-0.5 w-4 h-4 accent-[var(--brand-color,#0F62FE)]" />
+                    <span>{{ l }}</span>
+                  </label>
+                </div>
+                <p class="text-xs text-slate-500 mt-2">
+                  Membantu kami menyiapkan tunjangan transportasi yang sesuai.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Referensi profesional -->
+          <div class="border-t border-slate-100 pt-4 mt-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-semibold text-slate-800">Referensi Profesional
+                <span class="font-normal text-slate-500 text-sm">(opsional, max 5)</span>
+              </h3>
+              <button v-if="form.reference_contacts.length < 5" type="button" @click="addReference"
+                class="text-sm text-[var(--brand-color,#0F62FE)] hover:underline inline-flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Tambah Referensi
+              </button>
+            </div>
+            <p v-if="form.reference_contacts.length === 0" class="text-xs text-slate-500 italic mb-3">
+              Klik "Tambah Referensi" untuk mencantumkan rekan kerja, atasan, atau dosen
+              yang bisa dihubungi tim HR sebagai bahan reference check.
+            </p>
+            <div v-for="(ref, idx) in form.reference_contacts" :key="idx"
+              class="border border-slate-200 rounded-md p-3 mb-3 relative">
+              <button type="button" @click="removeReference(idx)"
+                class="absolute top-2 right-2 text-slate-400 hover:text-red-600"
+                title="Hapus referensi">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <div class="text-xs font-medium text-slate-600 mb-2">Referensi #{{ idx + 1 }}</div>
+              <div class="grid sm:grid-cols-2 gap-3">
+                <input v-model="ref.name" type="text" class="cp-input" placeholder="Nama lengkap" maxlength="100" />
+                <input v-model="ref.relation" type="text" class="cp-input" placeholder="Hubungan: atasan / kolega / dosen" maxlength="100" />
+                <input v-model="ref.position" type="text" class="cp-input" placeholder="Jabatan" maxlength="100" />
+                <input v-model="ref.company" type="text" class="cp-input" placeholder="Perusahaan / institusi" maxlength="100" />
+                <input v-model="ref.phone" type="tel" class="cp-input sm:col-span-2 font-mono"
+                  placeholder="0812 3456 7890" maxlength="32" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Sumber lamaran detail -->
+          <div class="border-t border-slate-100 pt-4 mt-4">
+            <label class="cp-label">Bagaimana Anda mengetahui lowongan ini?
+              <span class="text-slate-400 font-normal">(opsional)</span>
+            </label>
+            <input v-model="form.referral_source_detail" type="text" class="cp-input"
+              placeholder="mis. Referral dari Andi Wijaya (teman SMA), LinkedIn job alert, etc."
+              maxlength="255" />
+            <p class="text-xs text-slate-500 mt-1">
+              Kalau direkomendasikan karyawan, sebutkan namanya — bisa untuk program referral.
+            </p>
+          </div>
         </section>
 
-        <!-- STEP 4 ─────────────────────────────────────────── -->
-        <section v-if="step === 4" class="space-y-4">
+        <!-- STEP 5 — Dokumen & Kirim ────────────────────────── -->
+        <section v-if="step === 5" class="space-y-4">
           <header>
             <h2 class="text-lg font-bold">Dokumen Lamaran</h2>
             <p class="text-sm text-slate-500 mt-0.5">
@@ -834,7 +1310,7 @@ function fmtSize(bytes) {
             Sebelumnya
           </button>
           <span v-else></span>
-          <button v-if="step < 4" @click="nextStep" type="button" class="px-6 py-2 rounded-md bg-[var(--brand-color,#0F62FE)] text-white font-medium hover:opacity-90 transition inline-flex items-center gap-1">
+          <button v-if="step < STEPS.length" @click="nextStep" type="button" class="px-6 py-2 rounded-md bg-[var(--brand-color,#0F62FE)] text-white font-medium hover:opacity-90 transition inline-flex items-center gap-1">
             Lanjut
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />

@@ -77,6 +77,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('me',               'CandidateAuthController::me');
         $routes->post('change-password', 'CandidateAuthController::changePassword');
 
+        // Sprint 23+ — Profil Saya: kandidat lihat & edit lamaran-nya
+        // selama belum di stage final (HIRED/REJECTED/WITHDRAWN).
+        $routes->get('applications/(:num)',  'CandidateAuthController::showApplication/$1');
+        $routes->put('applications/(:num)',  'CandidateAuthController::updateApplication/$1');
+
         // Online tests (kandidat side)
         $routes->get('tests',                                'CandidateOnlineTestController::listAssignments');
         $routes->get('tests/(:num)',                         'CandidateOnlineTestController::showAssignment/$1');
@@ -128,6 +133,24 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->resource('departments', ['controller' => 'DepartmentController']);
         $routes->resource('positions', ['controller' => 'PositionController']);
         $routes->resource('job-grades', ['controller' => 'JobGradeController']);
+
+        // ─── Cost Centers (Sprint 6) ───────────────────────────────
+        // Endpoint khusus didefinisikan SEBELUM /(:num) supaya path
+        // /tree, /picker, /backfill-employees tidak nyangkut sebagai id.
+        $routes->get('cost-centers/tree',                  'CostCenterController::tree');
+        $routes->get('cost-centers/picker',                'CostCenterController::picker');
+        $routes->post('cost-centers/backfill-employees',   'CostCenterController::backfillEmployees');
+        $routes->get('cost-centers',                       'CostCenterController::index');
+        $routes->post('cost-centers',                      'CostCenterController::create');
+        $routes->get('cost-centers/(:num)',                'CostCenterController::show/$1');
+        $routes->put('cost-centers/(:num)',                'CostCenterController::update/$1');
+        $routes->delete('cost-centers/(:num)',             'CostCenterController::delete/$1');
+        $routes->get('cost-centers/(:num)/budgets',        'CostCenterController::listBudgets/$1');
+        $routes->post('cost-centers/(:num)/budgets',       'CostCenterController::setBudgets/$1');
+        $routes->delete('cost-center-budgets/(:num)',      'CostCenterController::deleteBudget/$1');
+        $routes->get('cost-centers/(:num)/budget-vs-actual','CostCenterController::budgetVsActual/$1');
+        $routes->get('cost-centers/(:num)/actuals',        'CostCenterController::actuals/$1');
+        $routes->get('cost-centers/(:num)/committed',      'CostCenterController::committed/$1');
 
         // Employees
         // Custom routes HARUS sebelum resource agar tidak tabrakan dengan resource show()
@@ -215,6 +238,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // export). Pola sama dengan leaves & goals di atas.
         $routes->post('payroll-periods/(:num)/calculate',     'PayrollPeriodController::calculate/$1');
         $routes->post('payroll-periods/(:num)/finalize',      'PayrollPeriodController::finalize/$1');
+        // Pre-check sebelum calculate: deteksi pengajuan transaksi yang
+        // memengaruhi payroll & masih PENDING approval. UI bisa show
+        // warning supaya HR aware sebelum hitung.
+        $routes->get('payroll-periods/(:num)/pending-approvals', 'PayrollPeriodController::pendingApprovals/$1');
         $routes->get('payroll-periods/(:num)/export-summary', 'PayrollPeriodController::exportSummary/$1');
         // Sprint 3 — throttle berat export ke 10/jam per IP+path
         $routes->get('payroll-periods/(:num)/bank-export',    'PayrollPeriodController::bankExport/$1',  ['filter' => 'throttle:export']);
@@ -439,6 +466,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('manpower-requests/(:num)/cancel',         'ManpowerController::cancel/$1');
         $routes->post('manpower-requests/(:num)/create-posting', 'ManpowerController::createPosting/$1');
         $routes->post('manpower-requests/(:num)/close',          'ManpowerController::close/$1');
+        // Sprint 5 — onboarding planning endpoints
+        $routes->get('manpower-requests/(:num)/planned-assets',  'ManpowerController::plannedAssets/$1');
+        $routes->put('manpower-requests/(:num)/planned-assets',  'ManpowerController::syncPlannedAssets/$1');
 
         // ─── Recruitment / ATS ─────────────────────────────────────
         $routes->get('recruitment/pipeline-stats',  'RecruitmentController::pipelineStats');
@@ -464,6 +494,40 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('candidates/(:num)/move-stage',       'RecruitmentController::moveStage/$1');
         $routes->post('candidates/(:num)/reject',           'RecruitmentController::rejectCandidate/$1');
         $routes->post('candidates/(:num)/hire',             'RecruitmentController::hireCandidate/$1');
+
+        // ─── Candidate Offers (Sprint 2 / REC-1) ───────────────────
+        // Letter-of-offer untuk kandidat di stage OFFER. Workflow:
+        //   DRAFT → SENT → ACCEPTED/REJECTED/EXPIRED/WITHDRAWN.
+        $routes->get('candidates/(:num)/offers',            'OfferController::listForCandidate/$1');
+        $routes->post('candidates/(:num)/offers',           'OfferController::createForCandidate/$1');
+        $routes->get('offers',                              'OfferController::index');
+        $routes->get('offers/(:num)',                       'OfferController::show/$1');
+        $routes->put('offers/(:num)',                       'OfferController::update/$1');
+        $routes->delete('offers/(:num)',                    'OfferController::delete/$1');
+        $routes->post('offers/(:num)/send',                 'OfferController::send/$1');
+        $routes->post('offers/(:num)/respond',              'OfferController::respond/$1');
+        $routes->post('offers/(:num)/withdraw',             'OfferController::withdraw/$1');
+
+        // ─── Probation (Sprint 2 / HIRE-1) ─────────────────────────
+        // PKWTT auto-tracking H+90 dengan reminder & decision flow.
+        $routes->get('probation/expiring',                  'ProbationController::expiring');
+        $routes->get('probation/expired',                   'ProbationController::expired');
+        $routes->post('employees/(:num)/probation/decide',  'ProbationController::decide/$1');
+
+        // ─── Individual Development Plan (Sprint 3 / OD-2) ─────────
+        // Closing-the-loop performance review → development plan.
+        // Endpoint khusus didefinisikan SEBELUM /(:num) supaya path
+        // /idp/my dan /idp/from-review tidak nyangkut sebagai resource id.
+        $routes->get('idp/my',                              'IdpController::my');
+        $routes->post('idp/from-review/(:num)',             'IdpController::createFromReview/$1');
+        $routes->get('idp',                                 'IdpController::index');
+        $routes->post('idp',                                'IdpController::create');
+        $routes->get('idp/(:num)',                          'IdpController::show/$1');
+        $routes->put('idp/(:num)',                          'IdpController::update/$1');
+        $routes->delete('idp/(:num)',                       'IdpController::delete/$1');
+        $routes->post('idp/(:num)/finalize',                'IdpController::finalize/$1');
+        $routes->post('idp/(:num)/complete',                'IdpController::complete/$1');
+        $routes->post('idp/(:num)/cancel',                  'IdpController::cancel/$1');
 
         // ─── Online Tests (HR admin) ───────────────────────────────
         // Lihat docs/ONLINE_TEST.md. Kandidat-side endpoint terpisah
@@ -668,6 +732,19 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('resignations/(:num)/reject',   'ResignationController::reject/$1');
         $routes->post('resignations/(:num)/cancel',   'ResignationController::cancel/$1');
 
+        // ─── Offboarding compliance (Sprint 1) ─────────────────────
+        // Asset clearance, BPJS deactivate, paklaring, dan final settlement
+        // tracking. Lihat docs/LIFECYCLE_AUDIT_2026.md item OFF-2/3/4/6 +
+        // HIRE-4 (BPJS SLA scanner di /offboarding/bpjs-overdue).
+        $routes->get('resignations/(:num)/offboarding',                                 'OffboardingController::status/$1');
+        $routes->post('resignations/(:num)/offboarding/asset-clearance',                'OffboardingController::setAssetClearance/$1');
+        $routes->post('resignations/(:num)/offboarding/bpjs-deactivated',               'OffboardingController::setBpjsDeactivated/$1');
+        $routes->post('resignations/(:num)/offboarding/paklaring',                      'OffboardingController::generatePaklaring/$1');
+        $routes->get('resignations/(:num)/offboarding/paklaring/(:num)',                'OffboardingController::downloadPaklaring/$1/$2');
+        $routes->post('resignations/(:num)/offboarding/final-settlement',               'OffboardingController::linkFinalSettlement/$1');
+        $routes->post('resignations/(:num)/offboarding/final-settlement/paid',          'OffboardingController::markFinalSettlementPaid/$1');
+        $routes->get('offboarding/bpjs-overdue',                                        'OffboardingController::bpjsOverdue');
+
         // ─── Job Information Change (Promosi/Demosi/Mutasi) ────────
         // Workflow: Supervisor → Dept Head → HR → BOD (kondisional) →
         // Employee Consent (kondisional, hanya DEMOTION non-disipliner) →
@@ -720,6 +797,53 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('generated-contracts/(:num)/sign',     'GeneratedContractController::sign/$1');
         // Daftar kontrak yang menunggu tanda tangan untuk employee login
         $routes->get('employee/pending-contracts',           'GeneratedContractController::pendingForEmployee');
+
+        // ─── Termination / PHK Formal Workflow (Sprint 4 / OFF-5) ──
+        // Workflow: DRAFT → PENDING_BIPARTITE → PENDING_HR_DIRECTOR
+        //   → PENDING_BOD → APPROVED → EXECUTED. Lihat
+        //   docs/SPRINT_4_TERMINATION_POLISH.md.
+        // Endpoint khusus didefinisikan SEBELUM /(:num) supaya path
+        // /options tidak nyangkut sebagai resource id.
+        $routes->get('terminations/options',                 'TerminationController::options');
+        $routes->get('terminations',                         'TerminationController::index');
+        $routes->post('terminations',                        'TerminationController::create');
+        $routes->get('terminations/(:num)',                  'TerminationController::show/$1');
+        $routes->put('terminations/(:num)',                  'TerminationController::update/$1');
+        $routes->delete('terminations/(:num)',               'TerminationController::delete/$1');
+        $routes->post('terminations/(:num)/submit',          'TerminationController::submit/$1');
+        $routes->post('terminations/(:num)/bipartite',       'TerminationController::bipartite/$1');
+        $routes->post('terminations/(:num)/approve',         'TerminationController::approve/$1');
+        $routes->post('terminations/(:num)/reject',          'TerminationController::reject/$1');
+        $routes->post('terminations/(:num)/cancel',          'TerminationController::cancel/$1');
+        $routes->post('terminations/(:num)/execute',         'TerminationController::execute/$1');
+        $routes->get('terminations/(:num)/letter',           'TerminationController::letter/$1');
+
+        // ─── Exit Interview (Sprint 4 / OFF-1) ─────────────────────
+        // Wawancara terstruktur saat resign / PHK.
+        // Endpoint khusus didefinisikan SEBELUM /(:num).
+        $routes->get('exit-interviews/options',              'ExitInterviewController::options');
+        $routes->get('exit-interviews/analytics',            'ExitInterviewController::analytics');
+        $routes->get('exit-interviews',                      'ExitInterviewController::index');
+        $routes->post('exit-interviews',                     'ExitInterviewController::create');
+        $routes->get('exit-interviews/(:num)',               'ExitInterviewController::show/$1');
+        $routes->put('exit-interviews/(:num)',               'ExitInterviewController::update/$1');
+        $routes->delete('exit-interviews/(:num)',            'ExitInterviewController::delete/$1');
+        $routes->post('exit-interviews/(:num)/complete',     'ExitInterviewController::complete/$1');
+        $routes->post('exit-interviews/(:num)/skip',         'ExitInterviewController::skip/$1');
+
+        // ─── Employee 360 View (Sprint 4 / CC-4) ───────────────────
+        // Aggregator endpoint — 12 section per karyawan.
+        $routes->get('employees/(:num)/360',                 'Employee360Controller::show/$1');
+
+        // ─── Compliance Reports (Sprint 4 / CC-5) ──────────────────
+        // WLKP, BPJS, PKWT, PHK list, audit summary, turnover.
+        // Throttle export berat (sama bucket dengan export lain).
+        $routes->get('compliance-reports/types',             'ComplianceReportController::types');
+        $routes->get('compliance-reports/runs',              'ComplianceReportController::runs');
+        $routes->post('compliance-reports/generate',         'ComplianceReportController::generate');
+        $routes->get('compliance-reports/runs/(:num)',       'ComplianceReportController::showRun/$1');
+        $routes->get('compliance-reports/runs/(:num)/csv',   'ComplianceReportController::exportCsv/$1',
+            ['filter' => 'throttle:export']);
     });
 });
 

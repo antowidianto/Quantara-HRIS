@@ -21,6 +21,8 @@ import {
   ArrowLeftStartOnRectangleIcon, ClockIcon, CheckCircleIcon, XMarkIcon,
   EyeIcon, MagnifyingGlassIcon, ChatBubbleLeftEllipsisIcon, UserIcon,
   CalendarDaysIcon, BookOpenIcon, ExclamationTriangleIcon, FunnelIcon,
+  DocumentTextIcon, BanknotesIcon, ShieldCheckIcon, ShieldExclamationIcon,
+  ArrowDownTrayIcon, CurrencyDollarIcon,
 } from '@heroicons/vue/24/outline'
 
 const auth = useAuthStore()
@@ -33,9 +35,14 @@ const page = ref(1)
 const perPage = 20
 const loading = ref(false)
 const offboardingTemplates = ref([])
-const selected = ref(null)   // request yang dibuka di modal review
+const selected = ref(null)   // request yang dibuka di modal review (detail lengkap)
 const decision = ref({ note: '', offboarding_template_id: '' })
 const acting = ref(false)
+const loadingDetail = ref(false)
+
+// State khusus offboarding clearance form (Sprint 1)
+const clearanceForm = ref({ note: '' })
+const finalSettlementForm = ref({ amount: 0, proof_path: '', note: '' })
 
 // Filter UI — default ke 'hr' kalau ada permission, ke 'supervisor' kalau tidak.
 const filterAs = ref(
@@ -90,13 +97,176 @@ async function fetchTemplates() {
   } catch { /* abaikan, optional */ }
 }
 
-function openReview(req) {
+async function openReview(req) {
+  // Buka modal cepat dengan data list, lalu fetch detail untuk dapat
+  // offboarding clearance status (yang tidak ada di list endpoint).
   selected.value = req
   decision.value = { note: '', offboarding_template_id: '' }
+  clearanceForm.value = { note: '' }
+  finalSettlementForm.value = { amount: 0, proof_path: '', note: '' }
+  loadingDetail.value = true
+  try {
+    const res = await api.get(`/resignations/${req.id}`)
+    selected.value = res.data?.data || req
+  } catch (e) {
+    // Best-effort: tetap tampilkan data list walau detail gagal
+    toast.warning('Gagal memuat detail offboarding clearance: ' + (e.response?.data?.message || e.message))
+  } finally {
+    loadingDetail.value = false
+  }
 }
 
 function closeReview() {
   selected.value = null
+  loadingDetail.value = false
+}
+
+async function refreshSelected() {
+  if (! selected.value?.id) return
+  try {
+    const res = await api.get(`/resignations/${selected.value.id}`)
+    selected.value = res.data?.data || selected.value
+  } catch {}
+}
+
+// ─── Offboarding clearance actions (Sprint 1) ──────────────────────
+
+async function setAssetClearance(cleared) {
+  if (! selected.value) return
+  const note = clearanceForm.value.note.trim()
+  // Backend akan throw kalau ada aset belum balik & note kurang dari 10 char
+  if (cleared && selected.value.offboarding?.clearance?.assets?.pending_count > 0
+      && note.length < 10) {
+    toast.warning(
+      'Masih ada aset belum dikembalikan. Catatan exception minimum 10 karakter '
+      + '(mis. "BAP polisi 2026/123 untuk laptop hilang").',
+    )
+    return
+  }
+  acting.value = true
+  try {
+    await api.post(`/resignations/${selected.value.id}/offboarding/asset-clearance`, {
+      cleared,
+      note: note || null,
+    })
+    toast.success(cleared ? 'Asset clearance disetujui' : 'Asset clearance di-reset')
+    clearanceForm.value.note = ''
+    await refreshSelected()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal update asset clearance')
+  } finally { acting.value = false }
+}
+
+async function markBpjsDeactivated() {
+  if (! selected.value) return
+  const ok = await confirmDialog({
+    title: 'Tandai BPJS Sudah Di-deactivate?',
+    message: 'Pastikan Anda sudah submit deactivate ke e-Dabu (Kesehatan) & SiPP (Ketenagakerjaan). '
+      + 'Setelah ditandai, status compliance H+7 dianggap terpenuhi.',
+    okText: 'Ya, Tandai',
+    variant: 'primary',
+  })
+  if (! ok) return
+  acting.value = true
+  try {
+    await api.post(`/resignations/${selected.value.id}/offboarding/bpjs-deactivated`, {
+      note: clearanceForm.value.note || null,
+    })
+    toast.success('BPJS ditandai sudah di-deactivate')
+    clearanceForm.value.note = ''
+    await refreshSelected()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal update BPJS status')
+  } finally { acting.value = false }
+}
+
+async function generatePaklaring() {
+  if (! selected.value) return
+  const ok = await confirmDialog({
+    title: 'Terbitkan Paklaring?',
+    message: 'Surat Keterangan Kerja (paklaring) akan dibuat & link-nya dikirim ke karyawan. '
+      + 'Pre-condition: status APPROVED, asset clearance OK, dan resign_date sudah lewat.',
+    okText: 'Ya, Terbitkan',
+    variant: 'primary',
+  })
+  if (! ok) return
+  acting.value = true
+  try {
+    const res = await api.post(`/resignations/${selected.value.id}/offboarding/paklaring`, {})
+    toast.success(res.data?.message || 'Paklaring berhasil diterbitkan')
+    await refreshSelected()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal generate paklaring')
+  } finally { acting.value = false }
+}
+
+function downloadPaklaring(format = 'pdf') {
+  if (! selected.value?.offboarding?.paklaring?.generated) return
+  // Backend butuh paklaring_id sebagai segment kedua untuk IDOR protection
+  const resignationId = selected.value.id
+  // paklaring_id tersedia di selected.value (column resignation_requests.paklaring_id)
+  const paklaringId = selected.value.paklaring_id
+  if (! paklaringId) {
+    toast.warning('Paklaring ID tidak ditemukan, refresh halaman.')
+    return
+  }
+  const url = `/api/v1/resignations/${resignationId}/offboarding/paklaring/${paklaringId}?format=${format}`
+  window.open(url, '_blank')
+}
+
+async function linkFinalSettlement() {
+  if (! selected.value) return
+  const ok = await confirmDialog({
+    title: 'Link Final Settlement ke Payroll?',
+    message: 'Sistem akan estimasi gaji prorata + sisa cuti + pesangon (kalau ada severance FINALIZED) '
+      + 'dan link ke periode payroll bulan resign. HR perlu adjust komponen di Payroll module setelahnya.',
+    okText: 'Ya, Hitung & Link',
+    variant: 'primary',
+  })
+  if (! ok) return
+  acting.value = true
+  try {
+    const res = await api.post(`/resignations/${selected.value.id}/offboarding/final-settlement`, {})
+    toast.success(res.data?.message || res.data?.data?.notes || 'Final settlement ter-link')
+    finalSettlementForm.value.amount = res.data?.data?.amount || 0
+    await refreshSelected()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal link final settlement')
+  } finally { acting.value = false }
+}
+
+async function markFinalSettlementPaid() {
+  if (! selected.value) return
+  const amount = parseFloat(finalSettlementForm.value.amount)
+  if (! amount || amount <= 0) {
+    toast.warning('Jumlah final settlement wajib > 0')
+    return
+  }
+  const ok = await confirmDialog({
+    title: 'Tandai Final Settlement Sudah Dibayar?',
+    message: `Jumlah Rp ${amount.toLocaleString('id-ID')} akan tercatat sebagai final settlement. `
+      + `Compliance: UU 13/2003 Pasal 156 wajibkan pembayaran ≤ 7 hari dari resign_date.`,
+    okText: 'Ya, Tandai Sudah Bayar',
+    variant: 'primary',
+  })
+  if (! ok) return
+  acting.value = true
+  try {
+    await api.post(`/resignations/${selected.value.id}/offboarding/final-settlement/paid`, {
+      amount,
+      proof_path: finalSettlementForm.value.proof_path || null,
+      note: finalSettlementForm.value.note || null,
+    })
+    toast.success('Final settlement ditandai sudah dibayar')
+    await refreshSelected()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal mark paid')
+  } finally { acting.value = false }
+}
+
+function fmtMoney(n) {
+  if (n === null || n === undefined) return '—'
+  return 'Rp ' + Number(n).toLocaleString('id-ID')
 }
 
 async function approve(req) {
@@ -363,6 +533,225 @@ onMounted(async () => {
             </div>
             <div v-if="selected.tasks_generated_count > 0" class="text-xs text-emerald-700 mt-1">
               ✓ {{ selected.tasks_generated_count }} task offboarding ter-generate
+            </div>
+          </div>
+
+          <!-- ─── Offboarding Compliance (Sprint 1) ──────────────────
+               Tampil saat status APPROVED. Hide kalau pengajuan belum
+               disetujui HR (asset/paklaring/final-settlement tidak relevan
+               sebelum resign formal). -->
+          <div v-if="selected.status === 'APPROVED' && selected.offboarding"
+            class="border-t border-gray-200 pt-4">
+            <h4 class="font-semibold text-sm inline-flex items-center gap-2 mb-3">
+              <ShieldCheckIcon class="w-5 h-5 text-emerald-600" />
+              Offboarding Compliance
+              <span v-if="loadingDetail" class="text-xs text-gray-400 font-normal">(memuat…)</span>
+            </h4>
+
+            <!-- Asset clearance -->
+            <div class="border rounded-lg p-3 mb-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex-1">
+                  <div class="font-medium text-sm flex items-center gap-1.5">
+                    <component
+                      :is="selected.offboarding.clearance.assets.ok ? ShieldCheckIcon : ShieldExclamationIcon"
+                      :class="selected.offboarding.clearance.assets.ok ? 'w-4 h-4 text-emerald-600' : 'w-4 h-4 text-amber-600'"
+                    />
+                    Asset Clearance
+                  </div>
+                  <div v-if="selected.offboarding.clearance.assets.ok" class="text-xs text-emerald-700 mt-1">
+                    ✓ Cleared
+                    <span v-if="selected.offboarding.clearance.assets.returned_at">
+                      {{ fmtDate(selected.offboarding.clearance.assets.returned_at) }}
+                    </span>
+                    <div v-if="selected.offboarding.clearance.assets.note"
+                      class="text-xs italic text-gray-600 mt-0.5">
+                      "{{ selected.offboarding.clearance.assets.note }}"
+                    </div>
+                  </div>
+                  <div v-else class="text-xs text-amber-700 mt-1">
+                    {{ selected.offboarding.clearance.assets.pending_count }} aset belum dikembalikan
+                    <ul v-if="selected.offboarding.clearance.assets.pending_assets?.length"
+                      class="list-disc ml-4 mt-1 text-gray-600">
+                      <li v-for="a in selected.offboarding.clearance.assets.pending_assets" :key="a.id">
+                        {{ a.name }} <span class="text-gray-400">({{ a.asset_number }}, {{ a.category }})</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              <!-- Action: toggle clearance -->
+              <div v-if="!selected.offboarding.clearance.assets.ok && isHr" class="mt-2 space-y-2">
+                <textarea v-model="clearanceForm.note" rows="2" maxlength="500"
+                  class="input text-xs"
+                  placeholder="Catatan exception (wajib jika ada aset belum balik, mis. 'BAP polisi 2026/123 untuk laptop hilang')"></textarea>
+                <div class="flex gap-2">
+                  <button class="btn-primary text-xs px-3 py-1" @click="setAssetClearance(true)" :disabled="acting">
+                    Tandai Asset Clearance OK
+                  </button>
+                </div>
+              </div>
+              <div v-else-if="selected.offboarding.clearance.assets.ok && isHr" class="mt-2">
+                <button class="text-xs text-gray-500 hover:text-red-600 underline"
+                  @click="setAssetClearance(false)" :disabled="acting">
+                  Reset clearance (jika perlu re-verify)
+                </button>
+              </div>
+            </div>
+
+            <!-- Finance clearance -->
+            <div class="border rounded-lg p-3 mb-3">
+              <div class="font-medium text-sm flex items-center gap-1.5">
+                <component
+                  :is="selected.offboarding.clearance.finance.ok ? ShieldCheckIcon : ShieldExclamationIcon"
+                  :class="selected.offboarding.clearance.finance.ok ? 'w-4 h-4 text-emerald-600' : 'w-4 h-4 text-amber-600'"
+                />
+                Finance Clearance
+              </div>
+              <div v-if="selected.offboarding.clearance.finance.ok"
+                class="text-xs text-emerald-700 mt-1">
+                ✓ Tidak ada pinjaman / kasbon outstanding
+              </div>
+              <div v-else class="text-xs text-amber-700 mt-1">
+                {{ selected.offboarding.clearance.finance.blocker }}
+              </div>
+            </div>
+
+            <!-- BPJS deactivation (OFF-6) -->
+            <div class="border rounded-lg p-3 mb-3">
+              <div class="font-medium text-sm flex items-center gap-1.5">
+                <component
+                  :is="selected.offboarding.clearance.bpjs.ok ? ShieldCheckIcon : ShieldExclamationIcon"
+                  :class="selected.offboarding.clearance.bpjs.ok ? 'w-4 h-4 text-emerald-600' : 'w-4 h-4 text-amber-600'"
+                />
+                BPJS Deactivation
+                <span class="text-xs text-gray-400 font-normal">(SLA H+7 dari resign_date)</span>
+              </div>
+              <div v-if="selected.offboarding.clearance.bpjs.ok"
+                class="text-xs text-emerald-700 mt-1">
+                ✓ Sudah di-deactivate {{ fmtDate(selected.offboarding.clearance.bpjs.deactivated_at) }}
+              </div>
+              <div v-else class="text-xs mt-1"
+                :class="selected.offboarding.clearance.bpjs.days_overdue >= 7 ? 'text-red-700' : 'text-amber-700'">
+                Belum di-deactivate.
+                <span v-if="selected.offboarding.clearance.bpjs.days_overdue > 0">
+                  <strong>{{ selected.offboarding.clearance.bpjs.days_overdue }} hari overdue</strong>
+                  dari batas H+7 ({{ fmtDate(selected.offboarding.clearance.bpjs.sla_due) }}).
+                </span>
+                <span v-else-if="selected.offboarding.clearance.bpjs.sla_due">
+                  Batas waktu: {{ fmtDate(selected.offboarding.clearance.bpjs.sla_due) }}.
+                </span>
+              </div>
+              <div v-if="!selected.offboarding.clearance.bpjs.ok && isHr" class="mt-2">
+                <button class="btn-primary text-xs px-3 py-1" @click="markBpjsDeactivated" :disabled="acting">
+                  Tandai BPJS Sudah Di-deactivate
+                </button>
+                <p class="text-xs text-gray-500 mt-1">
+                  Klik setelah Anda submit deactivate via e-Dabu (Kesehatan) & SiPP (Ketenagakerjaan).
+                </p>
+              </div>
+            </div>
+
+            <!-- Paklaring -->
+            <div class="border rounded-lg p-3 mb-3">
+              <div class="font-medium text-sm flex items-center gap-1.5">
+                <DocumentTextIcon class="w-4 h-4 text-blue-600" />
+                Paklaring (Surat Keterangan Kerja)
+                <span class="text-xs text-gray-400 font-normal">UU 13/2003 Pasal 153</span>
+              </div>
+              <div v-if="selected.offboarding.paklaring.generated"
+                class="text-xs text-emerald-700 mt-1 space-y-1">
+                <div>
+                  ✓ Diterbitkan
+                  <span class="font-mono">{{ selected.offboarding.paklaring.contract_number }}</span>
+                  pada {{ fmtDate(selected.offboarding.paklaring.generated_at) }}
+                </div>
+                <div class="flex gap-2">
+                  <button class="text-xs text-primary-600 hover:underline inline-flex items-center gap-1"
+                    @click="downloadPaklaring('pdf')">
+                    <ArrowDownTrayIcon class="w-3.5 h-3.5" /> Download PDF
+                  </button>
+                  <button class="text-xs text-primary-600 hover:underline inline-flex items-center gap-1"
+                    @click="downloadPaklaring('html')">
+                    <EyeIcon class="w-3.5 h-3.5" /> Preview HTML
+                  </button>
+                </div>
+              </div>
+              <div v-else class="text-xs text-gray-600 mt-1">
+                Belum diterbitkan.
+                <span v-if="!selected.offboarding.ready_for_paklaring" class="text-amber-700">
+                  (Pre-condition belum terpenuhi: pastikan asset clearance OK & resign_date sudah lewat)
+                </span>
+              </div>
+              <div v-if="!selected.offboarding.paklaring.generated && isHr" class="mt-2">
+                <button class="btn-primary text-xs px-3 py-1"
+                  :disabled="acting || !selected.offboarding.ready_for_paklaring"
+                  @click="generatePaklaring">
+                  Terbitkan Paklaring
+                </button>
+              </div>
+            </div>
+
+            <!-- Final settlement -->
+            <div class="border rounded-lg p-3">
+              <div class="font-medium text-sm flex items-center gap-1.5">
+                <BanknotesIcon class="w-4 h-4 text-green-600" />
+                Final Settlement
+                <span class="text-xs text-gray-400 font-normal">UU 13/2003 Pasal 156 — wajib H+7</span>
+              </div>
+              <div v-if="selected.offboarding.final_settlement.paid_at"
+                class="text-xs text-emerald-700 mt-1">
+                ✓ Dibayar {{ fmtDate(selected.offboarding.final_settlement.paid_at) }}:
+                {{ fmtMoney(selected.offboarding.final_settlement.amount) }}
+                <span v-if="selected.offboarding.final_settlement.payslip_id" class="text-gray-500">
+                  (payslip #{{ selected.offboarding.final_settlement.payslip_id }})
+                </span>
+              </div>
+              <div v-else-if="selected.offboarding.final_settlement.linked"
+                class="text-xs text-amber-700 mt-1">
+                Linked ke payslip #{{ selected.offboarding.final_settlement.payslip_id }} —
+                {{ fmtMoney(selected.offboarding.final_settlement.amount) }}, belum di-mark paid.
+              </div>
+              <div v-else class="text-xs text-gray-600 mt-1">
+                Belum di-link / dibayar.
+                <span v-if="!selected.offboarding.ready_for_final_settlement" class="text-amber-700">
+                  (Pre-condition belum terpenuhi: asset & finance clearance harus OK)
+                </span>
+              </div>
+
+              <div v-if="isHr && !selected.offboarding.final_settlement.paid_at" class="mt-3 space-y-2">
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn-outline text-xs px-3 py-1"
+                    :disabled="acting || !selected.offboarding.ready_for_final_settlement"
+                    @click="linkFinalSettlement">
+                    <CurrencyDollarIcon class="w-3.5 h-3.5 mr-1 inline" />
+                    Hitung & Link ke Payroll
+                  </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <label class="text-xs text-gray-500">Jumlah dibayar (Rp)</label>
+                    <input type="number" v-model="finalSettlementForm.amount" class="input text-xs" min="0" />
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-500">Bukti transfer (path/URL)</label>
+                    <input type="text" v-model="finalSettlementForm.proof_path" class="input text-xs"
+                      placeholder="opsional" />
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-500">Catatan</label>
+                    <input type="text" v-model="finalSettlementForm.note" class="input text-xs"
+                      placeholder="opsional" />
+                  </div>
+                </div>
+                <button class="btn-primary text-xs px-3 py-1" @click="markFinalSettlementPaid" :disabled="acting">
+                  Tandai Sudah Dibayar
+                </button>
+                <p class="text-xs text-gray-500">
+                  Compliance: pembayaran < 7 hari dari resign_date. Telat → audit log severity CRITICAL.
+                </p>
+              </div>
             </div>
           </div>
 

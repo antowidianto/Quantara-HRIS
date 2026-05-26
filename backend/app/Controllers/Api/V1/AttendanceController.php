@@ -513,6 +513,12 @@ class AttendanceController extends ApiController
 
         $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
         $companyId = $emp ? (int) $emp['company_id'] : 0;
+        // Sprint 23+ — tanggal masa kerja efektif. Cell di luar window
+        // ini dilabeli BEFORE_JOIN / AFTER_RESIGN supaya UI bisa render
+        // disabled state (tidak ada absensi lama, tidak ada jadwal masa
+        // depan setelah resign).
+        $joinDate   = $emp['join_date']   ?? null;
+        $resignDate = $emp['resign_date'] ?? null;
 
         // Pre-fetch attendances dalam rentang
         $attRows = $db->table('attendances')
@@ -596,6 +602,48 @@ class AttendanceController extends ApiController
             $isFuture  = $date > $today;
             $isToday   = $date === $today;
 
+            // Sprint 23+ — Mask hari sebelum join_date & setelah resign_date.
+            // Karyawan tidak punya catatan absensi di luar masa kerja, jadi
+            // sel-sel kalender ini ditampilkan disabled dengan label khusus
+            // supaya tidak mengundang submit data yang salah.
+            $isBeforeJoin = $joinDate   && $date < $joinDate;
+            $isAfterResign = $resignDate && $date > $resignDate;
+
+            if ($isBeforeJoin || $isAfterResign) {
+                $reason = $isBeforeJoin ? 'BEFORE_JOIN' : 'AFTER_RESIGN';
+                $label  = $isBeforeJoin
+                    ? 'Belum Join'
+                    : 'Sudah Resign';
+                $note   = $isBeforeJoin
+                    ? ('Anda baru bergabung pada ' . date('d M Y', strtotime((string) $joinDate)))
+                    : ('Anda resign pada ' . date('d M Y', strtotime((string) $resignDate)));
+
+                $days[] = [
+                    'date'           => $date,
+                    'day_name'       => $this->dayName($dow),
+                    'is_weekend'     => $isWeekend,
+                    'is_today'       => $isToday,
+                    'is_future'      => $isFuture,
+                    'is_past'        => $date < $today,
+                    'is_holiday'     => false,
+                    'holiday_name'   => null,
+                    'shift'          => null,
+                    'attendance'     => null,
+                    'leave'          => null,
+                    'status'         => $reason,
+                    'status_label'   => $label,
+                    'status_color'   => 'gray',
+                    'note'           => $note,
+                    'change_request' => null,
+                    'is_before_join' => $isBeforeJoin,
+                    'is_after_resign'=> $isAfterResign,
+                    'is_locked'      => true,
+                ];
+
+                $cursor += 86400;
+                continue;
+            }
+
             $sched = $schedByDate[$date] ?? null;
             $shift = null;
             if ($sched && ! empty($sched['shift_id'])) {
@@ -643,22 +691,25 @@ class AttendanceController extends ApiController
             );
 
             $days[] = [
-                'date'          => $date,
-                'day_name'      => $this->dayName($dow),
-                'is_weekend'    => $isWeekend,
-                'is_today'      => $isToday,
-                'is_future'     => $isFuture,
-                'is_past'       => $date < $today,
-                'is_holiday'    => $isHoliday,
-                'holiday_name'  => $isHoliday ? $holidayByDate[$date]['name'] : null,
-                'shift'         => $shift,
-                'attendance'    => $att,
-                'leave'         => $leaveOnDay,
-                'status'        => $status,
-                'status_label'  => $label,
-                'status_color'  => $color,
-                'note'          => $note,
-                'change_request'=> $crByDate[$date] ?? null,
+                'date'           => $date,
+                'day_name'       => $this->dayName($dow),
+                'is_weekend'     => $isWeekend,
+                'is_today'       => $isToday,
+                'is_future'      => $isFuture,
+                'is_past'        => $date < $today,
+                'is_holiday'     => $isHoliday,
+                'holiday_name'   => $isHoliday ? $holidayByDate[$date]['name'] : null,
+                'shift'          => $shift,
+                'attendance'     => $att,
+                'leave'          => $leaveOnDay,
+                'status'         => $status,
+                'status_label'   => $label,
+                'status_color'   => $color,
+                'note'           => $note,
+                'change_request' => $crByDate[$date] ?? null,
+                'is_before_join' => false,
+                'is_after_resign'=> false,
+                'is_locked'      => false,
             ];
 
             $cursor += 86400;

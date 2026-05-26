@@ -274,6 +274,10 @@ class PerformanceService
 
     /**
      * Finalize (HR action — locks).
+     *
+     * Sprint 3 (OD-2): saat finalize, otomatis bootstrap IDP DRAFT dari
+     * field `improvements` review supaya manager tidak harus buat IDP
+     * dari nol. Best-effort — kegagalan IDP tidak boleh blok finalize.
      */
     public function finalizeReview(int $reviewId): void
     {
@@ -288,6 +292,19 @@ class PerformanceService
             'finalized_at' => $now,
             'updated_at' => $now,
         ]);
+
+        // Sprint 3 — Auto-bootstrap IDP DRAFT kalau review punya improvements
+        // field non-empty. Manager review nanti & finalize via /idp/{id}/finalize.
+        if (! empty(trim((string) ($r['improvements'] ?? '')))) {
+            try {
+                \Config\Services::idp()->createFromReview(
+                    $reviewId,
+                    \Config\Services::tenant()->getUserId() ?: 0,
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', "Auto-bootstrap IDP from review #{$reviewId} failed: " . $e->getMessage());
+            }
+        }
     }
 
     /**

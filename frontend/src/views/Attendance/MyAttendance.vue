@@ -62,6 +62,16 @@ const calendarCells = computed(() => {
   return cells
 })
 
+// Sprint 23+ — Helper untuk cell yang locked (BEFORE_JOIN/AFTER_RESIGN).
+// Backend kasih flag `is_locked`; frontend juga toleran terhadap status
+// string sebagai fallback kalau flag belum ada.
+function isLockedCell(cell) {
+  if (! cell) return false
+  return cell.is_locked === true
+    || cell.status === 'BEFORE_JOIN'
+    || cell.status === 'AFTER_RESIGN'
+}
+
 const dayHeaders = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min']
 
 async function fetchData() {
@@ -95,6 +105,9 @@ function shiftMonth(delta) {
 
 function selectDay(day) {
   if (! day) return
+  // Locked day (sebelum join / setelah resign) tetap boleh di-pilih supaya
+  // user lihat penjelasannya di panel kanan, tapi semua tombol aksi otomatis
+  // hidden via `dayContext.allowChange/allowLeave` (cek `is_locked` di sana).
   selectedDay.value = day
 }
 
@@ -179,6 +192,7 @@ const changeTypeLabel = {
 const dayContext = computed(() => {
   const d = selectedDay.value
   if (! d) return null
+  const locked = isLockedCell(d)
   const cr = d.change_request
   const hasPendingChange = cr && cr.status === 'PENDING'
   const hasPendingLeave  = d.leave && d.leave.status === 'PENDING'
@@ -186,13 +200,15 @@ const dayContext = computed(() => {
 
   // Boleh ajukan cuti/izin jika belum ada cuti aktif untuk hari ini dan
   // tanggal masih di hari ini atau ke depan, atau lampau-tapi-ABSENT.
-  const allowLeave = ! hasApprovedLeave && ! hasPendingLeave && (
+  // Sprint 23+ — Locked cell (BEFORE_JOIN/AFTER_RESIGN) auto-disable.
+  const allowLeave = ! locked && ! hasApprovedLeave && ! hasPendingLeave && (
     d.is_today || d.is_future || d.status === 'ABSENT' || d.status === 'NOT_CLOCKED_IN'
   )
 
   // Boleh ajukan perubahan absensi jika hari ini/lampau dan belum ada
   // change-request PENDING.
-  const allowChange = ! hasPendingChange && ! d.is_future && d.status !== 'OFF' && d.status !== 'HOLIDAY'
+  const allowChange = ! locked && ! hasPendingChange && ! d.is_future
+    && d.status !== 'OFF' && d.status !== 'HOLIDAY'
 
   return {
     hasPendingChange,
@@ -201,6 +217,9 @@ const dayContext = computed(() => {
     allowLeave,
     allowChange,
     isAbsent: d.status === 'ABSENT',
+    isLocked: locked,
+    isBeforeJoin: d.is_before_join === true || d.status === 'BEFORE_JOIN',
+    isAfterResign: d.is_after_resign === true || d.status === 'AFTER_RESIGN',
   }
 })
 
@@ -243,44 +262,69 @@ onMounted(fetchData)
               v-for="(cell, idx) in calendarCells" :key="idx"
               :class="[
                 'min-h-[78px] p-2 rounded-md border text-left transition-colors',
-                cell ? colorMap[cell.status_color] || colorMap.gray : 'bg-transparent border-transparent cursor-default',
+                cell
+                  ? (isLockedCell(cell)
+                      ? 'bg-gray-50 text-gray-400 border-dashed border-gray-200 cursor-not-allowed'
+                      : (colorMap[cell.status_color] || colorMap.gray))
+                  : 'bg-transparent border-transparent cursor-default',
                 cell && selectedDay && selectedDay.date === cell.date ? 'ring-2 ring-primary-500' : '',
                 cell && cell.is_today ? 'border-primary-500 border-2' : '',
-                !cell ? 'pointer-events-none' : 'hover:opacity-90 cursor-pointer'
+                !cell ? 'pointer-events-none' : (isLockedCell(cell) ? 'hover:bg-gray-100' : 'hover:opacity-90 cursor-pointer')
               ]"
               :disabled="!cell"
+              :title="cell && isLockedCell(cell) ? cell.note : ''"
               @click="selectDay(cell)"
             >
               <template v-if="cell">
-                <div class="flex items-start justify-between text-xs">
-                  <span class="font-semibold">{{ Number(cell.date.slice(8, 10)) }}</span>
-                  <span v-if="cell.is_today" class="px-1 rounded bg-primary-600 text-white text-[10px]">Hari ini</span>
-                </div>
-                <div class="mt-1 flex items-center gap-1 text-[11px] leading-tight">
-                  <span :class="['inline-block w-2 h-2 rounded-full', dotColor(cell.status_color)]"></span>
-                  <span class="truncate">{{ cell.status_label }}</span>
-                </div>
-                <div v-if="cell.attendance" class="mt-0.5 text-[10px] text-gray-600">
-                  {{ formatTime(cell.attendance.clock_in_at) }} – {{ formatTime(cell.attendance.clock_out_at) }}
-                </div>
-                <div v-if="cell.change_request" class="mt-0.5 text-[10px]">
-                  <span :class="{
-                    'text-amber-700': cell.change_request.status === 'PENDING',
-                    'text-green-700': cell.change_request.status === 'APPROVED',
-                    'text-red-700':   cell.change_request.status === 'REJECTED',
-                    'text-gray-500':  cell.change_request.status === 'CANCELLED',
-                  }">
-                    ⚐ {{ cell.change_request.status }}
-                  </span>
-                </div>
-                <div v-if="cell.leave" class="mt-0.5 text-[10px] truncate"
-                  :class="{
-                    'text-blue-700':  cell.leave.status === 'APPROVED',
-                    'text-amber-700': cell.leave.status === 'PENDING',
-                    'text-red-700':   cell.leave.status === 'REJECTED',
-                  }">
-                  ✦ {{ cell.leave.leave_name || cell.leave.leave_code }}
-                </div>
+                <!-- LOCKED cells (BEFORE_JOIN / AFTER_RESIGN) — render
+                     simpler: hanya tanggal + label, semua transaksi
+                     disembunyikan karena pasti tidak ada. -->
+                <template v-if="isLockedCell(cell)">
+                  <div class="flex items-start justify-between text-xs">
+                    <span class="font-medium opacity-60">{{ Number(cell.date.slice(8, 10)) }}</span>
+                    <!-- Lock icon -->
+                    <svg class="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                  </div>
+                  <div class="mt-2 text-[10px] italic leading-tight">
+                    [{{ cell.status_label }}]
+                  </div>
+                </template>
+
+                <!-- NORMAL cells -->
+                <template v-else>
+                  <div class="flex items-start justify-between text-xs">
+                    <span class="font-semibold">{{ Number(cell.date.slice(8, 10)) }}</span>
+                    <span v-if="cell.is_today" class="px-1 rounded bg-primary-600 text-white text-[10px]">Hari ini</span>
+                  </div>
+                  <div class="mt-1 flex items-center gap-1 text-[11px] leading-tight">
+                    <span :class="['inline-block w-2 h-2 rounded-full', dotColor(cell.status_color)]"></span>
+                    <span class="truncate">{{ cell.status_label }}</span>
+                  </div>
+                  <div v-if="cell.attendance" class="mt-0.5 text-[10px] text-gray-600">
+                    {{ formatTime(cell.attendance.clock_in_at) }} – {{ formatTime(cell.attendance.clock_out_at) }}
+                  </div>
+                  <div v-if="cell.change_request" class="mt-0.5 text-[10px]">
+                    <span :class="{
+                      'text-amber-700': cell.change_request.status === 'PENDING',
+                      'text-green-700': cell.change_request.status === 'APPROVED',
+                      'text-red-700':   cell.change_request.status === 'REJECTED',
+                      'text-gray-500':  cell.change_request.status === 'CANCELLED',
+                    }">
+                      ⚐ {{ cell.change_request.status }}
+                    </span>
+                  </div>
+                  <div v-if="cell.leave" class="mt-0.5 text-[10px] truncate"
+                    :class="{
+                      'text-blue-700':  cell.leave.status === 'APPROVED',
+                      'text-amber-700': cell.leave.status === 'PENDING',
+                      'text-red-700':   cell.leave.status === 'REJECTED',
+                    }">
+                    ✦ {{ cell.leave.leave_name || cell.leave.leave_code }}
+                  </div>
+                </template>
               </template>
             </button>
           </div>
@@ -305,8 +349,28 @@ onMounted(fetchData)
             </span>
           </div>
 
+          <!-- Banner BEFORE_JOIN / AFTER_RESIGN (Sprint 23+) -->
+          <div v-if="dayContext?.isLocked"
+            class="bg-gray-50 border border-gray-200 rounded-md p-3 mb-3 text-sm flex items-start gap-2">
+            <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+            <div>
+              <div class="font-medium text-gray-700">
+                {{ dayContext.isBeforeJoin ? 'Belum Bergabung' : 'Sudah Resign' }}
+              </div>
+              <div class="text-xs text-gray-600 mt-0.5">
+                {{ selectedDay.note }}
+              </div>
+              <div class="text-xs text-gray-500 mt-1 italic">
+                Tanggal di luar masa kerja Anda — tidak ada catatan absensi yang berlaku.
+              </div>
+            </div>
+          </div>
+
           <!-- Banner ABSENT (alfa tanpa keterangan) -->
-          <div v-if="dayContext?.isAbsent"
+          <div v-else-if="dayContext?.isAbsent"
             class="bg-red-50 border border-red-200 rounded-md p-3 mb-3 text-sm text-red-800 flex items-start gap-2">
             <ExclamationTriangleIcon class="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>

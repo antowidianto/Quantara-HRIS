@@ -240,6 +240,151 @@ class CandidateAuthController extends BaseController
         return $this->ok(null, 'Password berhasil diganti. Silakan login ulang.');
     }
 
+    /**
+     * GET /careers/account/applications/{id}
+     *
+     * Sprint 23+ — Kandidat lihat detail lamaran-nya untuk fitur "Profil
+     * Saya". Hanya bisa akses lamaran yang dimiliki account ini.
+     */
+    public function showApplication($id = null)
+    {
+        $account = $this->candidateAccount();
+        if (! $account) return $this->fail('Not authenticated', 401);
+
+        $row = $this->ownedApplicationOrFail((int) $id, $account);
+        if (! $row) return $this->response;
+
+        return $this->ok($this->serializeApplication($row, $account));
+    }
+
+    /**
+     * PUT /careers/account/applications/{id}
+     *
+     * Update lamaran. Boleh dilakukan kandidat selama belum di stage final
+     * (HIRED, REJECTED, WITHDRAWN). Field yang boleh di-edit: profil
+     * pribadi, identitas, payroll, kontak darurat, keluarga, skill, dll.
+     * Field yang TIDAK boleh diubah: stage, rating, feedback HR, paths
+     * dokumen (re-upload via /careers/upload), candidate_account_id,
+     * audit fields.
+     */
+    public function updateApplication($id = null)
+    {
+        $account = $this->candidateAccount();
+        if (! $account) return $this->fail('Not authenticated', 401);
+
+        $row = $this->ownedApplicationOrFail((int) $id, $account);
+        if (! $row) return $this->response;
+
+        // Sprint 23+ — terminal stage (terutama HIRED) lock data karena
+        // sudah dipakai untuk generate kontrak / employee record. HR
+        // pegang full control mulai sini. REJECTED/WITHDRAWN juga locked
+        // supaya tidak ada update setelah rejection (audit trail clean).
+        if (in_array($row['current_stage'], ['HIRED', 'REJECTED', 'WITHDRAWN'], true)) {
+            return $this->fail(
+                'Lamaran sudah pada tahap final (' . $row['current_stage'] . '), tidak bisa diedit. '
+                . 'Hubungi tim HR jika ada perubahan data penting.',
+                422,
+                'APPLICATION_LOCKED',
+            );
+        }
+
+        $body = $this->getBody();
+        try {
+            Services::career()->updateApplicationByCandidate(
+                (int) $id,
+                (int) $account['id'],
+                $body,
+            );
+        } catch (\RuntimeException $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+
+        // Re-fetch supaya response selalu fresh
+        $db = \Config\Database::connect();
+        $fresh = $db->table('candidates')->where('id', (int) $id)->get()->getRowArray();
+        return $this->ok($this->serializeApplication($fresh, $account), 'Profil lamaran berhasil diperbarui');
+    }
+
+    /**
+     * Helper — pastikan application milik account yang sedang login &
+     * load row lengkap. Set $this->response untuk error supaya caller
+     * tinggal `return $this->response`.
+     */
+    private function ownedApplicationOrFail(int $id, array $account): ?array
+    {
+        $db = \Config\Database::connect();
+        $row = $db->table('candidates')
+            ->where('id', $id)
+            ->where('candidate_account_id', (int) $account['id'])
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $row) {
+            $this->response = $this->fail('Lamaran tidak ditemukan atau bukan milik Anda', 404);
+            return null;
+        }
+        return $row;
+    }
+
+    /**
+     * Bentuk response shape untuk endpoint show/update application —
+     * include job info + decode JSON fields.
+     */
+    private function serializeApplication(array $cand, array $account): array
+    {
+        $db = \Config\Database::connect();
+        $job = $db->table('job_postings')
+            ->select('id, title, reference_number, public_slug, work_arrangement, city,'
+                . ' employment_type, status, min_education')
+            ->where('id', (int) $cand['job_posting_id'])
+            ->get()->getRowArray();
+
+        // Decode JSON fields kalau ada
+        if (isset($cand['extra_answers']) && is_string($cand['extra_answers'])) {
+            $decoded = json_decode($cand['extra_answers'], true);
+            $cand['extra_answers'] = is_array($decoded) ? $decoded : [];
+        }
+        if (isset($cand['reference_contacts']) && is_string($cand['reference_contacts'])) {
+            $decoded = json_decode($cand['reference_contacts'], true);
+            $cand['reference_contacts'] = is_array($decoded) ? $decoded : [];
+        }
+
+        // driving_license / vehicle_owned di DB string comma-separated;
+        // convert ke array supaya frontend langsung bisa pake checkbox.
+        foreach (['driving_license', 'vehicle_owned'] as $col) {
+            if (! empty($cand[$col]) && is_string($cand[$col])) {
+                $cand[$col] = array_values(array_filter(
+                    array_map('trim', explode(',', $cand[$col])),
+                ));
+            } elseif (empty($cand[$col])) {
+                $cand[$col] = [];
+            }
+        }
+
+        // Field yang HR-only / sensitif untuk client side jangan di-expose
+        // (mis. internal notes / feedback HR yang ditulis interviewer).
+        $hidden = [
+            'applicant_ip',           // privasi
+            'rating',                 // rating internal HR
+            'rejection_reason',       // boleh diliat di dashboard list, bukan di edit form
+            'created_by',
+            'updated_by',
+            'deleted_at',
+        ];
+        foreach ($hidden as $h) unset($cand[$h]);
+
+        // Flag editable supaya UI tahu apakah harus disabled
+        $editable = ! in_array($cand['current_stage'], ['HIRED','REJECTED','WITHDRAWN'], true);
+
+        return [
+            'application' => $cand,
+            'job'         => $job,
+            'editable'    => $editable,
+            'lock_reason' => $editable
+                ? null
+                : 'Lamaran sudah pada tahap final (' . $cand['current_stage'] . ')',
+        ];
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────
 
     private function getBody(): array

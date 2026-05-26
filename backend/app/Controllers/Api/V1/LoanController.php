@@ -82,6 +82,20 @@ class LoanController extends ApiController
             'created_at'      => date('Y-m-d H:i:s'),
             'updated_at'      => date('Y-m-d H:i:s'),
         ];
+
+        // Sprint 6 — Cost Center: tag pinjaman ke cost center karyawan
+        // (asset finance perspective). Resolve via chain.
+        if (in_array('cost_center_id', $db->getFieldNames('loans'), true)) {
+            try {
+                $insert['cost_center_id'] = Services::costCenter()->resolveForEmployee(
+                    $employeeId,
+                    ['cost_center_id' => $data['cost_center_id'] ?? null]
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', 'Loan cost_center resolve failed: ' . $e->getMessage());
+            }
+        }
+
         $db->table('loans')->insert($insert);
         $id = (int) $db->insertID();
         Services::audit()->log('loan.create', 'loan', $id);

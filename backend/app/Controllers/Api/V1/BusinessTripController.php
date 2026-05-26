@@ -163,6 +163,21 @@ class BusinessTripController extends ApiController
             'created_at'       => $now,
             'updated_at'       => $now,
         ];
+
+        // Sprint 6 — Cost Center: tag biaya perjalanan dinas ke cost center
+        // karyawan. Resolve via chain dengan override eksplisit kalau payload
+        // explicit (mis. trip lintas department, di-charge ke department lain).
+        if (in_array('cost_center_id', $db->getFieldNames('business_trips'), true)) {
+            try {
+                $insert['cost_center_id'] = Services::costCenter()->resolveForEmployee(
+                    $employeeId,
+                    ['cost_center_id' => $data['cost_center_id'] ?? null]
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', 'BusinessTrip cost_center resolve failed: ' . $e->getMessage());
+            }
+        }
+
         $db->table('business_trips')->insert($insert);
         $id = (int) $db->insertID();
         Services::audit()->forModule('BUSINESS_TRIP')->logCreate('business_trip', $id, $insert,

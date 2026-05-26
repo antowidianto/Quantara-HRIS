@@ -10,6 +10,7 @@ import {
   ArrowLeftIcon, PlusIcon, ArrowRightIcon, XCircleIcon, CheckBadgeIcon,
   StarIcon, TrashIcon, ClipboardDocumentIcon, CheckIcon, KeyIcon,
   DocumentIcon, EyeIcon, ArrowDownTrayIcon, PhotoIcon, DocumentTextIcon,
+  EnvelopeIcon, BanknotesIcon, ClockIcon, NoSymbolIcon,
 } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
@@ -37,13 +38,85 @@ const moveStageInput = reactive({
 const showRejectModal = ref(null)
 const rejectReason = ref('')
 const showHireModal = ref(null)
+// Sprint 23+ — hire form sekarang mencakup data payroll-essential
+// (PTKP, NPWP, BPJS, rekening bank, tax method) supaya saat HR submit,
+// employee record langsung siap untuk perhitungan payroll. Field
+// sensitif (npwp, bank_account) di-encrypt at-rest oleh backend.
 const hireForm = reactive({
-  basic_salary: 0, join_date: '',
+  // Employment
+  basic_salary: 0,
+  join_date: '',
+  employment_status: 'PKWTT',
+  probation_end_date: '',
+  contract_end_date: '',
+  // Tax / PTKP
+  ptkp_status: 'TK0',
+  tax_method: 'GROSS',
+  pph21_method: 'TER',
+  npwp: '',
+  // BPJS
+  bpjs_kesehatan_no: '',
+  bpjs_kesehatan_class: 1,
+  bpjs_tk_no: '',
+  // Rekening bank
+  bank_name: '',
+  bank_account: '',
+  bank_account_holder: '',
 })
+
+// Indikator kelengkapan data payroll. Dipakai untuk badge di footer modal
+// supaya HR sadar field mana yang masih kosong.
+const payrollReadyCount = computed(() => {
+  let n = 0
+  if (hireForm.basic_salary > 0) n++
+  if (hireForm.ptkp_status) n++
+  if (hireForm.npwp.trim() !== '') n++
+  if (hireForm.bpjs_kesehatan_no.trim() !== '') n++
+  if (hireForm.bpjs_tk_no.trim() !== '') n++
+  if (hireForm.bank_name.trim() !== '' && hireForm.bank_account.trim() !== '') n++
+  return n
+})
+const PAYROLL_READY_TOTAL = 6
+
+const PTKP_OPTIONS = [
+  { value: 'TK0', label: 'TK/0 — Belum kawin, tanpa tanggungan' },
+  { value: 'TK1', label: 'TK/1 — Belum kawin, 1 tanggungan' },
+  { value: 'TK2', label: 'TK/2 — Belum kawin, 2 tanggungan' },
+  { value: 'TK3', label: 'TK/3 — Belum kawin, 3 tanggungan' },
+  { value: 'K0',  label: 'K/0 — Kawin, tanpa tanggungan' },
+  { value: 'K1',  label: 'K/1 — Kawin, 1 tanggungan' },
+  { value: 'K2',  label: 'K/2 — Kawin, 2 tanggungan' },
+  { value: 'K3',  label: 'K/3 — Kawin, 3 tanggungan' },
+  { value: 'HB0', label: 'HB/0 — Penghasilan istri digabung, tanpa tanggungan' },
+  { value: 'HB1', label: 'HB/1' },
+  { value: 'HB2', label: 'HB/2' },
+  { value: 'HB3', label: 'HB/3' },
+]
+const EMPLOYMENT_STATUS_OPTIONS = ['PKWTT','PKWT','PROBATION','HARIAN','MAGANG','OUTSOURCING']
+const BANK_OPTIONS = ['BCA','MANDIRI','BNI','BRI','CIMB','PERMATA','DANAMON','BTN','BSI','OCBC','MAYBANK','PANIN','MEGA','BTPN','LAINNYA']
 
 // Credential modal — tampil sekali setelah hire berhasil bila auto-create
 // user akun untuk karyawan baru. HR wajib catat / kirim ke karyawan; setelah
 // modal ditutup credential hilang dari client (tidak disimpan).
+// Offer management (Sprint 2 / REC-1) — modal sebelum HR convert ke HIRED.
+// Workflow: HR buka modal → buat DRAFT → kirim → kandidat respon di portal
+// → HR proceed ke Hire kalau ACCEPTED.
+const showOfferModal = ref(null) // candidate row saat aktif
+const offers = ref([])           // list offer untuk kandidat ini
+const loadingOffers = ref(false)
+const offerForm = reactive({
+  basic_salary: 0,
+  joining_bonus: 0,
+  employment_status: 'PKWTT',
+  probation_months: 3,
+  proposed_join_date: '',
+  response_deadline: '',
+  currency: 'IDR',
+  internal_notes: '',
+  allowances: [], // [{label, amount, type, is_taxable}]
+})
+const showOfferConfirm = ref(false) // konfirmasi send
+
 const credentialResult = ref(null)
 const copiedField = ref(null)
 async function copyToClipboard(text, field) {
@@ -133,9 +206,29 @@ async function openCandidateDetail(c) {
   } catch (e) { toast.error('Gagal'); showCandDetail.value = null }
 }
 
+// Sprint 23+ — gate "online test must be completed & graded by HR"
+// sebelum boleh maju ke INTERVIEW_HR/USER/OFFER/HIRED. Backend juga
+// enforce di moveStage(); frontend cek dulu untuk UX yang bagus
+// (warning + tombol disabled, bukan klik-error-baru-tahu).
+const POST_TEST_STAGES = ['INTERVIEW_HR', 'INTERVIEW_USER', 'OFFER', 'HIRED']
+
+function onlineTestBlocker(candidate, targetStage) {
+  if (! POST_TEST_STAGES.includes(targetStage)) return null
+  const status = candidate?.online_test_status
+  if (! status || ! status.has_assignments || status.all_done) return null
+  return status.blocker_reason || 'Online test belum selesai dikerjakan / belum di-review HR.'
+}
+
 async function moveStage(c, newStage) {
   if (newStage === 'HIRED') return openHireModal(c)
   if (newStage === 'REJECTED') return openRejectModal(c)
+
+  // Sprint 23+ — gate online test
+  const blocker = onlineTestBlocker(c, newStage)
+  if (blocker) {
+    toast.error(blocker, { timeout: 7000 })
+    return
+  }
 
   try {
     await api.post(`/candidates/${c.id}/move-stage`, { stage: newStage })
@@ -166,21 +259,85 @@ async function doReject() {
 
 function openHireModal(c) {
   showHireModal.value = c
+  // Reset semua field; pre-fill dari data candidate kalau tersedia.
+  // PTKP di-derive dari marital_status candidate (BELUM_KAWIN→TK0,
+  // KAWIN→K0). Dependent count belum di-track di candidates table
+  // jadi default ke 0.
+  const maritalToPtkp = {
+    BELUM_KAWIN: 'TK0',
+    KAWIN: 'K0',
+    CERAI_HIDUP: 'TK0',
+    CERAI_MATI: 'TK0',
+  }
   Object.assign(hireForm, {
     basic_salary: c.expected_salary || 0,
-    join_date: c.available_from || '',
+    join_date: c.available_from || new Date().toISOString().slice(0, 10),
+    employment_status: 'PKWTT',
+    probation_end_date: '',
+    contract_end_date: '',
+    ptkp_status: maritalToPtkp[c.marital_status] || 'TK0',
+    tax_method: 'GROSS',
+    pph21_method: 'TER',
+    npwp: c.npwp || '',
+    bpjs_kesehatan_no: c.bpjs_kesehatan_no || '',
+    bpjs_kesehatan_class: 1,
+    bpjs_tk_no: c.bpjs_tk_no || '',
+    bank_name: '',
+    bank_account: '',
+    bank_account_holder: c.full_name || '',
   })
 }
 
 async function doHire() {
   if (! canHire.value) { toast.error('Butuh permission recruitment.hire'); return }
+
+  // Validasi minimum: gaji pokok + tanggal bergabung wajib supaya
+  // payroll calculator bisa hitung apa pun. Field payroll lain bersifat
+  // soft-required (HR boleh kosongkan & lengkapi nanti via profil).
+  if (! hireForm.basic_salary || hireForm.basic_salary <= 0) {
+    toast.error('Gaji pokok wajib diisi (> 0)')
+    return
+  }
+  if (! hireForm.join_date) {
+    toast.error('Tanggal bergabung wajib diisi')
+    return
+  }
+
+  // Soft-warn kalau data payroll esensial belum lengkap. HR bisa tetap
+  // lanjut, tapi periode payroll pertama mungkin punya data kosong
+  // (NPWP/BPJS/rekening) yang harus dilengkapi sebelum bayar.
+  if (payrollReadyCount.value < PAYROLL_READY_TOTAL) {
+    const missing = []
+    if (! hireForm.npwp.trim()) missing.push('NPWP')
+    if (! hireForm.bpjs_kesehatan_no.trim()) missing.push('BPJS Kesehatan')
+    if (! hireForm.bpjs_tk_no.trim()) missing.push('BPJS Ketenagakerjaan')
+    if (! hireForm.bank_name.trim() || ! hireForm.bank_account.trim()) missing.push('Rekening bank')
+    if (missing.length > 0) {
+      const ok = await confirmDialog({
+        title: 'Data payroll belum lengkap',
+        message: `Field berikut masih kosong: ${missing.join(', ')}.\n\nKaryawan tetap bisa di-hire, tapi data tersebut harus dilengkapi sebelum periode payroll pertama supaya export bank, e-SPT PPh21, dan setor BPJS tidak ada kolom kosong.`,
+        okText: 'Lanjut Hire',
+        variant: 'warning',
+      })
+      if (! ok) return
+    }
+  }
+
   try {
     const candidateName = showHireModal.value.full_name
     // Move to HIRED dulu kalau belum
     if (showHireModal.value.current_stage !== 'HIRED') {
       await api.post(`/candidates/${showHireModal.value.id}/move-stage`, { stage: 'HIRED' })
     }
-    const res = await api.post(`/candidates/${showHireModal.value.id}/hire`, hireForm)
+    // Build payload — kirim semua field yang HR lengkapi. Backend akan
+    // skip field yang kosong-string supaya tidak overwrite carry-over
+    // dari candidate dengan empty value.
+    const payload = { ...hireForm }
+    // Empty-string strip (kecuali yang relevan dengan backend `array_key_exists` flow)
+    for (const k of Object.keys(payload)) {
+      if (payload[k] === '' || payload[k] === null) delete payload[k]
+    }
+    const res = await api.post(`/candidates/${showHireModal.value.id}/hire`, payload)
     const data = res.data.data || {}
     showHireModal.value = null
     // Kalau auto-create user account berhasil, tampilkan credential modal
@@ -211,6 +368,164 @@ async function deleteCandidate(c) {
     await api.delete(`/candidates/${c.id}`)
     fetchAll()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+}
+
+// ─── Offer management (Sprint 2 / REC-1) ─────────────────────────────
+
+const OFFER_STATUS_BADGE = {
+  DRAFT:     { label: 'Draft',     color: 'bg-gray-100 text-gray-700' },
+  SENT:      { label: 'Terkirim',  color: 'bg-blue-100 text-blue-700' },
+  ACCEPTED:  { label: 'Diterima',  color: 'bg-emerald-100 text-emerald-700' },
+  REJECTED:  { label: 'Ditolak',   color: 'bg-rose-100 text-rose-700' },
+  EXPIRED:   { label: 'Kadaluarsa',color: 'bg-amber-100 text-amber-700' },
+  WITHDRAWN: { label: 'Ditarik',   color: 'bg-gray-100 text-gray-500' },
+}
+
+const offerActiveCount = computed(
+  () => offers.value.filter(o => ['DRAFT', 'SENT'].includes(o.status)).length,
+)
+
+// Total monthly compensation untuk preview (basic + sum allowances)
+const offerTotalCompensation = computed(() => {
+  const base = Number(offerForm.basic_salary) || 0
+  const allow = (offerForm.allowances || []).reduce(
+    (acc, a) => acc + (Number(a.amount) || 0), 0,
+  )
+  return base + allow
+})
+
+async function openOfferModal(c) {
+  if (! canManage.value) {
+    toast.error('Butuh permission recruitment.manage')
+    return
+  }
+  showOfferModal.value = c
+  // Reset form & default deadline +7 hari kerja
+  Object.assign(offerForm, {
+    basic_salary: c.expected_salary || 0,
+    joining_bonus: 0,
+    employment_status: 'PKWTT',
+    probation_months: 3,
+    proposed_join_date: c.available_from || '',
+    response_deadline: defaultDeadline(),
+    currency: 'IDR',
+    internal_notes: '',
+    allowances: [],
+  })
+  await loadOffersForCandidate(c.id)
+}
+
+function defaultDeadline() {
+  const d = new Date()
+  d.setDate(d.getDate() + 7)
+  return d.toISOString().slice(0, 10)
+}
+
+async function loadOffersForCandidate(candId) {
+  loadingOffers.value = true
+  try {
+    const res = await api.get(`/candidates/${candId}/offers`)
+    offers.value = res.data.data || []
+  } catch (e) {
+    offers.value = []
+  } finally {
+    loadingOffers.value = false
+  }
+}
+
+function addOfferAllowance() {
+  offerForm.allowances.push({
+    label: '', amount: 0, type: 'fixed', is_taxable: true,
+  })
+}
+function removeOfferAllowance(idx) {
+  offerForm.allowances.splice(idx, 1)
+}
+
+async function saveOfferDraft() {
+  if (! showOfferModal.value) return
+
+  if (! offerForm.basic_salary || offerForm.basic_salary <= 0) {
+    toast.error('Gaji pokok wajib diisi (> 0)')
+    return
+  }
+  if (offerForm.employment_status === 'PKWT' && offerForm.probation_months > 0) {
+    toast.error('PKWT tidak boleh ada probation (PP 35/2021 Pasal 12). Set probation = 0.')
+    return
+  }
+  if (offerForm.probation_months < 0 || offerForm.probation_months > 3) {
+    toast.error('Probation antara 0-3 bulan (UU 13/2003 Pasal 60)')
+    return
+  }
+
+  // Filter allowances yang valid
+  const cleanAllowances = (offerForm.allowances || []).filter(
+    a => a.label && a.amount > 0,
+  )
+
+  try {
+    const payload = {
+      candidate_id: showOfferModal.value.id,
+      basic_salary: Number(offerForm.basic_salary),
+      joining_bonus: Number(offerForm.joining_bonus) || 0,
+      employment_status: offerForm.employment_status,
+      probation_months: Number(offerForm.probation_months) || 0,
+      proposed_join_date: offerForm.proposed_join_date || null,
+      response_deadline: offerForm.response_deadline || null,
+      currency: offerForm.currency || 'IDR',
+      internal_notes: offerForm.internal_notes || null,
+      allowances: cleanAllowances,
+    }
+    const res = await api.post(
+      `/candidates/${showOfferModal.value.id}/offers`,
+      payload,
+    )
+    toast.success(`Offer ${res.data.data.offer_number} dibuat (DRAFT)`)
+    await loadOffersForCandidate(showOfferModal.value.id)
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal buat offer')
+  }
+}
+
+async function sendOffer(offerId) {
+  const ok = await confirmDialog({
+    title: 'Kirim offer ke kandidat?',
+    message: 'Kandidat akan menerima notifikasi (in-app + email) dengan link ke portal untuk respond. '
+      + 'Setelah dikirim, offer tidak bisa diedit lagi (harus withdraw & buat baru).',
+    okText: 'Kirim',
+    variant: 'primary',
+  })
+  if (! ok) return
+  try {
+    await api.post(`/offers/${offerId}/send`)
+    toast.success('Offer dikirim ke kandidat')
+    await loadOffersForCandidate(showOfferModal.value.id)
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal kirim offer')
+  }
+}
+
+async function withdrawOffer(offerId) {
+  const reason = window.prompt('Alasan withdraw offer (min 5 karakter):', '')
+  if (! reason || reason.trim().length < 5) {
+    toast.error('Alasan withdraw wajib diisi minimum 5 karakter')
+    return
+  }
+  try {
+    await api.post(`/offers/${offerId}/withdraw`, { reason: reason.trim() })
+    toast.success('Offer di-withdraw')
+    await loadOffersForCandidate(showOfferModal.value.id)
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal withdraw')
+  }
+}
+
+function offerLetterUrl(offerId, format = 'pdf') {
+  // Note: backend belum expose endpoint render letter standalone untuk
+  // offer (cuma di generated_contracts). Sementara, user akses preview
+  // lewat detail page atau langsung copy dari log. Kalau diperlukan,
+  // tambah GET /offers/{id}/letter di OfferController kemudian.
+  return null
 }
 
 function nextStage(currentStage) {
@@ -327,8 +642,15 @@ function downloadDoc(doc) {
             </div>
             <div v-if="canManage" class="flex gap-1 mt-2 pt-2 border-t border-gray-100" @click.stop>
               <button v-if="nextStage(c.current_stage)"
-                class="text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded flex items-center gap-1"
-                :title="`Pindah ke ${nextStage(c.current_stage)}`"
+                :class="[
+                  'text-xs px-2 py-1 rounded flex items-center gap-1',
+                  onlineTestBlocker(c, nextStage(c.current_stage))
+                    ? 'text-gray-400 bg-gray-50 cursor-not-allowed'
+                    : 'text-blue-600 hover:bg-blue-50',
+                ]"
+                :title="onlineTestBlocker(c, nextStage(c.current_stage))
+                  || `Pindah ke ${nextStage(c.current_stage)}`"
+                :disabled="!! onlineTestBlocker(c, nextStage(c.current_stage))"
                 @click="moveStage(c, nextStage(c.current_stage))">
                 <ArrowRightIcon class="w-3 h-3" /> {{ nextStage(c.current_stage) }}
               </button>
@@ -470,18 +792,90 @@ function downloadDoc(doc) {
             </div>
           </div>
 
+          <!-- Sprint 23+ — banner status online test (gate post-test stages) -->
+          <div v-if="detailData.online_test_status?.has_assignments && ! detailData.online_test_status.all_done"
+            class="bg-amber-50 border border-amber-300 rounded-md p-3">
+            <div class="flex items-start gap-2">
+              <svg class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-amber-900 text-sm">Online Test Belum Selesai</div>
+                <p class="text-xs text-amber-800 mt-0.5">
+                  {{ detailData.online_test_status.blocker_reason
+                    || 'Online test belum selesai dikerjakan / belum di-review HR.' }}
+                </p>
+                <p class="text-[11px] text-amber-700 mt-1.5">
+                  Kandidat tidak bisa dipindah ke stage <strong>INTERVIEW HR / USER / OFFER / HIRED</strong>
+                  sampai semua test selesai & sudah di-grade oleh HR.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Daftar online test assignment kandidat -->
+          <div v-if="detailData.online_test_assignments?.length > 0">
+            <h3 class="font-semibold mb-2 text-sm">Online Test ({{ detailData.online_test_assignments.length }})</h3>
+            <div class="space-y-1.5">
+              <div v-for="a in detailData.online_test_assignments" :key="a.id"
+                class="flex items-center justify-between text-xs border border-gray-200 rounded px-3 py-2">
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium truncate">{{ a.test_name || 'Online Test' }}</div>
+                  <div class="text-gray-500 mt-0.5">
+                    <span>{{ a.test_category || '-' }}</span>
+                    <span v-if="a.due_at"> · Due: {{ fmtDate(a.due_at) }}</span>
+                    <span v-if="a.attempts_used > 0"> · Attempt: {{ a.attempts_used }}/{{ a.max_attempts }}</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 ml-2">
+                  <span v-if="a.best_percentage !== null && a.best_percentage !== undefined"
+                    class="text-xs font-mono">{{ a.best_percentage }}%</span>
+                  <span :class="[
+                    'text-[10px] px-2 py-0.5 rounded-full font-medium',
+                    a.status === 'COMPLETED' && a.best_result === 'PASS' ? 'bg-emerald-100 text-emerald-700' : '',
+                    a.status === 'COMPLETED' && a.best_result === 'FAIL' ? 'bg-rose-100 text-rose-700' : '',
+                    a.status === 'COMPLETED' && ['PENDING','REVIEW'].includes(a.best_result) ? 'bg-amber-100 text-amber-700' : '',
+                    a.status === 'PENDING' ? 'bg-gray-100 text-gray-600' : '',
+                    a.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' : '',
+                    a.status === 'EXPIRED' ? 'bg-rose-100 text-rose-700' : '',
+                    a.status === 'CANCELLED' ? 'bg-gray-100 text-gray-500' : '',
+                  ]">
+                    {{ a.status === 'COMPLETED' && ['PENDING','REVIEW'].includes(a.best_result)
+                      ? 'Menunggu Review'
+                      : (a.status === 'COMPLETED' ? a.best_result : a.status) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div v-if="canManage && ! TERMINAL.includes(detailData.current_stage)">
             <h3 class="font-semibold mb-2 text-sm">Aksi</h3>
             <div class="flex flex-wrap gap-2">
               <button v-for="s in STAGES" :key="s.code"
                 v-show="s.code !== detailData.current_stage"
-                class="text-xs px-3 py-1 rounded border border-gray-300 hover:bg-gray-50"
+                :class="[
+                  'text-xs px-3 py-1 rounded border',
+                  onlineTestBlocker(detailData, s.code)
+                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
+                    : 'border-gray-300 hover:bg-gray-50',
+                ]"
+                :title="onlineTestBlocker(detailData, s.code)
+                  || `Pindah ke ${s.label}`"
+                :disabled="!! onlineTestBlocker(detailData, s.code)"
                 @click="moveStage(detailData, s.code)">
                 {{ s.label }}
               </button>
               <button class="text-xs px-3 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50"
                 @click="openRejectModal(detailData)">
                 ❌ Tolak
+              </button>
+              <!-- Sprint 2 / REC-1: Offer letter management -->
+              <button v-if="canManage && detailData.current_stage === 'OFFER'"
+                class="text-xs px-3 py-1 rounded border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 flex items-center gap-1"
+                @click="openOfferModal(detailData)">
+                <BanknotesIcon class="w-3.5 h-3.5" /> Kelola Offer
               </button>
               <button v-if="canHire && detailData.current_stage === 'OFFER'"
                 class="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
@@ -604,29 +998,414 @@ function downloadDoc(doc) {
       </div>
     </div>
 
-    <!-- Hire modal -->
+    <!-- Offer modal (Sprint 2 / REC-1) — kelola offer letter kandidat -->
+    <div v-if="showOfferModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[92vh] overflow-y-auto">
+        <div class="px-6 py-3 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+          <div>
+            <h2 class="font-semibold flex items-center gap-2">
+              <BanknotesIcon class="w-5 h-5 text-amber-600" />
+              Offer Letter — {{ showOfferModal.full_name }}
+            </h2>
+            <div class="text-xs text-gray-500">
+              Buat penawaran kerja, kirim ke kandidat, dan track respon di sini
+            </div>
+          </div>
+          <button class="text-gray-500" @click="showOfferModal = null">&times;</button>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <!-- Existing offers list -->
+          <section v-if="loadingOffers || offers.length > 0" class="border border-gray-200 rounded-lg">
+            <header class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium text-sm flex items-center justify-between">
+              <span>Riwayat Offer ({{ offers.length }})</span>
+              <span v-if="offerActiveCount > 0" class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                {{ offerActiveCount }} aktif
+              </span>
+            </header>
+            <div class="divide-y divide-gray-100">
+              <div v-if="loadingOffers" class="px-4 py-3 text-sm text-gray-500 italic text-center">
+                Memuat…
+              </div>
+              <div v-for="offer in offers" :key="offer.id" class="px-4 py-3">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono text-sm font-medium">{{ offer.offer_number }}</span>
+                      <span :class="[
+                        'text-[10px] px-2 py-0.5 rounded-full font-medium',
+                        OFFER_STATUS_BADGE[offer.status]?.color || 'bg-gray-100 text-gray-600',
+                      ]">
+                        {{ OFFER_STATUS_BADGE[offer.status]?.label || offer.status }}
+                      </span>
+                      <span class="text-xs text-gray-500">
+                        {{ offer.employment_status }} · {{ offer.probation_months || 0 }} bln probation
+                      </span>
+                    </div>
+                    <div class="text-sm text-gray-700 mt-1 font-mono">
+                      {{ fmtCurrency(offer.basic_salary) }} / bulan
+                      <span v-if="offer.joining_bonus > 0" class="text-xs text-emerald-600 ml-1">
+                        + {{ fmtCurrency(offer.joining_bonus) }} sign-on
+                      </span>
+                      <span v-if="offer.total_monthly_compensation > offer.basic_salary"
+                        class="text-xs text-gray-500 ml-1">
+                        (total {{ fmtCurrency(offer.total_monthly_compensation) }})
+                      </span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span v-if="offer.proposed_join_date">
+                        <ClockIcon class="w-3 h-3 inline mr-0.5" />
+                        Join: {{ fmtDate(offer.proposed_join_date) }}
+                      </span>
+                      <span v-if="offer.response_deadline">
+                        Deadline respon: {{ fmtDate(offer.response_deadline) }}
+                      </span>
+                      <span v-if="offer.sent_at">
+                        Terkirim: {{ fmtDate(offer.sent_at) }}
+                      </span>
+                      <span v-if="offer.responded_at">
+                        Direspon: {{ fmtDate(offer.responded_at) }}
+                      </span>
+                    </div>
+                    <div v-if="offer.response_note"
+                      class="text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 mt-2 text-gray-700 italic">
+                      "{{ offer.response_note }}"
+                    </div>
+                    <div v-if="offer.rejection_reason"
+                      class="text-xs bg-rose-50 border border-rose-200 rounded px-2 py-1 mt-2 text-rose-700">
+                      Alasan tolak: {{ offer.rejection_reason }}
+                    </div>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <button v-if="offer.status === 'DRAFT'"
+                      class="text-xs px-2.5 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1"
+                      @click="sendOffer(offer.id)">
+                      <EnvelopeIcon class="w-3.5 h-3.5" /> Kirim
+                    </button>
+                    <button v-if="['DRAFT', 'SENT'].includes(offer.status)"
+                      class="text-xs px-2.5 py-1 rounded border border-gray-300 hover:bg-gray-50 flex items-center gap-1"
+                      @click="withdrawOffer(offer.id)">
+                      <NoSymbolIcon class="w-3.5 h-3.5" /> Withdraw
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Form bikin offer baru — disabled kalau ada offer aktif -->
+          <section class="border border-gray-200 rounded-lg">
+            <header class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium text-sm">
+              Buat Offer Baru
+            </header>
+
+            <div v-if="offerActiveCount > 0"
+              class="p-4 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
+              <strong>Ada offer aktif (DRAFT/SENT) untuk kandidat ini.</strong>
+              Withdraw offer aktif terlebih dahulu kalau mau buat offer baru
+              dengan persyaratan berbeda — supaya audit trail jelas.
+            </div>
+
+            <fieldset :disabled="offerActiveCount > 0" class="p-4 space-y-4 disabled:opacity-50">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="label">Gaji Pokok (Rp) *</label>
+                  <input type="number" v-model.number="offerForm.basic_salary" class="input" min="0" />
+                  <p class="text-xs text-gray-500 mt-1">
+                    Sebelum potongan PPh21 & BPJS. Tax method ditentukan saat hire.
+                  </p>
+                </div>
+                <div>
+                  <label class="label">Bonus Bergabung (Rp)</label>
+                  <input type="number" v-model.number="offerForm.joining_bonus" class="input" min="0" />
+                  <p class="text-xs text-gray-500 mt-1">
+                    Sign-on bonus, dibayar sekali di payroll bulan pertama.
+                  </p>
+                </div>
+                <div>
+                  <label class="label">Status Kerja *</label>
+                  <select v-model="offerForm.employment_status" class="input">
+                    <option value="PKWTT">PKWTT — Tetap</option>
+                    <option value="PKWT">PKWT — Kontrak waktu tertentu</option>
+                    <option value="PROBATION">PROBATION — Hanya masa percobaan</option>
+                    <option value="MAGANG">MAGANG</option>
+                    <option value="OUTSOURCING">OUTSOURCING</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="label">Probation (bulan)</label>
+                  <input type="number" v-model.number="offerForm.probation_months"
+                    :disabled="offerForm.employment_status === 'PKWT'"
+                    class="input" min="0" max="3" />
+                  <p class="text-xs text-gray-500 mt-1">
+                    Max 3 bulan (UU 13/2003 Pasal 60). PKWT tidak boleh probation.
+                  </p>
+                </div>
+                <div>
+                  <label class="label">Tanggal Bergabung Diajukan</label>
+                  <input type="date" v-model="offerForm.proposed_join_date" class="input" />
+                </div>
+                <div>
+                  <label class="label">Deadline Respon Kandidat *</label>
+                  <input type="date" v-model="offerForm.response_deadline" class="input" />
+                  <p class="text-xs text-gray-500 mt-1">
+                    Default H+7. Setelah lewat deadline, offer auto-EXPIRED via cron harian.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Allowances editor -->
+              <div class="border-t border-gray-200 pt-4">
+                <div class="flex items-center justify-between mb-2">
+                  <label class="label mb-0">Tunjangan / Allowances</label>
+                  <button type="button" class="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                    @click="addOfferAllowance">
+                    <PlusIcon class="w-3.5 h-3.5" /> Tambah
+                  </button>
+                </div>
+                <div v-if="offerForm.allowances.length === 0"
+                  class="text-xs text-gray-400 text-center italic py-3 border border-dashed border-gray-200 rounded">
+                  Belum ada tunjangan tambahan. Klik "Tambah" untuk masukkan transport, makan, dll.
+                </div>
+                <div v-for="(a, idx) in offerForm.allowances" :key="idx"
+                  class="grid grid-cols-12 gap-2 items-center mb-2">
+                  <input v-model="a.label" placeholder="Nama (mis. Transport)"
+                    class="input col-span-4 text-sm" />
+                  <input type="number" v-model.number="a.amount" placeholder="Nominal"
+                    class="input col-span-3 text-sm font-mono" min="0" />
+                  <select v-model="a.type" class="input col-span-2 text-sm">
+                    <option value="fixed">Fixed</option>
+                    <option value="variable">Variable</option>
+                  </select>
+                  <label class="col-span-2 flex items-center gap-1 text-xs">
+                    <input type="checkbox" v-model="a.is_taxable" /> Kena pajak
+                  </label>
+                  <button type="button" class="text-red-500 hover:bg-red-50 rounded p-1 col-span-1"
+                    @click="removeOfferAllowance(idx)">
+                    <TrashIcon class="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label class="label">Catatan Internal HR
+                  <span class="text-gray-400">(tidak dilihat kandidat)</span>
+                </label>
+                <textarea v-model="offerForm.internal_notes" class="input" rows="2"
+                  placeholder="Mis. negosiasi sudah final, BOD approval ada di email tgl X"></textarea>
+              </div>
+
+              <!-- Compensation summary -->
+              <div class="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+                <div class="flex items-center justify-between font-semibold">
+                  <span>Total Bulanan</span>
+                  <span class="font-mono text-amber-900">{{ fmtCurrency(offerTotalCompensation) }}</span>
+                </div>
+                <div class="text-xs text-amber-700 mt-1">
+                  Belum termasuk bonus bergabung, BPJS perusahaan, & tunjangan non-fixed yang variable.
+                  Jadikan dasar negosiasi awal dengan kandidat.
+                </div>
+              </div>
+            </fieldset>
+          </section>
+
+          <p class="text-xs text-gray-500 italic">
+            <strong>Workflow:</strong> Buat DRAFT → Kirim → Kandidat respon di portal kandidat
+            (ACCEPTED/REJECTED) → Setelah ACCEPTED, tutup modal & klik tombol "Hire" untuk konversi
+            ke employee. Offer otomatis di-EXPIRED H+1 setelah deadline lewat (cron harian).
+          </p>
+        </div>
+
+        <div class="px-6 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
+          <button class="btn-secondary" @click="showOfferModal = null">Tutup</button>
+          <button class="btn-primary" :disabled="offerActiveCount > 0" @click="saveOfferDraft">
+            <PlusIcon class="w-4 h-4" /> Simpan Draft
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hire modal — sekaligus capture data payroll-essential -->
     <div v-if="showHireModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
-        <div class="px-6 py-3 border-b flex items-center justify-between">
-          <h2 class="font-semibold">Hire {{ showHireModal.full_name }}</h2>
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
+        <div class="px-6 py-3 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+          <div>
+            <h2 class="font-semibold">Hire {{ showHireModal.full_name }}</h2>
+            <div class="text-xs text-gray-500">
+              Konversi ke employee + setup payroll
+            </div>
+          </div>
           <button class="text-gray-500" @click="showHireModal = null">&times;</button>
         </div>
-        <div class="p-6 space-y-3">
+
+        <div class="p-6 space-y-5">
           <p class="text-sm text-gray-600">
             Kandidat akan di-convert ke <strong>employee</strong> dengan auto-generate employee_number.
             Onboarding tasks (12 task default) otomatis dibuat & assigned ke HR/Supervisor/IT/Karyawan.
+            Data sensitif (NPWP, rekening bank) di-encrypt at-rest.
           </p>
-          <div>
-            <label class="label">Gaji Pokok (Rp) *</label>
-            <input type="number" v-model="hireForm.basic_salary" class="input" />
-          </div>
-          <div>
-            <label class="label">Tanggal Bergabung *</label>
-            <input type="date" v-model="hireForm.join_date" class="input" />
-            <p class="text-xs text-gray-500 mt-1">Anchor untuk due date task onboarding.</p>
+
+          <!-- Section 1: Employment -->
+          <section class="border border-gray-200 rounded-lg">
+            <header class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium text-sm">
+              Status Kepegawaian
+            </header>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="label">Gaji Pokok (Rp) *</label>
+                <input type="number" v-model.number="hireForm.basic_salary" class="input" min="0" />
+                <p class="text-xs text-gray-500 mt-1">Basis perhitungan PPh21, BPJS, lembur, & THR.</p>
+              </div>
+              <div>
+                <label class="label">Tanggal Bergabung *</label>
+                <input type="date" v-model="hireForm.join_date" class="input" />
+                <p class="text-xs text-gray-500 mt-1">Anchor untuk due date task onboarding.</p>
+              </div>
+              <div>
+                <label class="label">Status Kerja</label>
+                <select v-model="hireForm.employment_status" class="input">
+                  <option v-for="s in EMPLOYMENT_STATUS_OPTIONS" :key="s" :value="s">{{ s }}</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">PKWTT = tetap; PKWT = kontrak waktu tertentu.</p>
+              </div>
+              <div>
+                <label class="label">Kontrak Berakhir
+                  <span class="text-gray-400">(opsional)</span>
+                </label>
+                <input type="date" v-model="hireForm.contract_end_date" class="input"
+                  :disabled="hireForm.employment_status === 'PKWTT'" />
+                <p class="text-xs text-gray-500 mt-1">Wajib diisi untuk PKWT/PROBATION/MAGANG.</p>
+              </div>
+              <div class="md:col-span-2">
+                <label class="label">Probation Berakhir
+                  <span class="text-gray-400">(opsional)</span>
+                </label>
+                <input type="date" v-model="hireForm.probation_end_date" class="input" />
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 2: Pajak / PPh21 -->
+          <section class="border border-amber-200 rounded-lg bg-amber-50/30">
+            <header class="bg-amber-50 px-4 py-2 border-b border-amber-200 font-medium text-sm flex items-center gap-2">
+              <span>Pajak Penghasilan (PPh21)</span>
+              <span class="text-xs text-amber-700 font-normal">— wajib untuk perhitungan payroll</span>
+            </header>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="md:col-span-2">
+                <label class="label">Status PTKP *</label>
+                <select v-model="hireForm.ptkp_status" class="input">
+                  <option v-for="o in PTKP_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">
+                  Kode PTKP menentukan penghasilan tidak kena pajak. Default TK/0 (belum kawin tanpa tanggungan).
+                  HR bisa edit nanti via profil employee kalau status keluarga berubah.
+                </p>
+              </div>
+              <div>
+                <label class="label">Metode Pajak</label>
+                <select v-model="hireForm.tax_method" class="input">
+                  <option value="GROSS">GROSS — pajak ditanggung karyawan</option>
+                  <option value="NETT">NETT — pajak ditanggung perusahaan</option>
+                  <option value="GROSS_UP">GROSS UP — tunjangan pajak (gross-up)</option>
+                </select>
+              </div>
+              <div>
+                <label class="label">Metode PPh21</label>
+                <select v-model="hireForm.pph21_method" class="input">
+                  <option value="TER">TER — Tarif Efektif Rata-rata (default 2024+)</option>
+                  <option value="GROSS_UP">GROSS UP</option>
+                </select>
+              </div>
+              <div class="md:col-span-2">
+                <label class="label">NPWP <span class="text-gray-400">(15-16 digit, opsional)</span></label>
+                <input v-model="hireForm.npwp" class="input font-mono" placeholder="00.000.000.0-000.000" maxlength="32" />
+                <p class="text-xs text-gray-500 mt-1">
+                  Tanpa NPWP → tarif PPh21 + 20%. Boleh kosong & dilengkapi nanti.
+                  Disimpan terenkripsi.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 3: BPJS -->
+          <section class="border border-blue-200 rounded-lg bg-blue-50/30">
+            <header class="bg-blue-50 px-4 py-2 border-b border-blue-200 font-medium text-sm">
+              BPJS
+            </header>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="label">No. BPJS Kesehatan</label>
+                <input v-model="hireForm.bpjs_kesehatan_no" class="input font-mono" placeholder="13 digit" maxlength="20" />
+              </div>
+              <div>
+                <label class="label">Kelas BPJS Kesehatan</label>
+                <select v-model.number="hireForm.bpjs_kesehatan_class" class="input">
+                  <option :value="1">Kelas 1</option>
+                  <option :value="2">Kelas 2</option>
+                  <option :value="3">Kelas 3</option>
+                </select>
+              </div>
+              <div class="md:col-span-2">
+                <label class="label">No. BPJS Ketenagakerjaan (JHT/JP/JKK/JKM)</label>
+                <input v-model="hireForm.bpjs_tk_no" class="input font-mono" placeholder="11 digit" maxlength="20" />
+                <p class="text-xs text-gray-500 mt-1">
+                  Diperlukan untuk export iuran BPJS ke SiPP.
+                  Boleh kosong kalau karyawan belum punya kartu (bisa daftar lewat onboarding task BPJS_REGISTER).
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 4: Rekening bank -->
+          <section class="border border-emerald-200 rounded-lg bg-emerald-50/30">
+            <header class="bg-emerald-50 px-4 py-2 border-b border-emerald-200 font-medium text-sm">
+              Rekening Bank Penerimaan Gaji
+            </header>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="label">Bank</label>
+                <select v-model="hireForm.bank_name" class="input">
+                  <option value="">— Pilih bank —</option>
+                  <option v-for="b in BANK_OPTIONS" :key="b" :value="b">{{ b }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="label">No. Rekening</label>
+                <input v-model="hireForm.bank_account" class="input font-mono" placeholder="e.g. 1234567890" maxlength="32" />
+                <p class="text-xs text-gray-500 mt-1">Disimpan terenkripsi.</p>
+              </div>
+              <div class="md:col-span-2">
+                <label class="label">Nama Pemilik Rekening</label>
+                <input v-model="hireForm.bank_account_holder" class="input" placeholder="Sesuai buku tabungan" maxlength="200" />
+                <p class="text-xs text-gray-500 mt-1">
+                  Wajib sama persis dengan nama di buku tabungan untuk export bank-transfer payroll.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Status indicator -->
+          <div class="border-t border-gray-200 pt-3 flex items-center justify-between text-sm">
+            <div class="flex items-center gap-2">
+              <span :class="payrollReadyCount === PAYROLL_READY_TOTAL
+                ? 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold'
+                : 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold'">
+                {{ payrollReadyCount }}/{{ PAYROLL_READY_TOTAL }}
+              </span>
+              <span class="text-gray-700">
+                <template v-if="payrollReadyCount === PAYROLL_READY_TOTAL">
+                  Data payroll lengkap — siap di-calculate.
+                </template>
+                <template v-else>
+                  {{ PAYROLL_READY_TOTAL - payrollReadyCount }} field payroll belum lengkap (bisa dilengkapi nanti).
+                </template>
+              </span>
+            </div>
           </div>
         </div>
-        <div class="px-6 py-3 border-t flex justify-end gap-2">
+
+        <div class="px-6 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
           <button class="btn-secondary" @click="showHireModal = null">Batal</button>
           <button class="btn-primary" @click="doHire">
             <CheckBadgeIcon class="w-4 h-4" /> Konfirmasi Hire

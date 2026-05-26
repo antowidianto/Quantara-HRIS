@@ -10,6 +10,9 @@ import {
   CurrencyDollarIcon, ClipboardDocumentListIcon, UserCircleIcon,
   SunIcon, MoonIcon, ComputerDesktopIcon, LanguageIcon, CheckIcon,
   ArrowsRightLeftIcon,
+  // Sprint 2 / 4 polish — icons untuk menu baru
+  ExclamationTriangleIcon, ChatBubbleLeftRightIcon, DocumentChartBarIcon,
+  NoSymbolIcon,
 } from '@heroicons/vue/24/outline'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useI18n } from '@/locales'
@@ -101,8 +104,16 @@ const groups = computed(() => {
         { name: 'Promosi / Demosi (JIC)',           to: '/hr/jic',                                     icon: ClipboardDocumentListIcon,  perm: 'jic.view' },
         { name: 'Mutasi Karyawan',                  to: '/hr/transfers',                               icon: ArrowsRightLeftIcon,        perm: 'employee_transfer.view' },
         { name: t('nav.items.severance'),           to: '/hr/severance',                               icon: CurrencyDollarIcon,         perm: 'severance.view' },
+        // Sprint 4 / OFF-5 — PHK formal workflow (multi-step approval)
+        { name: 'Termination (PHK)',                to: '/hr/terminations',                            icon: NoSymbolIcon,               perm: 'termination.view' },
         { name: t('nav.items.resignations'),        to: '/hr/resignations',                            icon: ArrowLeftStartOnRectangleIcon, perm: 'resignation.view' },
+        // Sprint 4 / OFF-1 — Exit Interview + analytics turnover
+        { name: 'Exit Interviews',                  to: '/hr/exit-interviews',                         icon: ChatBubbleLeftRightIcon,    perm: 'exit_interview.view' },
         { name: t('nav.items.onboarding'),          to: '/hr/onboarding',                              icon: ClipboardDocumentListIcon,  perm: 'onboarding.view' },
+        // Sprint 2 polish — Probation Tracker (HIRE-1)
+        { name: 'Probation Tracker',                to: '/hr/probation',                               icon: ExclamationTriangleIcon,    perm: 'employee.update' },
+        // Sprint 3 / OD-2 — Individual Development Plan
+        { name: 'Development Plan (IDP)',           to: '/hr/idp',                                     icon: ChartBarIcon,               perm: 'idp.view' },
         { name: t('nav.items.assets'),              to: '/hr/assets',                                  icon: BuildingOffice2Icon,        perm: 'asset.view' },
         { name: t('nav.items.business_trips'),      to: '/travel',                                     icon: ClipboardDocumentListIcon,  perm: 'business_trip.view' },
         { name: 'Manpower Planning (MPP)',          to: '/recruitment/mpp',                            icon: ClipboardDocumentListIcon,  perm: 'mpp.view' },
@@ -143,6 +154,8 @@ const groups = computed(() => {
         { name: t('nav.items.leave_types'),        to: '/master/leave-types',        icon: CalendarDaysIcon,           perm: 'leave.manage_types' },
         { name: t('nav.items.payroll_components'), to: '/master/payroll-components', icon: CurrencyDollarIcon,         perm: 'payroll.manage' },
         { name: t('nav.items.allowances'),         to: '/master/allowances',         icon: BanknotesIcon,              perm: 'payroll.manage' },
+        // Cost Center master + budget vs actual report. Lihat docs/COST_CENTER.md.
+        { name: 'Cost Center',                     to: '/master/cost-centers',       icon: CurrencyDollarIcon,         perm: 'cost_center.view' },
         { name: t('nav.items.regulations'),        to: '/master/regulations',        icon: ClipboardDocumentListIcon,  perm: 'settings.manage' },
         { name: t('nav.items.contract_templates'), to: '/master/contract-templates', icon: ClipboardDocumentListIcon,  perm: 'settings.manage' },
         { name: t('nav.items.approval_chains'),    to: '/master/approval-chains',    icon: ShieldCheckIcon,            perm: 'settings.manage' },
@@ -153,6 +166,8 @@ const groups = computed(() => {
       title: t('nav.reports'),
       items: [
         { name: t('nav.items.reports_main'), to: '/reports', icon: ChartBarIcon, perm: 'report.view' },
+        // Sprint 4 / CC-5 — Compliance Reports (WLKP, BPJS, PKWT, PHK, audit, turnover)
+        { name: 'Compliance Reports',        to: '/hr/compliance-reports', icon: DocumentChartBarIcon, perm: 'compliance.report.view' },
       ].filter(i => ! i.perm || can(i.perm)),
     },
     {

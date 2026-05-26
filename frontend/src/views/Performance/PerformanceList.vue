@@ -103,16 +103,26 @@
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
             </div>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Deadline Set Goal</label>
+            <input v-model="form.goal_setting_deadline" type="date"
+              :max="form.end_date || undefined"
+              class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
+            <p class="text-xs text-gray-500 mt-1">Opsional. Tidak boleh setelah tanggal selesai cycle.</p>
+          </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Deadline Set Goal</label>
-              <input v-model="form.goal_setting_deadline" type="date"
-                class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Periode Review</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Periode Review (Mulai)</label>
               <input v-model="form.review_start_date" type="date"
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
+              <p class="text-xs text-gray-500 mt-1">Opsional.</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Periode Review (Selesai)</label>
+              <input v-model="form.review_end_date" type="date"
+                :min="form.review_start_date || undefined"
+                class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
+              <p class="text-xs text-gray-500 mt-1">Opsional. Harus >= tanggal mulai review.</p>
             </div>
           </div>
           <div>
@@ -120,6 +130,25 @@
             <textarea v-model="form.description" rows="3"
               class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500"></textarea>
           </div>
+
+          <!-- Inline error display — pesan dari backend (bukan alert
+               browser) supaya user tahu field mana yang masalah. -->
+          <div v-if="formError"
+            class="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            <div class="flex items-start gap-2">
+              <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 9v3.75m0 3.75h.007M5.25 19.5h13.5a1.5 1.5 0 001.299-2.25l-6.75-12a1.5 1.5 0 00-2.598 0l-6.75 12A1.5 1.5 0 005.25 19.5z" />
+              </svg>
+              <div class="flex-1">
+                <div class="font-medium">{{ formError }}</div>
+                <ul v-if="formErrorDetails && formErrorDetails.length" class="list-disc ml-4 mt-1 text-xs">
+                  <li v-for="(e, i) in formErrorDetails" :key="i">{{ e }}</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" @click="showModal = false"
               class="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">Batal</button>
@@ -184,6 +213,8 @@ const loading = ref(false)
 const showModal = ref(false)
 const saving = ref(false)
 const form = ref(blankForm())
+const formError = ref('')
+const formErrorDetails = ref([])
 const statusModal = ref({ show: false, cycle: null, newStatus: 'OPEN', saving: false })
 
 function blankForm() {
@@ -205,17 +236,81 @@ async function fetch() {
 
 function openCreate() {
   form.value = blankForm()
+  formError.value = ''
+  formErrorDetails.value = []
   showModal.value = true
 }
 
+/**
+ * Kirim payload bersih ke backend. HTML <input type="date"> yang
+ * dikosongkan akan jadi string '' — MySQL DATE column tidak terima itu
+ * untuk kolom nullable, jadi kita ubah '' menjadi null sebelum submit.
+ * Backend juga punya guard yang sama sebagai safety net.
+ */
+function buildPayload(src) {
+  const out = { ...src }
+  for (const k of Object.keys(out)) {
+    if (typeof out[k] === 'string' && out[k].trim() === '') {
+      out[k] = null
+    }
+  }
+  return out
+}
+
+/**
+ * Validasi client-side ringan — tangkap kasus paling umum biar user
+ * tidak round-trip ke server cuma untuk error tanggal yang trivial.
+ * Backend tetap punya validasi yang sama (defense in depth).
+ */
+function validateForm() {
+  const errs = []
+  const f = form.value
+  if (! f.code?.trim()) errs.push('Kode cycle wajib diisi.')
+  if (! f.name?.trim()) errs.push('Nama cycle wajib diisi.')
+  if (! f.start_date) errs.push('Tanggal mulai cycle wajib diisi.')
+  if (! f.end_date) errs.push('Tanggal selesai cycle wajib diisi.')
+  if (f.start_date && f.end_date && f.end_date <= f.start_date) {
+    errs.push('Tanggal selesai harus lebih besar dari tanggal mulai cycle.')
+  }
+  if (f.review_start_date && f.review_end_date
+      && f.review_end_date < f.review_start_date) {
+    errs.push('Tanggal akhir periode review tidak boleh lebih kecil dari tanggal mulai review.')
+  }
+  if (f.goal_setting_deadline && f.end_date
+      && f.goal_setting_deadline > f.end_date) {
+    errs.push('Deadline penetapan goal tidak boleh setelah tanggal selesai cycle.')
+  }
+  return errs
+}
+
 async function save() {
+  formError.value = ''
+  formErrorDetails.value = []
+
+  const clientErrs = validateForm()
+  if (clientErrs.length > 0) {
+    formError.value = 'Periksa kembali isian form:'
+    formErrorDetails.value = clientErrs
+    return
+  }
+
   saving.value = true
   try {
-    await api.post('/performance-cycles', form.value)
+    await api.post('/performance-cycles', buildPayload(form.value))
     showModal.value = false
     await fetch()
   } catch (e) {
-    alert(e.response?.data?.message || 'Gagal menyimpan')
+    // Tampilkan pesan dari backend — controller sekarang return 422
+    // dengan pesan ber-konteks (bukan stack trace SQL).
+    const resp = e.response?.data
+    formError.value = resp?.message || 'Gagal menyimpan cycle.'
+    // Validation rules detail dari Validator (kalau ada)
+    const errors = resp?.errors
+    if (errors && typeof errors === 'object') {
+      formErrorDetails.value = Object.values(errors).flat()
+    } else {
+      formErrorDetails.value = []
+    }
   } finally { saving.value = false }
 }
 

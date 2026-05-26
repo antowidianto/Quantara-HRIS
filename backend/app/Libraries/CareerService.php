@@ -414,6 +414,95 @@ class CareerService
             'updated_at'      => $now,
         ];
 
+        // Sprint 23+ — payroll & identity supporting fields. Disimpan
+        // optional supaya kandidat yang belum punya (mis. fresh-grad
+        // tanpa rekening) tetap bisa apply, tapi kalau diisi → langsung
+        // ter-carry-over ke employees row saat hire (lihat
+        // RecruitmentService::convertToEmployee). Hanya assign field
+        // yang kolomnya ada di DB (defensive untuk env yang belum
+        // jalankan migration 000049/000050).
+        $cols = $db->getFieldNames('candidates');
+
+        // Reference contacts datang dari form sebagai array of objects;
+        // store as JSON. Filter empty entries supaya tidak save row kosong.
+        $refContacts = null;
+        if (isset($data['reference_contacts']) && is_array($data['reference_contacts'])) {
+            $clean = [];
+            foreach ($data['reference_contacts'] as $r) {
+                if (! is_array($r)) continue;
+                $name  = trim((string) ($r['name']  ?? ''));
+                $phone = trim((string) ($r['phone'] ?? ''));
+                if ($name === '' && $phone === '') continue;
+                $clean[] = [
+                    'name'     => $name,
+                    'position' => trim((string) ($r['position'] ?? '')),
+                    'company'  => trim((string) ($r['company']  ?? '')),
+                    'phone'    => $this->normalizePhone($phone),
+                    'relation' => trim((string) ($r['relation'] ?? '')),
+                ];
+            }
+            $refContacts = ! empty($clean) ? json_encode($clean, JSON_UNESCAPED_UNICODE) : null;
+        }
+
+        $extras = [
+            // ── 000049 — payroll dasar
+            'postal_code'                => $data['postal_code'] ?? null,
+            'bank_name'                  => isset($data['bank_name'])
+                ? strtoupper(trim((string) $data['bank_name'])) : null,
+            'bank_account_number'        => $this->normalizeDigits($data['bank_account_number'] ?? null),
+            'bank_account_holder'        => $data['bank_account_holder'] ?? null,
+            'ptkp_status'                => $this->normalizeEnum(
+                $data['ptkp_status'] ?? null,
+                ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3'],
+            ),
+            'dependents_count'           => isset($data['dependents_count'])
+                ? max(0, min(3, (int) $data['dependents_count']))
+                : null,
+            'emergency_contact_name'     => $data['emergency_contact_name'] ?? null,
+            'emergency_contact_phone'    => $this->normalizePhone($data['emergency_contact_phone'] ?? null),
+            'emergency_contact_relation' => $this->normalizeEnum(
+                $data['emergency_contact_relation'] ?? null,
+                ['ORANG_TUA','PASANGAN','SAUDARA','ANAK','LAINNYA'],
+            ),
+
+            // ── 000050 — extended profile
+            'blood_type'                 => $this->normalizeEnum(
+                $data['blood_type'] ?? null,
+                ['A','A+','A-','B','B+','B-','AB','AB+','AB-','O','O+','O-'],
+            ),
+            'driving_license'            => isset($data['driving_license'])
+                ? $this->normalizeMultiEnum($data['driving_license'], ['A','B1','B2','C','D'])
+                : null,
+            'vehicle_owned'              => isset($data['vehicle_owned'])
+                ? $this->normalizeMultiEnum($data['vehicle_owned'], ['MOTOR','MOBIL','SEPEDA'])
+                : null,
+            'passport_number'            => isset($data['passport_number'])
+                ? strtoupper(trim((string) $data['passport_number'])) : null,
+            'disability_status'          => $this->normalizeEnum(
+                $data['disability_status'] ?? null,
+                ['NONE','PHYSICAL','SENSORY','INTELLECTUAL','MENTAL','MULTIPLE'],
+            ),
+            'disability_notes'           => $data['disability_notes'] ?? null,
+            'spouse_name'                => $data['spouse_name'] ?? null,
+            'spouse_occupation'          => $data['spouse_occupation'] ?? null,
+            'spouse_workplace'           => $data['spouse_workplace'] ?? null,
+            'children_count'             => isset($data['children_count'])
+                ? max(0, min(20, (int) $data['children_count']))
+                : null,
+            'health_conditions'          => $data['health_conditions'] ?? null,
+            'languages'                  => $data['languages'] ?? null,
+            'professional_skills'        => $data['professional_skills'] ?? null,
+            'certifications'             => $data['certifications'] ?? null,
+            'reference_contacts'         => $refContacts,
+            'referral_source_detail'     => $data['referral_source_detail'] ?? null,
+            'github_url'                 => $this->cleanUrl($data['github_url'] ?? null),
+        ];
+        foreach ($extras as $col => $val) {
+            if (in_array($col, $cols, true)) {
+                $insert[$col] = $val;
+            }
+        }
+
         // Validasi minimal
         if ($insert['full_name'] === '') {
             throw new \RuntimeException('Nama lengkap wajib diisi');
@@ -517,6 +606,293 @@ class CareerService
     }
 
     /**
+     * Update lamaran oleh kandidat sendiri (dari "Profil Saya" portal karir).
+     *
+     * Sprint 23+ — kandidat boleh edit data lamaran selama belum di stage
+     * final. Dipanggil dari CandidateAuthController::updateApplication
+     * yang sudah ownership-check & stage-lock.
+     *
+     * Field yang TIDAK boleh diubah lewat endpoint ini:
+     *   - id, company_id, job_posting_id, candidate_account_id
+     *   - current_stage, rating, rejection_reason
+     *   - converted_employee_id, converted_at, applied_at, applicant_ip
+     *   - audit fields (created_*, updated_*)
+     *
+     * Validasi dasar (NIK 16 digit, KK 16 digit) tetap dipakai supaya
+     * data tetap konsisten. Kalau pelamar reset NIK ke kosong, kita
+     * izinkan (mungkin salah entry awal).
+     *
+     * @throws \RuntimeException kalau ada validasi gagal
+     */
+    public function updateApplicationByCandidate(
+        int $candidateId,
+        int $candidateAccountId,
+        array $data,
+    ): void {
+        $db = \Config\Database::connect();
+        $existing = $db->table('candidates')
+            ->where('id', $candidateId)
+            ->where('candidate_account_id', $candidateAccountId)
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $existing) {
+            throw new \RuntimeException('Lamaran tidak ditemukan atau bukan milik Anda');
+        }
+        if (in_array($existing['current_stage'], ['HIRED', 'REJECTED', 'WITHDRAWN'], true)) {
+            throw new \RuntimeException(
+                'Lamaran sudah pada tahap final (' . $existing['current_stage'] . '), tidak bisa diedit'
+            );
+        }
+
+        $cols = $db->getFieldNames('candidates');
+        $update = [];
+
+        // ── Profil dasar ──────────────────────────────────────────
+        $simpleString = [
+            'full_name', 'birth_place', 'address', 'city', 'province',
+            'current_position', 'current_company', 'cover_letter',
+            // Sprint 23+ extended profile (varchar/text)
+            'spouse_name', 'spouse_occupation', 'spouse_workplace',
+            'health_conditions', 'languages', 'professional_skills',
+            'certifications', 'referral_source_detail',
+            'bank_account_holder',
+        ];
+        foreach ($simpleString as $f) {
+            if (array_key_exists($f, $data) && in_array($f, $cols, true)) {
+                $val = is_string($data[$f]) ? trim($data[$f]) : null;
+                $update[$f] = $val !== '' ? $val : null;
+            }
+        }
+
+        if (array_key_exists('email', $data)) {
+            $email = $this->normalizeEmail($data['email']);
+            if ($email && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                throw new \RuntimeException('Format email tidak valid');
+            }
+            // Cek dup email per (company, job, exclude self)
+            if ($email && $email !== $existing['email']) {
+                $dup = $db->table('candidates')
+                    ->where('company_id', (int) $existing['company_id'])
+                    ->where('job_posting_id', (int) $existing['job_posting_id'])
+                    ->where('email', $email)
+                    ->where('id !=', $candidateId)
+                    ->where('deleted_at IS NULL')
+                    ->countAllResults();
+                if ($dup > 0) {
+                    throw new \RuntimeException(
+                        'Email sudah dipakai untuk lamaran lain di posisi yang sama'
+                    );
+                }
+            }
+            $update['email'] = $email;
+        }
+
+        if (array_key_exists('phone', $data)) {
+            $update['phone'] = $this->normalizePhone($data['phone']);
+        }
+
+        if (array_key_exists('birth_date', $data)) {
+            $update['birth_date'] = $data['birth_date'] ?: null;
+        }
+
+        if (array_key_exists('gender', $data)) {
+            $update['gender'] = $this->normalizeEnum($data['gender'], ['M','F','O']);
+        }
+        if (array_key_exists('religion', $data)) {
+            $update['religion'] = $this->normalizeEnum($data['religion'], self::RELIGIONS);
+        }
+        if (array_key_exists('marital_status', $data)) {
+            $update['marital_status'] = $this->normalizeEnum($data['marital_status'], self::MARITAL_STATUSES);
+        }
+        if (array_key_exists('nationality', $data)) {
+            $update['nationality'] = ! empty($data['nationality'])
+                ? strtoupper((string) $data['nationality'])
+                : 'WNI';
+        }
+
+        // ── Identitas (NIK/KK harus 16 digit kalau diisi) ────────
+        if (array_key_exists('nik', $data)) {
+            $nik = $this->normalizeDigits($data['nik']);
+            if ($nik !== null && strlen($nik) !== 16) {
+                throw new \RuntimeException('NIK harus 16 digit');
+            }
+            $update['nik'] = $nik;
+        }
+        if (array_key_exists('npwp', $data)) {
+            $update['npwp'] = $this->normalizeDigits($data['npwp']);
+        }
+        if (array_key_exists('kk_number', $data)) {
+            $kk = $this->normalizeDigits($data['kk_number']);
+            if ($kk !== null && strlen($kk) !== 16) {
+                throw new \RuntimeException('Nomor KK harus 16 digit');
+            }
+            $update['kk_number'] = $kk;
+        }
+        foreach (['bpjs_kesehatan_no', 'bpjs_tk_no', 'passport_number'] as $f) {
+            if (array_key_exists($f, $data) && in_array($f, $cols, true)) {
+                $val = $f === 'passport_number'
+                    ? (! empty($data[$f]) ? strtoupper(trim((string) $data[$f])) : null)
+                    : $this->normalizeDigits($data[$f]);
+                $update[$f] = $val;
+            }
+        }
+
+        // ── Pendidikan & pengalaman ─────────────────────────────
+        if (array_key_exists('last_education_level', $data)) {
+            $update['last_education_level'] = $this->normalizeEnum(
+                $data['last_education_level'], self::EDUCATION_LEVELS,
+            );
+        }
+        foreach (['last_education_institution', 'last_education_major'] as $f) {
+            if (array_key_exists($f, $data)) {
+                $update[$f] = is_string($data[$f]) ? (trim($data[$f]) ?: null) : null;
+            }
+        }
+        if (array_key_exists('last_education_year', $data)) {
+            $update['last_education_year'] = ! empty($data['last_education_year'])
+                ? (int) $data['last_education_year'] : null;
+        }
+        if (array_key_exists('gpa', $data)) {
+            $update['gpa'] = $data['gpa'] !== '' && $data['gpa'] !== null
+                ? round((float) $data['gpa'], 2) : null;
+        }
+        if (array_key_exists('years_experience', $data)) {
+            $update['years_experience'] = isset($data['years_experience'])
+                ? max(0, (int) $data['years_experience']) : null;
+        }
+        if (array_key_exists('expected_salary', $data)) {
+            $update['expected_salary'] = isset($data['expected_salary'])
+                ? max(0, (float) $data['expected_salary']) : null;
+        }
+        if (array_key_exists('available_from', $data)) {
+            $update['available_from'] = $data['available_from'] ?: null;
+        }
+        foreach (['linkedin_url', 'portfolio_url', 'github_url'] as $f) {
+            if (array_key_exists($f, $data) && in_array($f, $cols, true)) {
+                $update[$f] = $this->cleanUrl($data[$f]);
+            }
+        }
+
+        // ── Step 3 (payroll & supporting) ──────────────────────
+        if (array_key_exists('postal_code', $data) && in_array('postal_code', $cols, true)) {
+            $update['postal_code'] = $data['postal_code'] ?: null;
+        }
+        if (array_key_exists('bank_name', $data) && in_array('bank_name', $cols, true)) {
+            $update['bank_name'] = ! empty($data['bank_name'])
+                ? strtoupper(trim((string) $data['bank_name'])) : null;
+        }
+        if (array_key_exists('bank_account_number', $data) && in_array('bank_account_number', $cols, true)) {
+            $update['bank_account_number'] = $this->normalizeDigits($data['bank_account_number']);
+        }
+        if (array_key_exists('ptkp_status', $data) && in_array('ptkp_status', $cols, true)) {
+            $update['ptkp_status'] = $this->normalizeEnum(
+                $data['ptkp_status'],
+                ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3'],
+            );
+        }
+        if (array_key_exists('dependents_count', $data) && in_array('dependents_count', $cols, true)) {
+            $update['dependents_count'] = max(0, min(3, (int) ($data['dependents_count'] ?? 0)));
+        }
+        if (array_key_exists('children_count', $data) && in_array('children_count', $cols, true)) {
+            $update['children_count'] = max(0, min(20, (int) ($data['children_count'] ?? 0)));
+        }
+        if (array_key_exists('emergency_contact_name', $data)) {
+            $update['emergency_contact_name'] = is_string($data['emergency_contact_name'])
+                ? (trim($data['emergency_contact_name']) ?: null) : null;
+        }
+        if (array_key_exists('emergency_contact_phone', $data)) {
+            $update['emergency_contact_phone'] = $this->normalizePhone($data['emergency_contact_phone']);
+        }
+        if (array_key_exists('emergency_contact_relation', $data) && in_array('emergency_contact_relation', $cols, true)) {
+            $update['emergency_contact_relation'] = $this->normalizeEnum(
+                $data['emergency_contact_relation'],
+                ['ORANG_TUA','PASANGAN','SAUDARA','ANAK','LAINNYA'],
+            );
+        }
+
+        // ── Disabilitas ──────────────────────────────────────
+        if (array_key_exists('disability_status', $data) && in_array('disability_status', $cols, true)) {
+            $update['disability_status'] = $this->normalizeEnum(
+                $data['disability_status'],
+                ['NONE','PHYSICAL','SENSORY','INTELLECTUAL','MENTAL','MULTIPLE'],
+            );
+        }
+        if (array_key_exists('disability_notes', $data) && in_array('disability_notes', $cols, true)) {
+            $update['disability_notes'] = is_string($data['disability_notes'])
+                ? (trim($data['disability_notes']) ?: null) : null;
+        }
+        if (array_key_exists('blood_type', $data) && in_array('blood_type', $cols, true)) {
+            $update['blood_type'] = $this->normalizeEnum(
+                $data['blood_type'],
+                ['A','A+','A-','B','B+','B-','AB','AB+','AB-','O','O+','O-'],
+            );
+        }
+
+        // ── Mobilitas (multi-checkbox) ───────────────────────
+        if (array_key_exists('driving_license', $data) && in_array('driving_license', $cols, true)) {
+            $update['driving_license'] = $this->normalizeMultiEnum(
+                $data['driving_license'], ['A','B1','B2','C','D'],
+            );
+        }
+        if (array_key_exists('vehicle_owned', $data) && in_array('vehicle_owned', $cols, true)) {
+            $update['vehicle_owned'] = $this->normalizeMultiEnum(
+                $data['vehicle_owned'], ['MOTOR','MOBIL','SEPEDA'],
+            );
+        }
+
+        // ── Reference contacts (JSON) ────────────────────────
+        if (array_key_exists('reference_contacts', $data) && in_array('reference_contacts', $cols, true)) {
+            if (is_array($data['reference_contacts'])) {
+                $clean = [];
+                foreach ($data['reference_contacts'] as $r) {
+                    if (! is_array($r)) continue;
+                    $name  = trim((string) ($r['name']  ?? ''));
+                    $phone = trim((string) ($r['phone'] ?? ''));
+                    if ($name === '' && $phone === '') continue;
+                    $clean[] = [
+                        'name'     => $name,
+                        'position' => trim((string) ($r['position'] ?? '')),
+                        'company'  => trim((string) ($r['company']  ?? '')),
+                        'phone'    => $this->normalizePhone($phone),
+                        'relation' => trim((string) ($r['relation'] ?? '')),
+                    ];
+                }
+                $update['reference_contacts'] = ! empty($clean)
+                    ? json_encode($clean, JSON_UNESCAPED_UNICODE)
+                    : null;
+            } elseif ($data['reference_contacts'] === null || $data['reference_contacts'] === '') {
+                $update['reference_contacts'] = null;
+            }
+        }
+
+        if (empty($update)) {
+            return; // nothing to update
+        }
+
+        $update['updated_at'] = date('Y-m-d H:i:s');
+
+        // Clean: drop key yang kolomnya tidak ada (defensive untuk env
+        // belum migrate 000049/000050)
+        $update = array_intersect_key($update, array_flip($cols));
+
+        $db->table('candidates')->where('id', $candidateId)->update($update);
+
+        // Audit log
+        try {
+            Services::audit()->forModule('CAREER')->log(
+                action: 'application.update_by_candidate',
+                entity: 'candidate',
+                entityId: $candidateId,
+                description: 'Kandidat update profil lamaran via Career Portal '
+                    . '(' . count($update) . ' field termasuk timestamp)',
+                severity: 'NOTICE',
+            );
+        } catch (\Throwable $e) {
+            // ignore audit failure
+        }
+    }
+
+    /**
      * Compare 2 education level. Return true jika $applicant >= $required.
      */
     public function educationMeetsMinimum(string $applicant, string $required): bool
@@ -595,6 +971,27 @@ class CareerService
         if (empty($value)) return null;
         $u = strtoupper((string) $value);
         return in_array($u, $allowed, true) ? $u : null;
+    }
+
+    /**
+     * Normalize multi-value enum (comma-separated input) — keep only
+     * values yang ada di whitelist, return comma-separated string atau
+     * null kalau semua invalid.
+     */
+    private function normalizeMultiEnum($value, array $allowed): ?string
+    {
+        if (empty($value)) return null;
+        $items = is_array($value)
+            ? $value
+            : preg_split('/[,;]+/', (string) $value);
+        $clean = [];
+        foreach ($items as $v) {
+            $u = strtoupper(trim((string) $v));
+            if ($u !== '' && in_array($u, $allowed, true) && ! in_array($u, $clean, true)) {
+                $clean[] = $u;
+            }
+        }
+        return ! empty($clean) ? implode(',', $clean) : null;
     }
 
     private function cleanUrl($url): ?string

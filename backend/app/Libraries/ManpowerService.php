@@ -163,12 +163,33 @@ class ManpowerService
             throw new \RuntimeException('Tidak ada langkah approval yang menunggu');
         }
 
+        // Sprint 3 (CC-3) — Approval Delegation Wiring.
+        // Kalau step ini punya `expected_approver_user_id`, validate caller-nya
+        // adalah orang itu ATAU delegate aktif-nya. Tanpa expected (legacy
+        // schema atau user-based permission), trust caller punya permission.
+        $expected = isset($pending['expected_approver_user_id'])
+            ? (int) $pending['expected_approver_user_id']
+            : null;
+        if ($expected) {
+            $resolver = Services::approvalDelegationResolver();
+            if (! $resolver->canApproveOnBehalfOf($userId, $expected, (int) $mpp['company_id'], 'MPP')) {
+                throw new \RuntimeException(
+                    "Hanya {$pending['approver_role']} (user #{$expected}) atau delegate aktif-nya "
+                    . "yang berhak approve step ini."
+                );
+            }
+        }
+
         $now = date('Y-m-d H:i:s');
+        // Catat delegated_from kalau caller adalah delegate, bukan original
+        $isDelegate = $expected && $expected !== $userId;
         $db->table('manpower_request_approvals')->where('id', (int) $pending['id'])->update([
             'decision'         => 'APPROVED',
             'decided_at'       => $now,
             'approver_user_id' => $userId,
-            'comment'          => $comment,
+            'comment'          => $isDelegate
+                ? '[DELEGATED dari user #' . $expected . '] ' . ($comment ?? '')
+                : $comment,
             'updated_at'       => $now,
         ]);
 
@@ -363,6 +384,16 @@ class ManpowerService
                 'updated_by' => $userId,
                 'updated_at' => $now,
             ]);
+        }
+
+        // Sprint 5 — Onboarding planning: copy job_grade, default supervisor/
+        // manager, dan planned assets dari MPP ke job_postings + job_posting_assets.
+        // Best-effort: kalau service belum tersedia atau migration belum jalan,
+        // log warning tapi jangan break flow create-posting yang sudah sukses.
+        try {
+            Services::onboardingPlan()->syncFromMpp($mppId, $postingId, $userId);
+        } catch (\Throwable $e) {
+            log_message('warning', "MPP planning sync to posting #{$postingId} failed: " . $e->getMessage());
         }
 
         return [

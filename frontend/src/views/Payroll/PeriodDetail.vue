@@ -15,6 +15,10 @@ const toast = useToast()
 const period = ref(null)
 const slips = ref([])
 
+// Pending approvals warning (transaksi yang masih menggantung approval)
+const pendingApprovals = ref(null)
+const pendingLoading = ref(false)
+
 // Export dialog
 const showExportDialog = ref(false)
 const exportSummary = ref(null)
@@ -32,21 +36,74 @@ async function fetchData() {
   ])
   period.value = p.data.data
   slips.value = s.data.data
+  // Refresh pending approvals warning supaya HR aware sebelum klik Hitung
+  fetchPendingApprovals()
 }
 onMounted(fetchData)
 
+// Pre-check: ambil daftar pengajuan yang masih PENDING approval &
+// menyentuh perhitungan periode ini. Endpoint read-only — boleh
+// dipanggil bebas tanpa side-effect.
+async function fetchPendingApprovals() {
+  const id = route.params.id
+  pendingLoading.value = true
+  try {
+    const res = await api.get(`/payroll-periods/${id}/pending-approvals`)
+    pendingApprovals.value = res.data.data
+  } catch (e) {
+    // Non-fatal: jangan ganggu page kalau gagal load warning
+    pendingApprovals.value = null
+  } finally {
+    pendingLoading.value = false
+  }
+}
+
 async function calculate() {
+  // Confirmation message di-augment kalau ada pending approval supaya HR
+  // benar-benar aware tradeoff: hitung tetap bisa, tapi transaksi
+  // pending akan ke-skip sampai di-approve & re-calculate.
+  const hasPending = (pendingApprovals.value?.total_count ?? 0) > 0
+  const baseMessage = 'Semua slip yang sudah ada akan dihitung ulang.'
+  const pendingMessage = hasPending
+    ? `\n\nPeringatan: Ada ${pendingApprovals.value.total_count} pengajuan transaksi yang masih menunggu approval (`
+      + pendingApprovals.value.warnings.map(w => `${w.count} ${labelType(w.type)}`).join(', ')
+      + '). Transaksi tersebut TIDAK akan masuk ke perhitungan periode ini sampai di-approve.'
+    : ''
   const ok = await confirmDialog({
-    title: 'Hitung payroll periode ini?',
-    message: 'Semua slip yang sudah ada akan dihitung ulang.',
-    okText: 'Hitung',
+    title: hasPending
+      ? 'Lanjut hitung payroll dengan pending approval?'
+      : 'Hitung payroll periode ini?',
+    message: baseMessage + pendingMessage,
+    okText: hasPending ? 'Tetap Hitung' : 'Hitung',
+    variant: hasPending ? 'warning' : undefined,
   })
   if (! ok) return
   try {
-    await api.post(`/payroll-periods/${route.params.id}/calculate`)
-    toast.success('Payroll dihitung')
+    const res = await api.post(`/payroll-periods/${route.params.id}/calculate`)
+    const summary = res.data?.data
+    const warnings = summary?.warnings ?? []
+    if (warnings.length > 0) {
+      toast.warning(
+        `Payroll dihitung dengan ${warnings.length} warning. Cek panel pending approval di atas.`,
+        { timeout: 6000 },
+      )
+    } else {
+      toast.success('Payroll dihitung')
+    }
     fetchData()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+}
+
+// Mapping label tipe untuk display
+function labelType(type) {
+  const labels = {
+    overtime: 'lembur',
+    attendance_change: 'koreksi absensi',
+    reimbursement: 'reimbursement',
+    loan: 'kasbon',
+    bonus_run: 'bonus run',
+  }
+  return labels[type] || type
 }
 async function finalize() {
   const ok = await confirmDialog({
@@ -141,6 +198,73 @@ function downloadBpjs(type) {
       <div class="card card-body"><div class="text-xs text-gray-500">Total Gross</div><div class="text-lg font-bold">{{ fmtCurrency(period.total_gross) }}</div></div>
       <div class="card card-body"><div class="text-xs text-gray-500">Total Potongan</div><div class="text-lg font-bold">{{ fmtCurrency(period.total_deduction) }}</div></div>
       <div class="card card-body"><div class="text-xs text-gray-500">Take Home Pay</div><div class="text-lg font-bold text-primary-600">{{ fmtCurrency(period.total_net) }}</div></div>
+    </div>
+
+    <!-- Pending approval warning panel — muncul kalau ada pengajuan
+         transaksi (overtime/koreksi absensi/reimbursement/kasbon/bonus)
+         yang masih PENDING & menyentuh window periode ini. Hanya
+         informatif; tidak block tombol Hitung. HR boleh tetap lanjut
+         dan re-calculate setelah approval masuk. -->
+    <div v-if="pendingApprovals && pendingApprovals.total_count > 0"
+      class="border border-amber-300 bg-amber-50 rounded-lg p-4 mb-6">
+      <div class="flex items-start gap-3">
+        <ExclamationTriangleIcon class="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-amber-900 mb-1">
+            {{ pendingApprovals.total_count }} pengajuan masih menunggu approval
+          </div>
+          <p class="text-sm text-amber-800 mb-3">
+            Transaksi berikut masih PENDING dan akan <strong>diabaikan</strong> dari
+            perhitungan periode ini sampai di-approve & periode di-hitung ulang.
+          </p>
+          <ul class="space-y-2">
+            <li v-for="w in pendingApprovals.warnings" :key="w.type"
+              class="flex items-start gap-2 text-sm">
+              <span class="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 rounded-full bg-amber-200 text-amber-900 text-xs font-bold">
+                {{ w.count }}
+              </span>
+              <span class="text-amber-900 capitalize">{{ labelType(w.type) }}</span>
+            </li>
+          </ul>
+          <details class="mt-3 text-xs">
+            <summary class="cursor-pointer text-amber-800 hover:text-amber-900 font-medium">
+              Lihat daftar pengajuan
+            </summary>
+            <div class="mt-2 space-y-3 text-amber-900">
+              <div v-for="(rows, key) in pendingApprovals.items" :key="key">
+                <div class="font-semibold mb-1 capitalize">{{ labelType(key) }}</div>
+                <ul class="ml-4 space-y-0.5">
+                  <li v-for="r in rows.slice(0, 10)" :key="r.id" class="font-mono text-[11px]">
+                    <template v-if="key === 'overtime' || key === 'attendance_change'">
+                      #{{ r.id }} · {{ r.employee_number || '-' }} · {{ r.employee_name || '-' }} · {{ fmtDate(r.work_date) }}
+                    </template>
+                    <template v-else-if="key === 'reimbursement'">
+                      #{{ r.request_number || r.id }} · {{ r.employee_name || '-' }} · {{ fmtDate(r.expense_date) }} · {{ fmtCurrency(r.amount) }}
+                    </template>
+                    <template v-else-if="key === 'loan'">
+                      #{{ r.loan_number || r.id }} · {{ r.employee_name || '-' }} · {{ fmtCurrency(r.principal) }}
+                    </template>
+                    <template v-else-if="key === 'bonus_run'">
+                      #{{ r.id }} · {{ r.name }} ({{ r.status }}) · {{ fmtCurrency(r.total_amount) }}
+                    </template>
+                    <template v-else>
+                      #{{ r.id }}
+                    </template>
+                  </li>
+                  <li v-if="rows.length > 10" class="italic">
+                    … +{{ rows.length - 10 }} lainnya
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </details>
+          <button type="button"
+            class="mt-3 text-xs text-amber-800 underline hover:text-amber-900"
+            @click="fetchPendingApprovals" :disabled="pendingLoading">
+            {{ pendingLoading ? 'Memuat ulang…' : 'Refresh' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
