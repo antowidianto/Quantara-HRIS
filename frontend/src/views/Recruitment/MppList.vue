@@ -65,6 +65,18 @@ const departments = ref([])
 const positions   = ref([])
 const branches    = ref([])
 const employees   = ref([])
+const jobGrades   = ref([])
+const assetCategories = [
+  { value: 'LAPTOP', label: 'Laptop' },
+  { value: 'DESKTOP', label: 'Desktop / PC' },
+  { value: 'PHONE', label: 'Telepon / HP' },
+  { value: 'VEHICLE', label: 'Kendaraan' },
+  { value: 'FURNITURE', label: 'Furniture' },
+  { value: 'TOOL', label: 'Tools / Peralatan' },
+  { value: 'ID_CARD', label: 'ID Card' },
+  { value: 'ACCESS_CARD', label: 'Access Card' },
+  { value: 'OTHER', label: 'Lainnya' },
+]
 
 // ─── Static maps ────────────────────────────────────────────────────
 const STATUS_BADGE = {
@@ -127,14 +139,16 @@ async function loadDeps() {
     // Karyawan TIDAK lagi di-load semua sekaligus — picker
     // EmployeeSearchSelect melakukan server-side search saat dibutuhkan,
     // sehingga aman walau ada ratusan/ribuan karyawan.
-    const [d, p, b] = await Promise.all([
+    const [d, p, b, jg] = await Promise.all([
       api.get('/departments', { params: { per_page: 200 } }).catch(() => ({ data: { data: [] } })),
       api.get('/positions',   { params: { per_page: 200 } }).catch(() => ({ data: { data: [] } })),
       api.get('/branches',    { params: { per_page: 100 } }).catch(() => ({ data: { data: [] } })),
+      api.get('/job-grades',  { params: { per_page: 200 } }).catch(() => ({ data: { data: [] } })),
     ])
     departments.value = d.data.data || []
     positions.value   = p.data.data || []
     branches.value    = b.data.data || []
+    jobGrades.value   = jg.data.data || []
   } catch { /* deps optional */ }
 }
 
@@ -159,14 +173,47 @@ function openCreate() {
     requirements: '',
     notes: '',
     submit_now: false,
+    // Sprint 5 — onboarding planning
+    job_grade_id: null,
+    proposed_supervisor_employee_id: null,
+    proposed_manager_employee_id: null,
+    planned_assets: [],
   }
   showForm.value = true
 }
 
-function openEdit(row) {
+async function openEdit(row) {
   editing.value = JSON.parse(JSON.stringify(row))
   editing.value.submit_now = false
+  // Lazy-load planned assets
+  editing.value.planned_assets = []
+  try {
+    const res = await api.get(`/manpower-requests/${row.id}/planned-assets`)
+    editing.value.planned_assets = (res.data.data || []).map(p => ({
+      category: p.category,
+      name: p.name,
+      brand_model_pref: p.brand_model_pref || '',
+      asset_id: p.asset_id || null,
+      is_required: Number(p.is_required) === 1 ? 1 : 0,
+      notes: p.notes || '',
+    }))
+  } catch { /* keep empty */ }
   showForm.value = true
+}
+
+function addPlannedAsset() {
+  editing.value.planned_assets.push({
+    category: 'LAPTOP',
+    name: '',
+    brand_model_pref: '',
+    asset_id: null,
+    is_required: 1,
+    notes: '',
+  })
+}
+
+function removePlannedAsset(idx) {
+  editing.value.planned_assets.splice(idx, 1)
 }
 
 async function save() {
@@ -662,6 +709,113 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
             <label class="label">Persyaratan Kandidat</label>
             <textarea v-model="editing.requirements" rows="3" class="input"></textarea>
           </div>
+          <!-- ─── Onboarding Planning (Sprint 5) ──────────────────── -->
+          <div class="md:col-span-2 mt-2 border-t pt-3">
+            <h3 class="text-sm font-semibold text-gray-700 flex items-center gap-1.5 mb-1">
+              <UserGroupIcon class="w-4 h-4 text-primary-600" />
+              Rencana Onboarding (opsional, mempercepat hari pertama)
+            </h3>
+            <p class="text-xs text-gray-500 mb-3">
+              Isi data ini saat MPP supaya HR & IT punya gambaran utuh sebelum kandidat di-hire:
+              job grade, atasan langsung, manager kepegawaian, dan asset kerja yang dibutuhkan.
+              Saat candidate jadi karyawan, semua field di bawah otomatis ter-apply ke profil
+              dan asset langsung di-pre-allocate — onboarding tinggal ceklis.
+            </p>
+          </div>
+
+          <div>
+            <label class="label">Job Grade Target</label>
+            <SearchableSelect
+              v-model="editing.job_grade_id"
+              :items="jobGrades"
+              value-key="id"
+              label-key="name"
+              :search-keys="['name','code']"
+              placeholder="- Belum ditentukan -"
+            />
+            <p class="text-[11px] text-gray-500 mt-0.5">
+              Mempengaruhi range gaji & allowance default karyawan baru.
+            </p>
+          </div>
+          <div></div>
+
+          <div>
+            <label class="label">Atasan Langsung (Supervisor)</label>
+            <EmployeeSearchSelect
+              v-model="editing.proposed_supervisor_employee_id"
+              placeholder="- Pilih dari direktori -"
+              :only-active="true"
+            />
+            <p class="text-[11px] text-gray-500 mt-0.5">
+              Jadi reporting line untuk approval cuti, lembur, attendance.
+            </p>
+          </div>
+          <div>
+            <label class="label">Manager Kepegawaian</label>
+            <EmployeeSearchSelect
+              v-model="editing.proposed_manager_employee_id"
+              placeholder="- Pilih dari direktori -"
+              :only-active="true"
+            />
+            <p class="text-[11px] text-gray-500 mt-0.5">
+              HR-side approver. Boleh sama dengan supervisor atau orang yang berbeda.
+            </p>
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="label flex items-center justify-between">
+              <span>
+                Asset yang Dibutuhkan
+                <span class="text-xs text-gray-400 font-normal">({{ editing.planned_assets?.length || 0 }} item)</span>
+              </span>
+              <button type="button" class="text-xs text-primary-600 hover:underline"
+                @click="addPlannedAsset">
+                + Tambah Asset
+              </button>
+            </label>
+            <div v-if="!editing.planned_assets || editing.planned_assets.length === 0"
+              class="text-xs text-gray-400 italic border border-dashed border-gray-200 rounded p-3 text-center">
+              Belum ada asset yang di-plan. Mis. laptop, ID card, kendaraan operasional.
+            </div>
+            <div v-for="(pa, idx) in editing.planned_assets" :key="idx"
+              class="border rounded p-2 mb-2 bg-gray-50">
+              <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-start">
+                <div class="md:col-span-3">
+                  <label class="text-[10px] text-gray-500">Kategori *</label>
+                  <select v-model="pa.category" class="input text-sm">
+                    <option v-for="c in assetCategories" :key="c.value" :value="c.value">
+                      {{ c.label }}
+                    </option>
+                  </select>
+                </div>
+                <div class="md:col-span-5">
+                  <label class="text-[10px] text-gray-500">Deskripsi Singkat *</label>
+                  <input v-model="pa.name" class="input text-sm"
+                    placeholder="mis. Laptop developer 16GB RAM" maxlength="200" />
+                </div>
+                <div class="md:col-span-3">
+                  <label class="text-[10px] text-gray-500">Brand/Model (opsional)</label>
+                  <input v-model="pa.brand_model_pref" class="input text-sm"
+                    placeholder="mis. ThinkPad T14" maxlength="200" />
+                </div>
+                <div class="md:col-span-1 flex items-end justify-end h-full">
+                  <button type="button" class="text-red-600 hover:text-red-800 p-1"
+                    title="Hapus" @click="removePlannedAsset(idx)">
+                    <TrashIcon class="w-4 h-4" />
+                  </button>
+                </div>
+                <div class="md:col-span-12 flex items-center gap-3">
+                  <label class="flex items-center gap-1 text-xs">
+                    <input type="checkbox" v-model="pa.is_required" :true-value="1" :false-value="0" />
+                    Wajib (tanpa ini kerja terhambat)
+                  </label>
+                  <input v-model="pa.notes" class="input text-xs flex-1"
+                    placeholder="Catatan tambahan untuk IT (opsional)" />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="md:col-span-2">
             <label class="label">Catatan Internal</label>
             <textarea v-model="editing.notes" rows="2" class="input"></textarea>

@@ -28,6 +28,20 @@ class PayrollService
             throw new \InvalidArgumentException('Payroll period not found');
         }
 
+        // ─── Pending-approval pre-check ──────────────────────────────
+        // Scan transaksi yang memengaruhi perhitungan payroll (dari
+        // payroll components & approval-flow lainnya) yang statusnya
+        // masih menggantung. Hanya warn + log (tidak block calculate)
+        // supaya HR tetap bisa lanjut hitung; mereka punya audit trail
+        // kalau ternyata ada pengajuan yang ke-skip dan harus di-recalc
+        // setelah approval.
+        $pending = $this->pendingApprovalsForPeriod($payrollPeriodId, $period);
+        $warnings = [];
+        if (! empty($pending['items'])) {
+            $warnings = $this->buildPendingWarnings($pending);
+            $this->logPendingApprovals($payrollPeriodId, $period, $pending, $warnings);
+        }
+
         // Clear existing payslips for THIS period (re-calculation flow).
         $existing = $db->table('payslips')->where('payroll_period_id', $payrollPeriodId)->get()->getResultArray();
         foreach ($existing as $p) {
@@ -120,7 +134,240 @@ class PayrollService
             'total_gross'      => $totalGross,
             'total_deduction'  => $totalDeduction,
             'total_net'        => $totalNet,
+            'warnings'         => $warnings,
+            'pending_approvals'=> $pending,
         ];
+    }
+
+    /**
+     * Cek pengajuan transaksi yang memengaruhi payroll tapi masih menggantung
+     * approval pada saat calculate. Hasilnya dipakai untuk:
+     *   - Surface warning ke caller (controller / UI)
+     *   - Log ke `log_message('warning', ...)` & `AuditLogger` severity WARNING
+     *
+     * Cakupan check (semua di-scope per company periode ini):
+     *   1. Overtime PENDING dengan work_date dalam [start_date, end_date]
+     *      → kalau di-approve setelah calculate, lembur akan ke-skip dari
+     *        slip period ini sampai user re-calculate.
+     *   2. Attendance Change Request PENDING dengan work_date dalam range
+     *      → bisa mengubah status attendance (PRESENT/ABSENT) yang
+     *        mempengaruhi absent_deduction di slip.
+     *   3. Reimbursement PENDING dengan expense_date <= end_date
+     *      → kalau di-approve setelah calculate, akan terbayar di
+     *        period berikutnya saja.
+     *   4. Loan/Kasbon PENDING (any) di company
+     *      → cicilan baru mulai jalan setelah status RUNNING; kalau
+     *        approval terlambat, instalment pertama akan delay 1 period.
+     *   5. Bonus Run dengan payroll_period_id = period ini & status
+     *      DRAFT/CALCULATED (belum APPROVED)
+     *      → bonus tidak akan ter-merge ke payslip period ini.
+     *
+     * @param int        $payrollPeriodId
+     * @param array|null $period Pre-loaded period row (optimization).
+     * @return array{
+     *   total_count:int,
+     *   items:array<string, list<array<string,mixed>>>,
+     *   counts:array<string, int>
+     * }
+     */
+    public function pendingApprovalsForPeriod(int $payrollPeriodId, ?array $period = null): array
+    {
+        $db = \Config\Database::connect();
+        if ($period === null) {
+            $period = $db->table('payroll_periods')->where('id', $payrollPeriodId)->get()->getRowArray();
+        }
+        if (! $period) {
+            return ['total_count' => 0, 'items' => [], 'counts' => []];
+        }
+
+        $companyId = (int) $period['company_id'];
+        $startDate = (string) $period['start_date'];
+        $endDate   = (string) $period['end_date'];
+
+        $items = [];
+
+        // 1. Overtime PENDING (dalam window period)
+        $overtimePending = $db->table('overtimes o')
+            ->select('o.id, o.employee_id, o.work_date, o.hours, o.day_type, o.created_at,'
+                . ' e.full_name AS employee_name, e.employee_number')
+            ->join('employees e', 'e.id = o.employee_id', 'left')
+            ->where('o.company_id', $companyId)
+            ->where('o.status', 'PENDING')
+            ->where('o.work_date >=', $startDate)
+            ->where('o.work_date <=', $endDate)
+            ->orderBy('o.work_date', 'ASC')
+            ->limit(100)
+            ->get()->getResultArray();
+        if (! empty($overtimePending)) {
+            $items['overtime'] = $overtimePending;
+        }
+
+        // 2. Attendance change request PENDING (dalam window period)
+        if ($db->tableExists('attendance_change_requests')) {
+            $acrPending = $db->table('attendance_change_requests acr')
+                ->select('acr.id, acr.employee_id, acr.work_date, acr.created_at,'
+                    . ' e.full_name AS employee_name, e.employee_number')
+                ->join('employees e', 'e.id = acr.employee_id', 'left')
+                ->where('acr.company_id', $companyId)
+                ->where('acr.status', 'PENDING')
+                ->where('acr.work_date >=', $startDate)
+                ->where('acr.work_date <=', $endDate)
+                ->orderBy('acr.work_date', 'ASC')
+                ->limit(100)
+                ->get()->getResultArray();
+            if (! empty($acrPending)) {
+                $items['attendance_change'] = $acrPending;
+            }
+        }
+
+        // 3. Reimbursement PENDING dengan expense_date <= end_date
+        $reimbPending = $db->table('reimbursements r')
+            ->select('r.id, r.employee_id, r.request_number, r.category, r.expense_date,'
+                . ' r.amount, r.created_at,'
+                . ' e.full_name AS employee_name, e.employee_number')
+            ->join('employees e', 'e.id = r.employee_id', 'left')
+            ->where('r.company_id', $companyId)
+            ->where('r.status', 'PENDING')
+            ->where('r.expense_date <=', $endDate)
+            ->orderBy('r.expense_date', 'ASC')
+            ->limit(100)
+            ->get()->getResultArray();
+        if (! empty($reimbPending)) {
+            $items['reimbursement'] = $reimbPending;
+        }
+
+        // 4. Loan/Kasbon PENDING
+        $loanPending = $db->table('loans l')
+            ->select('l.id, l.employee_id, l.loan_number, l.principal,'
+                . ' l.installment_amount, l.installments, l.created_at,'
+                . ' e.full_name AS employee_name, e.employee_number')
+            ->join('employees e', 'e.id = l.employee_id', 'left')
+            ->where('l.company_id', $companyId)
+            ->where('l.status', 'PENDING')
+            ->orderBy('l.created_at', 'ASC')
+            ->limit(100)
+            ->get()->getResultArray();
+        if (! empty($loanPending)) {
+            $items['loan'] = $loanPending;
+        }
+
+        // 5. Bonus run yang ditujukan ke period ini tapi belum APPROVED
+        if ($db->tableExists('bonus_runs')) {
+            $bonusPending = $db->table('bonus_runs br')
+                ->select('br.id, br.name, br.status, br.total_amount,'
+                    . ' br.recipient_count, br.pay_date, br.bonus_scheme_id,'
+                    . ' bs.code AS scheme_code, bs.name AS scheme_name')
+                ->join('bonus_schemes bs', 'bs.id = br.bonus_scheme_id', 'left')
+                ->where('br.company_id', $companyId)
+                ->where('br.payroll_period_id', $payrollPeriodId)
+                ->whereIn('br.status', ['DRAFT', 'CALCULATED'])
+                ->where('br.deleted_at IS NULL')
+                ->orderBy('br.id', 'ASC')
+                ->limit(100)
+                ->get()->getResultArray();
+            if (! empty($bonusPending)) {
+                $items['bonus_run'] = $bonusPending;
+            }
+        }
+
+        $counts = [];
+        $total = 0;
+        foreach ($items as $key => $rows) {
+            $counts[$key] = count($rows);
+            $total += count($rows);
+        }
+
+        return [
+            'total_count' => $total,
+            'items'       => $items,
+            'counts'      => $counts,
+        ];
+    }
+
+    /**
+     * Bentuk pesan warning Bahasa Indonesia ringkas per kategori.
+     *
+     * @return list<array{type:string,count:int,message:string}>
+     */
+    private function buildPendingWarnings(array $pending): array
+    {
+        $labels = [
+            'overtime'          => 'pengajuan lembur',
+            'attendance_change' => 'koreksi absensi',
+            'reimbursement'     => 'pengajuan reimbursement',
+            'loan'              => 'pengajuan kasbon',
+            'bonus_run'         => 'bonus run',
+        ];
+        $warnings = [];
+        foreach ($pending['counts'] as $type => $count) {
+            if ($count <= 0) continue;
+            $label = $labels[$type] ?? $type;
+            $warnings[] = [
+                'type'    => $type,
+                'count'   => $count,
+                'message' => sprintf(
+                    'Ada %d %s yang masih menunggu approval — perhitungan periode ini akan mengabaikan transaksi tersebut sampai di-approve & re-calculate.',
+                    $count,
+                    $label,
+                ),
+            ];
+        }
+        return $warnings;
+    }
+
+    /**
+     * Tulis log warning + audit trail untuk pending approvals.
+     */
+    private function logPendingApprovals(
+        int $payrollPeriodId,
+        array $period,
+        array $pending,
+        array $warnings
+    ): void {
+        $summary = [];
+        foreach ($pending['counts'] as $type => $count) {
+            $summary[] = "{$type}={$count}";
+        }
+        $summaryStr = implode(', ', $summary);
+
+        log_message(
+            'warning',
+            sprintf(
+                '[Payroll calculate] Period #%d (%s) memiliki transaksi pending approval: %s',
+                $payrollPeriodId,
+                $period['code'] ?? '-',
+                $summaryStr,
+            ),
+        );
+
+        try {
+            Services::audit()
+                ->forModule('PAYROLL')
+                ->log(
+                    action: 'payroll_period.pending_approvals_detected',
+                    entity: 'payroll_period',
+                    entityId: $payrollPeriodId,
+                    description: sprintf(
+                        'Calculate periode #%d (%s): terdapat %d transaksi pending approval (%s).',
+                        $payrollPeriodId,
+                        $period['code'] ?? '-',
+                        (int) $pending['total_count'],
+                        $summaryStr,
+                    ),
+                    severity: 'WARNING',
+                    metadata: [
+                        'period_code' => $period['code'] ?? null,
+                        'period_name' => $period['name'] ?? null,
+                        'start_date'  => $period['start_date'] ?? null,
+                        'end_date'    => $period['end_date'] ?? null,
+                        'counts'      => $pending['counts'],
+                        'warnings'    => $warnings,
+                    ],
+                );
+        } catch (\Throwable $e) {
+            // Audit failure jangan menggagalkan calculate.
+            log_message('error', 'AuditLogger.log pending approvals failed: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -429,6 +676,21 @@ class PayrollService
             'created_at'         => date('Y-m-d H:i:s'),
             'updated_at'         => date('Y-m-d H:i:s'),
         ];
+
+        // Sprint 6 — Cost Center: tag payslip ke cost center karyawan supaya
+        // total biaya gaji bisa di-aggregate per cost center untuk laporan
+        // budget vs actual finance. Resolve via chain employee → dept →
+        // branch → company root. Best-effort: kalau resolver gagal atau
+        // schema belum migrate, payslip tetap ter-insert tanpa cost_center.
+        $payslipsCols = $db->getFieldNames('payslips');
+        if (in_array('cost_center_id', $payslipsCols, true)) {
+            try {
+                $payslipData['cost_center_id'] = Services::costCenter()
+                    ->resolveForEmployee((int) $emp['id']);
+            } catch (\Throwable $e) {
+                log_message('warning', 'Payslip cost_center resolve failed: ' . $e->getMessage());
+            }
+        }
 
         $db->table('payslips')->insert($payslipData);
         $payslipId = $db->insertID();

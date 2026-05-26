@@ -305,6 +305,30 @@ class RecruitmentController extends ApiController
 
         $job = $db->table('job_postings')->where('id', (int) $row['job_posting_id'])->get()->getRowArray();
         $row['job'] = $job;
+
+        // Sprint 23+ — gate online test status. Frontend pakai untuk
+        // disable tombol "Pindah ke INTERVIEW_HR/USER/OFFER/HIRED" kalau
+        // test belum selesai. Backend tetap enforce di moveStage(), ini
+        // hanya UX hint supaya HR tidak nge-klik & dapat error.
+        try {
+            $row['online_test_status'] = Services::recruitment()
+                ->onlineTestCompletionStatus((int) $row['id']);
+        } catch (\Throwable $e) {
+            $row['online_test_status'] = null;
+        }
+
+        // Daftar assignment online test untuk display di candidate detail
+        $row['online_test_assignments'] = $db->tableExists('online_test_assignments')
+            ? $db->table('online_test_assignments ota')
+                ->select('ota.id, ota.status, ota.best_result, ota.best_percentage,'
+                    . ' ota.due_at, ota.completed_at, ota.attempts_used, ota.max_attempts,'
+                    . ' ot.name AS test_name, ot.category AS test_category')
+                ->join('online_tests ot', 'ot.id = ota.online_test_id', 'left')
+                ->where('ota.candidate_id', (int) $row['id'])
+                ->orderBy('ota.created_at', 'DESC')
+                ->get()->getResultArray()
+            : [];
+
         return $this->ok($row);
     }
 
@@ -460,10 +484,39 @@ class RecruitmentController extends ApiController
         if (! $row) return $this->response;
 
         $data = $this->getJsonInput();
+        // Sprint 23+ — saat hire, capture sekaligus data payroll-essential
+        // (PTKP, NPWP, BPJS, rekening bank, tax method) supaya periode
+        // payroll pertama langsung bisa di-calculate. Field sensitif
+        // (npwp, bank_account) di-encrypt di service layer.
         $overrides = array_intersect_key($data, array_flip([
             'employee_number','department_id','position_id','branch_id',
+            'job_grade_id','manager_id',
             'employment_status','join_date','basic_salary',
+            'probation_end_date','contract_end_date',
+            // Payroll
+            'ptkp_status','tax_method','pph21_method',
+            'npwp',
+            'bpjs_kesehatan_no','bpjs_kesehatan_class','bpjs_tk_no',
+            'bank_name','bank_account','bank_account_holder',
         ]));
+
+        // Validasi ringan untuk field payroll yang punya enum constraint
+        $validPtkp = ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3'];
+        if (! empty($overrides['ptkp_status']) && ! in_array($overrides['ptkp_status'], $validPtkp, true)) {
+            return $this->fail('ptkp_status tidak valid. Gunakan TK0-TK3 / K0-K3 / HB0-HB3.', 422);
+        }
+        if (! empty($overrides['tax_method'])
+            && ! in_array($overrides['tax_method'], ['GROSS','NETT','GROSS_UP'], true)) {
+            return $this->fail('tax_method harus GROSS / NETT / GROSS_UP.', 422);
+        }
+        if (! empty($overrides['pph21_method'])
+            && ! in_array($overrides['pph21_method'], ['TER','GROSS_UP'], true)) {
+            return $this->fail('pph21_method harus TER atau GROSS_UP.', 422);
+        }
+        if (isset($overrides['bpjs_kesehatan_class'])
+            && ! in_array((int) $overrides['bpjs_kesehatan_class'], [1, 2, 3], true)) {
+            return $this->fail('bpjs_kesehatan_class harus 1, 2, atau 3.', 422);
+        }
         try {
             $result = Services::recruitment()->convertToEmployee((int) $id, $overrides);
         } catch (\Throwable $e) {

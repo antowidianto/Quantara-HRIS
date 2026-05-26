@@ -26,6 +26,9 @@ const routes = [
       { path: 'login',                       name: 'candidate-login',     component: () => import('@/views/Career/CandidateLogin.vue') },
       { path: 'register',                    name: 'candidate-register',  component: () => import('@/views/Career/CandidateRegister.vue') },
       { path: 'dashboard',                   name: 'candidate-dashboard', component: () => import('@/views/Career/CandidateDashboard.vue') },
+      // Sprint 23+ — "Profil Saya" untuk pelamar; edit data lamaran
+      // selama belum di stage final (HIRED/REJECTED/WITHDRAWN).
+      { path: 'profile/:id',                 name: 'candidate-profile',   component: () => import('@/views/Career/CandidateProfile.vue') },
       { path: 'tests/:id',                   name: 'candidate-test-detail', component: () => import('@/views/Career/CandidateTakeTest.vue') },
       { path: 'tests/result/:attemptId',    name: 'candidate-test-result', component: () => import('@/views/Career/CandidateTestResult.vue') },
     ],
@@ -72,6 +75,8 @@ const routes = [
       { path: 'roster', name: 'roster', component: () => import('@/views/Roster/RosterMatrix.vue') },
       { path: 'master/leave-types', name: 'leave-types', component: () => import('@/views/Master/LeaveTypes.vue') },
       { path: 'master/payroll-components', name: 'payroll-components', component: () => import('@/views/Master/PayrollComponents.vue') },
+      // Cost Center master + budget vs actual report. Lihat docs/COST_CENTER.md.
+      { path: 'master/cost-centers', name: 'cost-centers', component: () => import('@/views/Master/CostCenters.vue') },
       { path: 'master/regulations', name: 'regulations', component: () => import('@/views/Master/Regulations.vue') },
       { path: 'master/contract-templates', name: 'contract-templates', component: () => import('@/views/Master/ContractTemplates.vue') },
       { path: 'master/approval-chains', name: 'approval-chains', component: () => import('@/views/Master/ApprovalChains.vue') },
@@ -93,6 +98,18 @@ const routes = [
       { path: 'hr/severance', name: 'severance', component: () => import('@/views/HR/Severance.vue') },
       // Onboarding & Offboarding
       { path: 'hr/onboarding', name: 'onboarding', component: () => import('@/views/HR/OnboardingBoard.vue') },
+      // Probation Tracker (Sprint 2 / HIRE-1) — monitoring masa percobaan
+      // PKWTT, decision PASS/FAIL/EXTEND. Lihat docs/SPRINT_2_RECRUITMENT_POLISH.md.
+      { path: 'hr/probation', name: 'probation', component: () => import('@/views/HR/ProbationDashboard.vue') },
+      // Sprint 3 — Individual Development Plan (OD-2)
+      { path: 'hr/idp', name: 'idp', component: () => import('@/views/HR/IdpDashboard.vue') },
+      // Sprint 4 — Termination workflow (OFF-5), Exit Interview (OFF-1),
+      // Compliance Reports (CC-5). Lihat docs/SPRINT_4_TERMINATION_POLISH.md.
+      { path: 'hr/terminations', name: 'terminations', component: () => import('@/views/HR/TerminationBoard.vue') },
+      { path: 'hr/exit-interviews', name: 'exit-interviews', component: () => import('@/views/HR/ExitInterviews.vue') },
+      { path: 'hr/compliance-reports', name: 'compliance-reports', component: () => import('@/views/HR/ComplianceReports.vue') },
+      // Sprint 4 — Employee 360 view (CC-4) — aggregator profile lengkap
+      { path: 'employees/:id/360', name: 'employee-360', component: () => import('@/views/Employees/Employee360.vue') },
       // Resignation — self-service untuk karyawan + halaman review HR/atasan.
       // Lihat docs/RESIGNATION.md.
       { path: 'hr/my-resignation', name: 'my-resignation', component: () => import('@/views/HR/MyResignation.vue') },

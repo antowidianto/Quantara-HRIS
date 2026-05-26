@@ -80,6 +80,21 @@ class ReimbursementController extends ApiController
             'created_at'   => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ];
+
+        // Sprint 6 — Cost Center: tag biaya reimbursement ke cost center
+        // sehingga muncul di laporan budget vs actual kategori REIMBURSE.
+        // Resolve chain: override → employee → dept → branch → company root.
+        if (in_array('cost_center_id', $db->getFieldNames('reimbursements'), true)) {
+            try {
+                $insert['cost_center_id'] = Services::costCenter()->resolveForEmployee(
+                    $employeeId,
+                    ['cost_center_id' => $data['cost_center_id'] ?? null]
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', 'Reimbursement cost_center resolve failed: ' . $e->getMessage());
+            }
+        }
+
         $db->table('reimbursements')->insert($insert);
         $id = (int) $db->insertID();
         Services::audit()->log('reimbursement.create', 'reimbursement', $id);

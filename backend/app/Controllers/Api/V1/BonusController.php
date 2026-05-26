@@ -470,6 +470,23 @@ class BonusController extends ApiController
             'created_at'        => $now,
             'updated_at'        => $now,
         ];
+
+        // Sprint 6 — Cost Center: header-level untuk semua recipient.
+        // Validate kalau eksplisit di-set; kalau tidak, biarkan null —
+        // recipient-level resolve ke cost_center_id masing-masing karyawan
+        // saat calculate (pattern di BonusService::calculateRun).
+        if (in_array('cost_center_id', $db->getFieldNames('bonus_runs'), true)) {
+            $explicitCc = ! empty($data['cost_center_id']) ? (int) $data['cost_center_id'] : null;
+            if ($explicitCc) {
+                try {
+                    Services::costCenter()->assertValidForCompany($explicitCc, $companyId);
+                    $insert['cost_center_id'] = $explicitCc;
+                } catch (\Throwable $e) {
+                    return $this->fail($e->getMessage(), 422);
+                }
+            }
+        }
+
         $db->table('bonus_runs')->insert($insert);
         $id = (int) $db->insertID();
 

@@ -161,8 +161,8 @@ function fmtDate(d) {
         <div v-else class="space-y-3">
           <div v-for="app in data.applications" :key="app.id"
             class="bg-white border border-slate-200 rounded-xl p-4">
-            <div class="flex items-start justify-between">
-              <div>
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex-1 min-w-0">
                 <div class="font-semibold text-slate-900">{{ app.job_title }}</div>
                 <div class="text-sm text-slate-500 mt-1 space-x-3">
                   <span>Ref: {{ app.reference_number }}</span>
@@ -173,9 +173,22 @@ function fmtDate(d) {
                   Dilamar: {{ fmtDate(app.applied_at) }}
                 </div>
               </div>
-              <span class="text-xs px-3 py-1 rounded-full font-medium" :class="stageColor(app.current_stage)">
-                {{ stageLabel(app.current_stage) }}
-              </span>
+              <div class="flex flex-col items-end gap-2 shrink-0">
+                <span class="text-xs px-3 py-1 rounded-full font-medium whitespace-nowrap" :class="stageColor(app.current_stage)">
+                  {{ stageLabel(app.current_stage) }}
+                </span>
+                <!-- Sprint 23+ — "Profil Saya" link. Selalu tampil; halaman
+                     itu sendiri yang handle locked vs editable berdasarkan
+                     stage (HIRED/REJECTED/WITHDRAWN → read-only). -->
+                <router-link
+                  :to="{ name: 'candidate-profile', params: { slug, id: app.id } }"
+                  class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline inline-flex items-center gap-1 whitespace-nowrap">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                  </svg>
+                  {{ ['HIRED','REJECTED','WITHDRAWN'].includes(app.current_stage) ? 'Lihat Profil' : 'Edit Profil' }}
+                </router-link>
+              </div>
             </div>
             <div v-if="app.rejection_reason && app.current_stage === 'REJECTED'"
               class="mt-2 text-sm text-rose-600 bg-rose-50 p-2 rounded">

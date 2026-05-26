@@ -480,7 +480,7 @@ class JicService
     {
         $db  = Database::connect();
         $emp = $db->table('employees')->where('id', (int) $jic['employee_id'])->get()->getRowArray();
-        if (! $emp || empty($emp['user_id'])) return;
+        if (! $emp) return;
 
         $title = match ($jic['change_type']) {
             'PROMOTION'         => 'Selamat atas promosi Anda',
@@ -495,20 +495,124 @@ class JicService
             $jic['effective_date'],
         );
 
-        Services::notification()->send(
-            (int) $emp['user_id'],
-            (int) $jic['company_id'],
-            'jic.implemented',
-            $title,
-            $msg,
-            [
-                'jic_id'      => (int) $jic['id'],
-                'jic_number'  => $jic['jic_number'],
-                'contract_id' => $contractId,
-                'change_type' => $jic['change_type'],
-            ],
-            null,
-            true,
-        );
+        // 1. Notifikasi ke karyawan ybs
+        if (! empty($emp['user_id'])) {
+            try {
+                Services::notification()->send(
+                    (int) $emp['user_id'],
+                    (int) $jic['company_id'],
+                    'jic.implemented',
+                    $title,
+                    $msg,
+                    [
+                        'jic_id'      => (int) $jic['id'],
+                        'jic_number'  => $jic['jic_number'],
+                        'contract_id' => $contractId,
+                        'change_type' => $jic['change_type'],
+                    ],
+                    null,
+                    true,
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', 'JIC notify employee failed: ' . $e->getMessage());
+            }
+        }
+
+        // 2. Notifikasi ke atasan baru — supervisor & manager.
+        // Penting: kalau JIC mengubah supervisor/manager (mutasi/promosi),
+        // atasan baru harus tahu bahwa karyawan ini sekarang di bawah mereka,
+        // supaya bisa adjust assignment / approval routing. Atasan lama
+        // notif terpisah biar mereka aware tidak lagi punya tanggung jawab.
+        $this->notifyNewReporters($db, $jic, $emp);
+    }
+
+    /**
+     * Kirim notifikasi ke supervisor/manager baru (dan lama, kalau berbeda)
+     * saat JIC mengubah reporting line. Best-effort: kegagalan satu pengirim
+     * tidak block lainnya.
+     */
+    private function notifyNewReporters(
+        \CodeIgniter\Database\BaseConnection $db,
+        array $jic,
+        array $emp,
+    ): void {
+        $changeNames = [];
+
+        $oldSupId = isset($jic['old_supervisor_id']) ? (int) $jic['old_supervisor_id'] : 0;
+        $newSupId = isset($jic['new_supervisor_id']) ? (int) $jic['new_supervisor_id'] : 0;
+        $oldMgrId = isset($jic['old_manager_id'])    ? (int) $jic['old_manager_id']    : 0;
+        $newMgrId = isset($jic['new_manager_id'])    ? (int) $jic['new_manager_id']    : 0;
+
+        // Kumpulkan target notif: (employee_id, role_label, type)
+        $targets = [];
+        if ($newSupId && $newSupId !== $oldSupId) {
+            $targets[] = ['emp_id' => $newSupId, 'role' => 'Atasan Langsung', 'kind' => 'new'];
+            if ($oldSupId && $oldSupId !== (int) $emp['id']) {
+                $targets[] = ['emp_id' => $oldSupId, 'role' => 'Atasan Langsung Lama', 'kind' => 'old'];
+            }
+        }
+        if ($newMgrId && $newMgrId !== $oldMgrId && $newMgrId !== $newSupId) {
+            $targets[] = ['emp_id' => $newMgrId, 'role' => 'Manager Kepegawaian', 'kind' => 'new'];
+            if ($oldMgrId && $oldMgrId !== (int) $emp['id'] && $oldMgrId !== $oldSupId) {
+                $targets[] = ['emp_id' => $oldMgrId, 'role' => 'Manager Kepegawaian Lama', 'kind' => 'old'];
+            }
+        }
+
+        if (empty($targets)) return;
+
+        // Resolve user_id untuk setiap target
+        $empIds = array_unique(array_column($targets, 'emp_id'));
+        $rows = $db->table('employees')
+            ->select('id, user_id, full_name')
+            ->whereIn('id', $empIds)
+            ->where('deleted_at IS NULL')
+            ->get()->getResultArray();
+        $byEmp = [];
+        foreach ($rows as $r) $byEmp[(int) $r['id']] = $r;
+
+        $effectiveDate = (string) ($jic['effective_date'] ?? date('Y-m-d'));
+        $employeeName  = (string) ($emp['full_name'] ?? '#' . $emp['id']);
+
+        foreach ($targets as $t) {
+            $row = $byEmp[(int) $t['emp_id']] ?? null;
+            if (! $row || empty($row['user_id'])) continue;
+
+            $isNew = $t['kind'] === 'new';
+            $title = $isNew
+                ? sprintf('Anda menjadi %s untuk %s', $t['role'], $employeeName)
+                : sprintf('Karyawan keluar dari reporting line Anda: %s', $employeeName);
+            $msg = $isNew
+                ? sprintf(
+                    '%s sekarang berada di bawah Anda sebagai %s, efektif %s. '
+                    . 'Approval cuti, lembur, attendance, serta task ownership akan ter-routing ke Anda.',
+                    $employeeName, strtolower($t['role']), $effectiveDate,
+                )
+                : sprintf(
+                    '%s tidak lagi berada di reporting line Anda efektif %s. '
+                    . 'Approval pending mungkin ter-redirect — pastikan handover dengan atasan baru.',
+                    $employeeName, $effectiveDate,
+                );
+
+            try {
+                Services::notification()->send(
+                    (int) $row['user_id'],
+                    (int) $jic['company_id'],
+                    'jic.reporter_changed',
+                    $title,
+                    $msg,
+                    [
+                        'jic_id'      => (int) $jic['id'],
+                        'jic_number'  => $jic['jic_number'],
+                        'employee_id' => (int) $emp['id'],
+                        'role'        => $t['role'],
+                        'kind'        => $t['kind'],
+                    ],
+                    '/employees/' . (int) $emp['id'],
+                    $isNew, // important = new reporter
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', 'JIC notify reporter failed: ' . $e->getMessage());
+            }
+        }
     }
 }

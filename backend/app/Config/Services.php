@@ -174,6 +174,123 @@ class Services extends BaseService
         return new \App\Libraries\OnboardingService();
     }
 
+    /**
+     * OnboardingPlanService — orchestrator untuk fields yang di-plan saat
+     * MPP submission (job_grade, supervisor, manager, planned assets) dan
+     * yang otomatis dipopulasi saat hire (saldo cuti per gender, asset
+     * pre-allocation). Dipanggil dari ManpowerService, RecruitmentService,
+     * dan endpoint baru di MppController + OnboardingController.
+     */
+    public static function onboardingPlan(bool $getShared = true): \App\Libraries\OnboardingPlanService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('onboardingPlan');
+        }
+
+        return new \App\Libraries\OnboardingPlanService();
+    }
+
+    /**
+     * CostCenterService — dimensi accounting cost center (Sprint 6).
+     * Resolver chain employee → department → branch → company root,
+     * CRUD master + budget periodisasi, budget vs actual reporting.
+     * Dipakai oleh payroll, reimbursement, loan, business trip, bonus,
+     * severance, asset, MPP, employee profile.
+     */
+    public static function costCenter(bool $getShared = true): \App\Libraries\CostCenterService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('costCenter');
+        }
+
+        return new \App\Libraries\CostCenterService();
+    }
+
+    /**
+     * PaklaringService — generator Surat Keterangan Kerja (paklaring) untuk
+     * karyawan yang berhenti. Wajib menurut UU 13/2003 Pasal 153, biasanya
+     * jadi syarat aplikasi kerja di perusahaan baru. Lihat docs/RESIGNATION.md
+     * dan docs/LIFECYCLE_AUDIT_2026.md (item OFF-2).
+     */
+    public static function paklaring(bool $getShared = true): \App\Libraries\PaklaringService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('paklaring');
+        }
+
+        return new \App\Libraries\PaklaringService();
+    }
+
+    /**
+     * OffboardingService — clearance gates (asset/finance/BPJS) +
+     * orchestrator final settlement → payroll. Lihat docs/RESIGNATION.md
+     * dan docs/LIFECYCLE_AUDIT_2026.md (item OFF-3, OFF-4, OFF-6).
+     */
+    public static function offboarding(bool $getShared = true): \App\Libraries\OffboardingService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('offboarding');
+        }
+
+        return new \App\Libraries\OffboardingService();
+    }
+
+    /**
+     * OfferService — manage candidate offer letter (Sprint 2 / REC-1).
+     * Workflow DRAFT → SENT → ACCEPTED/REJECTED/EXPIRED/WITHDRAWN.
+     * Lihat docs/LIFECYCLE_AUDIT_2026.md item REC-1.
+     */
+    public static function offer(bool $getShared = true): \App\Libraries\OfferService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('offer');
+        }
+
+        return new \App\Libraries\OfferService();
+    }
+
+    /**
+     * ProbationService — masa percobaan PKWTT compliance (Sprint 2 / HIRE-1).
+     * Auto-fill probation_end_date saat hire, decision PASS/FAIL/EXTEND,
+     * scanner expired+reminder. Lihat UU 13/2003 Pasal 60.
+     */
+    public static function probation(bool $getShared = true): \App\Libraries\ProbationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('probation');
+        }
+
+        return new \App\Libraries\ProbationService();
+    }
+
+    /**
+     * IdpService — Individual Development Plan (Sprint 3 / OD-2).
+     * Auto-bootstrap IDP dari performance review.improvements field saat
+     * review difinalize. Lihat docs/LIFECYCLE_AUDIT_2026.md item OD-2.
+     */
+    public static function idp(bool $getShared = true): \App\Libraries\IdpService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('idp');
+        }
+
+        return new \App\Libraries\IdpService();
+    }
+
+    /**
+     * ApprovalDelegationResolver — pure helper untuk module yang tidak
+     * pakai ApprovalEngine (MPP, Resignation, Transfer, JIC). Cek delegasi
+     * aktif berdasarkan tabel `approval_delegations`. Sprint 3 / CC-3.
+     */
+    public static function approvalDelegationResolver(bool $getShared = true): \App\Libraries\ApprovalDelegationResolver
+    {
+        if ($getShared) {
+            return static::getSharedInstance('approvalDelegationResolver');
+        }
+
+        return new \App\Libraries\ApprovalDelegationResolver();
+    }
+
     public static function asset(bool $getShared = true): \App\Libraries\AssetService
     {
         if ($getShared) {
@@ -484,5 +601,63 @@ class Services extends BaseService
         }
 
         return new \App\Libraries\OnlineTestService();
+    }
+
+    /**
+     * TerminationService — PHK formal workflow (Sprint 4 / OFF-5).
+     * Multi-step approval: HR Director → BOD (kondisional). Auto-create
+     * severance + PHK letter saat execute. Lihat docs/SPRINT_4_TERMINATION_POLISH.md.
+     */
+    public static function termination(bool $getShared = true): \App\Libraries\TerminationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('termination');
+        }
+
+        return new \App\Libraries\TerminationService();
+    }
+
+    /**
+     * ExitInterviewService — wawancara terstruktur saat resign / PHK
+     * (Sprint 4 / OFF-1). Analytics: would_rehire, primary_reason breakdown,
+     * eNPS, satisfaction. Lihat docs/SPRINT_4_TERMINATION_POLISH.md.
+     */
+    public static function exitInterview(bool $getShared = true): \App\Libraries\ExitInterviewService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('exitInterview');
+        }
+
+        return new \App\Libraries\ExitInterviewService();
+    }
+
+    /**
+     * Employee360Service — aggregator profile lengkap karyawan untuk
+     * Employee 360 view (Sprint 4 / CC-4). Aggregate 12 section:
+     * profile, employment, compensation, leave, attendance, payroll YTD,
+     * performance, training, assets, disciplinary, documents, lifecycle.
+     */
+    public static function employee360(bool $getShared = true): \App\Libraries\Employee360Service
+    {
+        if ($getShared) {
+            return static::getSharedInstance('employee360');
+        }
+
+        return new \App\Libraries\Employee360Service();
+    }
+
+    /**
+     * ComplianceReportService — generator laporan kepatuhan HR
+     * (Sprint 4 / CC-5). Reports: WLKP tahunan, BPJS bulanan, PKWT expiring,
+     * PHK list, audit summary, probation/BPJS overdue, turnover summary.
+     * Hasil di-cache di compliance_report_runs (TTL 24 jam).
+     */
+    public static function complianceReport(bool $getShared = true): \App\Libraries\ComplianceReportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('complianceReport');
+        }
+
+        return new \App\Libraries\ComplianceReportService();
     }
 }

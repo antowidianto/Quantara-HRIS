@@ -58,9 +58,27 @@ class RecruitmentService
         return $candidate;
     }
 
+    /** Stage di mana online test biasanya dikerjakan — saat keluar dari
+     * stage ini ke stage lebih lanjut (atau langsung HIRED), kita harus
+     * pastikan semua test assignment-nya sudah selesai dikerjakan & di-grade
+     * oleh HR. */
+    public const ONLINE_TEST_STAGE = 'ONLINE_TEST';
+
+    /** Stage yang dianggap "lebih lanjut" dari ONLINE_TEST. Pindah ke
+     * salah satu dari ini wajib lewat gate online test verification. */
+    public const POST_ONLINE_TEST_STAGES = [
+        'INTERVIEW_HR', 'INTERVIEW_USER', 'OFFER', 'HIRED',
+    ];
+
     /**
      * Move candidate ke stage baru. Tutup stage lama (kalau masih PENDING),
      * buat row stage baru dengan PENDING, update candidate.current_stage.
+     *
+     * Sprint 23+ — gate ONLINE_TEST: kalau kandidat punya assignment online
+     * test yang belum selesai (status != COMPLETED) atau belum di-grade
+     * tuntas (best_result PENDING/REVIEW), tolak pemindahan ke stage di
+     * atas online test (INTERVIEW_HR / INTERVIEW_USER / OFFER / HIRED)
+     * supaya HR tidak accidentally lewatkan tahap test atau review-nya.
      */
     public function moveStage(int $candidateId, string $newStage, array $params = []): int
     {
@@ -76,6 +94,16 @@ class RecruitmentService
             throw new \RuntimeException(
                 "Candidate sudah di stage final {$cand['current_stage']}, tidak bisa kembali ke {$newStage}"
             );
+        }
+
+        // Sprint 23+ — verify online test selesai sebelum boleh maju ke
+        // stage post-test. Allow REJECTED/WITHDRAWN tanpa check (HR bisa
+        // tolak kapan saja).
+        if (in_array($newStage, self::POST_ONLINE_TEST_STAGES, true)) {
+            $status = $this->onlineTestCompletionStatus($candidateId);
+            if ($status['has_assignments'] && ! $status['all_done']) {
+                throw new \RuntimeException($status['blocker_reason']);
+            }
         }
 
         $now = date('Y-m-d H:i:s');
@@ -116,6 +144,120 @@ class RecruitmentService
         ]);
 
         return $stageId;
+    }
+
+    /**
+     * Sprint 23+ — verifikasi status semua online_test_assignments milik
+     * kandidat. Dipakai sebagai gate sebelum HR boleh maju dari stage
+     * ONLINE_TEST ke stage berikutnya.
+     *
+     * Aturan:
+     *   - Kalau kandidat tidak punya assignment sama sekali → boleh lewat
+     *     (asumsi posisi ini memang tidak butuh online test).
+     *   - Kalau ada assignment dengan status PENDING/IN_PROGRESS → blocked
+     *     (kandidat belum mengerjakan / sedang mengerjakan).
+     *   - Kalau ada assignment status COMPLETED tapi best_result masih
+     *     PENDING/REVIEW → blocked (HR belum review essay/manual grade).
+     *   - Status EXPIRED/CANCELLED tidak block — anggap sudah selesai
+     *     (mungkin kandidat tidak mengerjakan tepat waktu, HR sengaja batal).
+     *
+     * @return array{
+     *   has_assignments: bool,
+     *   all_done: bool,
+     *   pending: int,
+     *   in_progress: int,
+     *   awaiting_review: int,
+     *   blocker_reason: string|null,
+     * }
+     */
+    public function onlineTestCompletionStatus(int $candidateId): array
+    {
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('online_test_assignments')) {
+            return [
+                'has_assignments' => false,
+                'all_done'        => true,
+                'pending'         => 0,
+                'in_progress'     => 0,
+                'awaiting_review' => 0,
+                'blocker_reason'  => null,
+            ];
+        }
+        $rows = $db->table('online_test_assignments ota')
+            ->select('ota.id, ota.status, ota.best_result,'
+                . ' ot.name AS test_name')
+            ->join('online_tests ot', 'ot.id = ota.online_test_id', 'left')
+            ->where('ota.candidate_id', $candidateId)
+            ->get()->getResultArray();
+
+        return self::analyzeOnlineTestRows($rows);
+    }
+
+    /**
+     * Pure analyzer untuk daftar assignment online test seorang kandidat.
+     * Dipisah dari query DB supaya bisa di-unit-test tanpa setup migrasi.
+     *
+     * @param array<int, array{status?: string, best_result?: string|null, test_name?: string|null}> $rows
+     * @return array{
+     *   has_assignments: bool,
+     *   all_done: bool,
+     *   pending: int,
+     *   in_progress: int,
+     *   awaiting_review: int,
+     *   blocker_reason: string|null,
+     * }
+     */
+    public static function analyzeOnlineTestRows(array $rows): array
+    {
+        if (empty($rows)) {
+            return [
+                'has_assignments' => false,
+                'all_done'        => true,
+                'pending'         => 0,
+                'in_progress'     => 0,
+                'awaiting_review' => 0,
+                'blocker_reason'  => null,
+            ];
+        }
+
+        $pending = 0;
+        $inProgress = 0;
+        $awaitingReview = 0;
+        $blockers = [];
+        foreach ($rows as $r) {
+            $status = (string) ($r['status'] ?? '');
+            $result = (string) ($r['best_result'] ?? 'PENDING');
+            $testName = (string) ($r['test_name'] ?? 'Online Test');
+            if ($status === 'PENDING') {
+                $pending++;
+                $blockers[] = "{$testName}: belum dikerjakan kandidat";
+            } elseif ($status === 'IN_PROGRESS') {
+                $inProgress++;
+                $blockers[] = "{$testName}: sedang dikerjakan";
+            } elseif ($status === 'COMPLETED' && in_array($result, ['PENDING', 'REVIEW'], true)) {
+                $awaitingReview++;
+                $blockers[] = "{$testName}: menunggu review HR (essay/manual grading)";
+            }
+            // EXPIRED & CANCELLED tidak block
+        }
+
+        $allDone = ($pending + $inProgress + $awaitingReview) === 0;
+        $reason = null;
+        if (! $allDone) {
+            $reason = 'Tidak bisa maju ke stage berikutnya — online test belum selesai: '
+                . implode('; ', array_slice($blockers, 0, 3))
+                . (count($blockers) > 3 ? ' (+' . (count($blockers) - 3) . ' lainnya)' : '')
+                . '.';
+        }
+
+        return [
+            'has_assignments' => true,
+            'all_done'        => $allDone,
+            'pending'         => $pending,
+            'in_progress'     => $inProgress,
+            'awaiting_review' => $awaitingReview,
+            'blocker_reason'  => $reason,
+        ];
     }
 
     /**
@@ -215,10 +357,75 @@ class RecruitmentService
             'updated_at'        => $now,
         ];
 
+        // ─── Payroll-essential overrides (Sprint 23+) ────────────────
+        // Saat HR melakukan hire, form sekarang sekalian capture data
+        // payroll dasar supaya periode payroll pertama bisa langsung
+        // di-calculate tanpa harus edit profil employee dulu. Field
+        // sensitif (NPWP, rekening bank) di-encrypt at-rest pakai
+        // EncryptionService — sama dengan flow di EmployeeController.
+        $enc = Services::encryption();
+        $employeeCols = $db->getFieldNames('employees');
+        if (in_array('job_grade_id', $employeeCols, true) && isset($employeeOverrides['job_grade_id'])) {
+            $insert['job_grade_id'] = (int) $employeeOverrides['job_grade_id'] ?: null;
+        }
+        if (in_array('manager_id', $employeeCols, true) && isset($employeeOverrides['manager_id'])) {
+            $insert['manager_id'] = (int) $employeeOverrides['manager_id'] ?: null;
+        }
+        if (in_array('probation_end_date', $employeeCols, true) && isset($employeeOverrides['probation_end_date'])) {
+            $insert['probation_end_date'] = $employeeOverrides['probation_end_date'] ?: null;
+        }
+        if (in_array('contract_end_date', $employeeCols, true) && isset($employeeOverrides['contract_end_date'])) {
+            $insert['contract_end_date'] = $employeeOverrides['contract_end_date'] ?: null;
+        }
+        if (in_array('ptkp_status', $employeeCols, true) && ! empty($employeeOverrides['ptkp_status'])) {
+            $insert['ptkp_status'] = (string) $employeeOverrides['ptkp_status'];
+        }
+        if (in_array('tax_method', $employeeCols, true) && ! empty($employeeOverrides['tax_method'])) {
+            $insert['tax_method'] = (string) $employeeOverrides['tax_method'];
+        }
+        if (in_array('pph21_method', $employeeCols, true) && ! empty($employeeOverrides['pph21_method'])) {
+            $insert['pph21_method'] = (string) $employeeOverrides['pph21_method'];
+        }
+        // NPWP — override eksplisit menang dari carry-over candidate.
+        // Encrypt sebelum disimpan. Empty string → biarkan null supaya
+        // tidak ter-encrypt jadi ciphertext kosong.
+        if (array_key_exists('npwp', $employeeOverrides)) {
+            $npwp = trim((string) $employeeOverrides['npwp']);
+            if (in_array('npwp_encrypted', $employeeCols, true)) {
+                $insert['npwp_encrypted'] = $npwp !== '' ? $enc->encrypt($npwp) : null;
+            }
+        }
+        if (array_key_exists('bpjs_kesehatan_no', $employeeOverrides)
+            && in_array('bpjs_kesehatan_no', $employeeCols, true)) {
+            $insert['bpjs_kesehatan_no'] = trim((string) $employeeOverrides['bpjs_kesehatan_no']) ?: null;
+        }
+        if (array_key_exists('bpjs_tk_no', $employeeOverrides)
+            && in_array('bpjs_tk_no', $employeeCols, true)) {
+            $insert['bpjs_tk_no'] = trim((string) $employeeOverrides['bpjs_tk_no']) ?: null;
+        }
+        if (array_key_exists('bpjs_kesehatan_class', $employeeOverrides)
+            && in_array('bpjs_kesehatan_class', $employeeCols, true)) {
+            $cls = (int) $employeeOverrides['bpjs_kesehatan_class'];
+            $insert['bpjs_kesehatan_class'] = in_array($cls, [1, 2, 3], true) ? $cls : 1;
+        }
+        if (array_key_exists('bank_name', $employeeOverrides)
+            && in_array('bank_name', $employeeCols, true)) {
+            $insert['bank_name'] = trim((string) $employeeOverrides['bank_name']) ?: null;
+        }
+        if (array_key_exists('bank_account', $employeeOverrides)) {
+            $acc = trim((string) $employeeOverrides['bank_account']);
+            if (in_array('bank_account_encrypted', $employeeCols, true)) {
+                $insert['bank_account_encrypted'] = $acc !== '' ? $enc->encrypt($acc) : null;
+            }
+        }
+        if (array_key_exists('bank_account_holder', $employeeOverrides)
+            && in_array('bank_account_holder', $employeeCols, true)) {
+            $insert['bank_account_holder'] = trim((string) $employeeOverrides['bank_account_holder']) ?: null;
+        }
+
         // Carry-over field standar HR Indonesia kalau tabel `employees`
         // sudah punya kolomnya — pakai array_intersect_key supaya aman
         // di environment yang belum migrate field-field tersebut.
-        $employeeCols = $db->getFieldNames('employees');
         // Map candidate.marital_status (BELUM_KAWIN/KAWIN/...) → PTKP code
         // (TK0/K0/...) yang dipakai tabel employees. Default 0 tanggungan;
         // HR bisa edit di profil employee setelah hire.
@@ -239,12 +446,11 @@ class RecruitmentService
             'nationality'    => $cand['nationality']    ?? null,
             'nik'            => $cand['nik']            ?? null,
             'ktp_number'     => $cand['nik']            ?? null,
-            'npwp'           => $cand['npwp']           ?? null,
             'kk_number'      => $cand['kk_number']      ?? null,
-            'bpjs_kesehatan_no' => $cand['bpjs_kesehatan_no'] ?? null,
-            'bpjs_tk_no'     => $cand['bpjs_tk_no']     ?? null,
             'city'           => $cand['city']           ?? null,
             'province'       => $cand['province']       ?? null,
+            // Sprint 23+ — extended profile
+            'blood_type'     => $cand['blood_type']     ?? null,
             'last_education_level'       => $cand['last_education_level']       ?? null,
             'last_education_institution' => $cand['last_education_institution'] ?? null,
             'last_education_major'       => $cand['last_education_major']       ?? null,
@@ -255,6 +461,73 @@ class RecruitmentService
             if ($val !== null && in_array($col, $employeeCols, true) && ! isset($insert[$col])) {
                 $insert[$col] = $val;
             }
+        }
+
+        // Carry-over PII payroll fields dari candidate (kalau belum di-set
+        // via overrides dari hire form). NPWP & rekening bank harus
+        // di-encrypt; nomor BPJS plain text. Hanya carry-over kalau
+        // override-nya belum supply value (atau key tidak ada di payload).
+        if (! isset($insert['npwp_encrypted'])
+            && ! empty($cand['npwp'])
+            && in_array('npwp_encrypted', $employeeCols, true)) {
+            $insert['npwp_encrypted'] = $enc->encrypt((string) $cand['npwp']);
+        }
+        if (! isset($insert['bpjs_kesehatan_no'])
+            && ! empty($cand['bpjs_kesehatan_no'])
+            && in_array('bpjs_kesehatan_no', $employeeCols, true)) {
+            $insert['bpjs_kesehatan_no'] = (string) $cand['bpjs_kesehatan_no'];
+        }
+        if (! isset($insert['bpjs_tk_no'])
+            && ! empty($cand['bpjs_tk_no'])
+            && in_array('bpjs_tk_no', $employeeCols, true)) {
+            $insert['bpjs_tk_no'] = (string) $cand['bpjs_tk_no'];
+        }
+
+        // Sprint 23+ — carry-over additional payroll/identity fields
+        // yang dikumpulkan via Career Portal application form. Field-field
+        // ini opsional di apply, jadi cek dulu apakah ada di candidate row
+        // & belum diset oleh override hire form.
+        if (! isset($insert['postal_code'])
+            && ! empty($cand['postal_code'])
+            && in_array('postal_code', $employeeCols, true)) {
+            $insert['postal_code'] = (string) $cand['postal_code'];
+        }
+        if (! isset($insert['bank_name'])
+            && ! empty($cand['bank_name'])
+            && in_array('bank_name', $employeeCols, true)) {
+            $insert['bank_name'] = (string) $cand['bank_name'];
+        }
+        if (! isset($insert['bank_account_encrypted'])
+            && ! empty($cand['bank_account_number'])
+            && in_array('bank_account_encrypted', $employeeCols, true)) {
+            $insert['bank_account_encrypted'] = $enc->encrypt((string) $cand['bank_account_number']);
+        }
+        if (! isset($insert['bank_account_holder'])
+            && ! empty($cand['bank_account_holder'])
+            && in_array('bank_account_holder', $employeeCols, true)) {
+            $insert['bank_account_holder'] = (string) $cand['bank_account_holder'];
+        }
+        // PTKP dari kandidat menang dari mapping otomatis dari marital_status
+        // kalau dia sudah eksplisit isi (mis. K2 untuk yang punya 2 anak).
+        if (! isset($insert['ptkp_status'])
+            && ! empty($cand['ptkp_status'])
+            && in_array('ptkp_status', $employeeCols, true)) {
+            $insert['ptkp_status'] = (string) $cand['ptkp_status'];
+        }
+        // Emergency contacts
+        foreach (['emergency_contact_name', 'emergency_contact_phone'] as $col) {
+            if (! isset($insert[$col])
+                && ! empty($cand[$col])
+                && in_array($col, $employeeCols, true)) {
+                $insert[$col] = (string) $cand[$col];
+            }
+        }
+        // emergency_contact_relation di candidates ('ORANG_TUA' dst) →
+        // employees pakai kolom `emergency_contact_rel` (alias).
+        if (! isset($insert['emergency_contact_rel'])
+            && ! empty($cand['emergency_contact_relation'])
+            && in_array('emergency_contact_rel', $employeeCols, true)) {
+            $insert['emergency_contact_rel'] = (string) $cand['emergency_contact_relation'];
         }
 
         $db->table('employees')->insert($insert);
@@ -272,6 +545,85 @@ class RecruitmentService
             'converted_at'          => $now,
             'updated_at'            => $now,
         ]);
+
+        // Sprint 2 — Probation auto-tracking (HIRE-1)
+        // Untuk PKWTT, auto-set probation_end_date = join_date + 3 bulan
+        // sesuai UU 13/2003 Pasal 60. Untuk PKWT/MAGANG/OUTSOURCING set NA.
+        // Best-effort: kegagalan tidak boleh blok hire flow.
+        try {
+            Services::probation()->applyDefaults($employeeId);
+        } catch (\Throwable $e) {
+            log_message('warning', "Probation defaults apply failed for employee #{$employeeId}: " . $e->getMessage());
+        }
+
+        // Sprint 5 — MPP-driven onboarding planning (job_grade, supervisor,
+        // manager + asset pre-allocation + saldo cuti gender-aware).
+        // Field-field ini di-plan saat MPP submission oleh requestor, jadi
+        // saat hire HR tidak perlu cari ulang. Best-effort untuk semua
+        // sub-step — kegagalan satu langkah tidak boleh blok hire flow,
+        // hanya logged & jadi action item HR di onboarding board.
+        $planningResult = ['job_grade_id' => null, 'supervisor_id' => null, 'manager_id' => null];
+        $leaveSeed = ['seeded' => 0, 'skipped_gender' => 0];
+        $assetPrealloc = ['pre_allocated' => 0, 'unfulfilled' => 0, 'intent_only' => 0];
+        try {
+            $planSvc = Services::onboardingPlan();
+            $planningResult = $planSvc->applyPlanningToEmployee(
+                $employeeId,
+                isset($cand['job_posting_id']) ? (int) $cand['job_posting_id'] : null,
+                $employeeOverrides
+            );
+        } catch (\Throwable $e) {
+            log_message('warning', "applyPlanningToEmployee failed for #{$employeeId}: " . $e->getMessage());
+        }
+
+        // Sprint 6 — Cost Center: resolve dan apply ke employee row.
+        // Prioritas: override eksplisit → posting.cost_center_id (carry-over MPP)
+        // → department.default → branch.default → company root.
+        try {
+            $empCols = $db->getFieldNames('employees');
+            if (in_array('cost_center_id', $empCols, true)) {
+                // Build override chain: cek posting punya cost_center_id?
+                $postingCcId = null;
+                if (! empty($cand['job_posting_id'])) {
+                    $postRow = $db->table('job_postings')
+                        ->select('cost_center_id')
+                        ->where('id', (int) $cand['job_posting_id'])
+                        ->get()->getRowArray();
+                    if ($postRow && ! empty($postRow['cost_center_id'])) {
+                        $postingCcId = (int) $postRow['cost_center_id'];
+                    }
+                }
+                $ccOverrides = [];
+                if (! empty($employeeOverrides['cost_center_id'])) {
+                    $ccOverrides['cost_center_id'] = (int) $employeeOverrides['cost_center_id'];
+                } elseif ($postingCcId) {
+                    $ccOverrides['cost_center_id'] = $postingCcId;
+                }
+                $resolvedCc = Services::costCenter()->resolveForEmployee($employeeId, $ccOverrides);
+                if ($resolvedCc) {
+                    $db->table('employees')->where('id', $employeeId)->update([
+                        'cost_center_id' => $resolvedCc,
+                        'updated_at'     => $now,
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            log_message('warning', "Cost center resolve for #{$employeeId} failed: " . $e->getMessage());
+        }
+        try {
+            $leaveSeed = Services::onboardingPlan()->seedInitialLeaveBalances($employeeId);
+        } catch (\Throwable $e) {
+            log_message('warning', "seedInitialLeaveBalances failed for #{$employeeId}: " . $e->getMessage());
+        }
+        try {
+            $assetPrealloc = Services::onboardingPlan()->preAllocateAssetsForEmployee(
+                $employeeId,
+                isset($cand['job_posting_id']) ? (int) $cand['job_posting_id'] : null,
+                (int) ($employeeOverrides['_actor_user_id'] ?? 0) ?: $employeeId
+            );
+        } catch (\Throwable $e) {
+            log_message('warning', "preAllocateAssetsForEmployee failed for #{$employeeId}: " . $e->getMessage());
+        }
 
         // Trigger ONBOARD_DEFAULT + auto-complete tasks yang datanya sudah
         // lengkap dari Career Portal application (SUBMIT_DOCS, NPWP_VERIFY,
@@ -317,6 +669,14 @@ class RecruitmentService
             'user_email'           => $autoResult['user_email']   ?? null,
             'temp_password'        => $autoResult['temp_password'] ?? null,
             'auto_completed_tasks' => (int) ($autoResult['auto_completed'] ?? 0),
+            // Sprint 5 — onboarding planning summary, dipakai HR di response
+            // hire untuk lihat apa saja yang sudah otomatis ter-set.
+            'planning'             => $planningResult,
+            'leave_seeded'         => (int) ($leaveSeed['seeded'] ?? 0),
+            'leave_skipped_gender' => (int) ($leaveSeed['skipped_gender'] ?? 0),
+            'assets_pre_allocated' => (int) ($assetPrealloc['pre_allocated'] ?? 0),
+            'assets_intent_only'   => (int) ($assetPrealloc['intent_only'] ?? 0),
+            'assets_unfulfilled'   => (int) ($assetPrealloc['unfulfilled'] ?? 0),
         ];
     }
 

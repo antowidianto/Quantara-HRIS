@@ -229,8 +229,68 @@ class ManpowerController extends ApiController
             'updated_at'                => $now,
         ];
 
+        // Sprint 5 — onboarding planning fields. Hanya disimpan kalau
+        // schema sudah migrate (cek getFieldNames). Mempertahankan
+        // backward-compat dengan instance yang belum jalan migration 56.
+        $mppCols = $db->getFieldNames('manpower_requests');
+        if (in_array('job_grade_id', $mppCols, true)) {
+            $insert['job_grade_id'] = ! empty($data['job_grade_id']) ? (int) $data['job_grade_id'] : null;
+        }
+        if (in_array('proposed_supervisor_employee_id', $mppCols, true)) {
+            $insert['proposed_supervisor_employee_id'] =
+                ! empty($data['proposed_supervisor_employee_id'])
+                    ? (int) $data['proposed_supervisor_employee_id'] : null;
+        }
+        if (in_array('proposed_manager_employee_id', $mppCols, true)) {
+            $insert['proposed_manager_employee_id'] =
+                ! empty($data['proposed_manager_employee_id'])
+                    ? (int) $data['proposed_manager_employee_id'] : null;
+        }
+
+        // Sprint 6 — Cost Center: di-set explisit oleh requestor atau
+        // resolve otomatis dari department.default_cost_center_id atau
+        // branch.default_cost_center_id. Validate kalau eksplisit di-set.
+        if (in_array('cost_center_id', $mppCols, true)) {
+            $explicitCc = ! empty($data['cost_center_id']) ? (int) $data['cost_center_id'] : null;
+            if ($explicitCc) {
+                try {
+                    Services::costCenter()->assertValidForCompany($explicitCc, $companyId);
+                    $insert['cost_center_id'] = $explicitCc;
+                } catch (\Throwable $e) {
+                    return $this->fail($e->getMessage(), 422);
+                }
+            } else {
+                // Auto-resolve dari dept/branch saat create — tidak fatal
+                // kalau gagal (cost center bisa di-set HR via edit).
+                try {
+                    $insert['cost_center_id'] = Services::costCenter()
+                        ->resolveForRequestData($companyId, $insert);
+                } catch (\Throwable $e) {
+                    log_message('warning', 'MPP cost_center auto-resolve failed: ' . $e->getMessage());
+                }
+            }
+        }
+
         $db->table('manpower_requests')->insert($insert);
         $id = (int) $db->insertID();
+
+        // Sprint 5 — sync planned assets list dari payload (best-effort,
+        // jangan break create kalau planning service punya error)
+        $plannedAssets = isset($data['planned_assets']) && is_array($data['planned_assets'])
+            ? $data['planned_assets'] : [];
+        if (! empty($plannedAssets)) {
+            try {
+                $syncResult = Services::onboardingPlan()->syncMppPlannedAssets(
+                    $id, $plannedAssets, $this->userId()
+                );
+                if (! empty($syncResult['errors'])) {
+                    log_message('warning', 'MPP planned assets validation errors: '
+                        . json_encode($syncResult['errors']));
+                }
+            } catch (\Throwable $e) {
+                log_message('warning', "MPP planned assets sync failed: " . $e->getMessage());
+            }
+        }
 
         Services::audit()->forModule('RECRUITMENT')->logCreate('manpower_request', $id, $insert,
             "MPP baru: {$insert['reference_number']} - {$insert['proposed_title']} ({$type}, qty {$insert['headcount']})");
@@ -278,7 +338,27 @@ class ManpowerController extends ApiController
             'request_type','reason','replacement_for_employee_id',
             'headcount','employment_type','salary_min','salary_max',
             'target_start_date','justification','job_description','requirements','notes',
+            // Sprint 5 — planning fields (whitelisted; null-able)
+            'job_grade_id','proposed_supervisor_employee_id','proposed_manager_employee_id',
+            // Sprint 6 — cost center
+            'cost_center_id',
         ]));
+        // Coerce planning IDs to int|null untuk konsistensi DB.
+        foreach (['job_grade_id','proposed_supervisor_employee_id','proposed_manager_employee_id','cost_center_id'] as $k) {
+            if (array_key_exists($k, $update)) {
+                $update[$k] = ! empty($update[$k]) ? (int) $update[$k] : null;
+            }
+        }
+        // Validasi cost_center_id kalau di-set
+        if (! empty($update['cost_center_id'])) {
+            try {
+                Services::costCenter()->assertValidForCompany(
+                    (int) $update['cost_center_id'], (int) $row['company_id']
+                );
+            } catch (\Throwable $e) {
+                return $this->fail($e->getMessage(), 422);
+            }
+        }
 
         // Sanitize enum-like fields
         if (isset($update['request_type'])) {
@@ -304,8 +384,88 @@ class ManpowerController extends ApiController
         $update['updated_at'] = date('Y-m-d H:i:s');
 
         \Config\Database::connect()->table('manpower_requests')->where('id', (int) $id)->update($update);
+
+        // Sprint 5 — kalau payload punya planned_assets, sync ulang.
+        if (isset($data['planned_assets']) && is_array($data['planned_assets'])) {
+            try {
+                $syncResult = Services::onboardingPlan()->syncMppPlannedAssets(
+                    (int) $id, $data['planned_assets'], $this->userId()
+                );
+                if (! empty($syncResult['errors'])) {
+                    return $this->fail([
+                        'message' => 'Beberapa baris asset tidak valid',
+                        'errors'  => $syncResult['errors'],
+                    ], 422);
+                }
+            } catch (\Throwable $e) {
+                log_message('warning', "MPP planned assets sync failed: " . $e->getMessage());
+            }
+        }
+
         Services::audit()->forModule('RECRUITMENT')->logUpdate('manpower_request', (int) $id, $row, $update);
         return $this->ok(null, 'Updated');
+    }
+
+    /**
+     * Sprint 5 — list planned assets untuk satu MPP.
+     * Endpoint khusus supaya UI bisa lazy-load saat membuka detail.
+     */
+    public function plannedAssets($id = null)
+    {
+        if (! $this->canView()) return $this->fail('Forbidden', 403);
+        $row = $this->loadOrFail((int) $id);
+        if (! $row) return $this->response;
+
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('manpower_request_assets')) {
+            return $this->ok([]);
+        }
+        $rows = $db->table('manpower_request_assets mra')
+            ->select('mra.*, a.asset_number, a.name AS asset_name, a.status AS asset_status, a.condition AS asset_condition')
+            ->join('assets a', 'a.id = mra.asset_id', 'left')
+            ->where('mra.manpower_request_id', (int) $id)
+            ->orderBy('mra.id', 'ASC')
+            ->get()->getResultArray();
+        return $this->ok($rows);
+    }
+
+    /**
+     * Sprint 5 — replace daftar planned asset untuk satu MPP.
+     * Body: { plans: [{category, name, brand_model_pref?, asset_id?, is_required?, notes?}, ...] }
+     * Hanya boleh saat MPP DRAFT atau SUBMITTED.
+     */
+    public function syncPlannedAssets($id = null)
+    {
+        if (! $this->canSubmit()) return $this->fail('Forbidden', 403);
+        $row = $this->loadOrFail((int) $id);
+        if (! $row) return $this->response;
+        if ((int) $row['requested_by_user_id'] !== $this->userId() && ! $this->tenant()->isSuperAdmin()) {
+            return $this->fail('Hanya pengaju yang bisa mengubah planned assets MPP ini', 403);
+        }
+
+        $data  = $this->getJsonInput();
+        $plans = isset($data['plans']) && is_array($data['plans']) ? $data['plans'] : [];
+        try {
+            $result = Services::onboardingPlan()->syncMppPlannedAssets(
+                (int) $id, $plans, $this->userId()
+            );
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        if (! empty($result['errors'])) {
+            return $this->fail([
+                'message' => 'Beberapa baris asset tidak valid',
+                'errors'  => $result['errors'],
+            ], 422);
+        }
+
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'mpp.sync_planned_assets', entity: 'manpower_request', entityId: (int) $id,
+            after: ['inserted' => $result['inserted']],
+            description: "Sync planned assets MPP {$row['reference_number']}: {$result['inserted']} item",
+            severity: 'NOTICE'
+        );
+        return $this->ok($result, 'Planned assets updated');
     }
 
     public function delete($id = null)

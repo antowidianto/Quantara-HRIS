@@ -971,7 +971,27 @@ function statusBadgeClass(s) {
                   <div class="field">
                     <label class="label">Akhir Probation</label>
                     <input v-if="isEditing" v-model="form.probation_end_date" type="date" class="input" />
-                    <div v-else class="value">{{ employee?.probation_end_date ? fmtDate(employee.probation_end_date) : '—' }}</div>
+                    <div v-else>
+                      <div class="value">{{ employee?.probation_end_date ? fmtDate(employee.probation_end_date) : '—' }}</div>
+                      <!-- Sprint 2 / HIRE-1: probation status badge & quick link -->
+                      <div v-if="employee?.probation_end_date && employee?.probation_status"
+                        class="mt-1 flex items-center gap-2 flex-wrap text-xs">
+                        <span :class="[
+                          'px-2 py-0.5 rounded-full font-medium',
+                          employee.probation_status === 'PASSED' ? 'bg-emerald-100 text-emerald-700' : '',
+                          employee.probation_status === 'FAILED' ? 'bg-rose-100 text-rose-700' : '',
+                          employee.probation_status === 'EXTENDED' ? 'bg-amber-100 text-amber-700' : '',
+                          employee.probation_status === 'ONGOING' ? 'bg-blue-100 text-blue-700' : '',
+                        ]">
+                          {{ employee.probation_status }}
+                        </span>
+                        <router-link v-if="employee.probation_status === 'ONGOING'"
+                          to="/hr/probation"
+                          class="text-blue-600 hover:underline">
+                          → Buka Probation Tracker untuk decision
+                        </router-link>
+                      </div>
+                    </div>
                   </div>
                   <div class="field">
                     <label class="label">Akhir Kontrak</label>

@@ -73,6 +73,37 @@ class PerformanceController extends ApiController
         return $this->ok($b->orderBy('start_date', 'DESC')->get()->getResultArray());
     }
 
+    /**
+     * Normalize a nullable date input. MySQL DATE/DATETIME tidak terima
+     * empty string `''` — harus betul-betul `null`. Frontend HTML `<input
+     * type="date">` yang dikosongkan kirim `''`, jadi kita rapikan di sini.
+     *
+     * Sekalian validasi format YYYY-MM-DD dan kewajaran tanggal (mis.
+     * '2026-13-40' lolos strtotime tapi salah). Mengembalikan:
+     *   - null  bila input null/empty/whitespace
+     *   - string YYYY-MM-DD bila valid
+     *   - throws \InvalidArgumentException dengan pesan ber-konteks bila
+     *     input ada tapi format-nya rusak (caller convert ke 422).
+     */
+    private function nullableDate($value, string $fieldLabel): ?string
+    {
+        if ($value === null) return null;
+        $v = trim((string) $value);
+        if ($v === '') return null;
+        // Format wajib YYYY-MM-DD dgn checkdate untuk reject 2026-02-31 dst
+        if (! preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m)) {
+            throw new \InvalidArgumentException(
+                "Format {$fieldLabel} harus YYYY-MM-DD (contoh 2026-12-31). Diterima: '{$v}'."
+            );
+        }
+        if (! checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+            throw new \InvalidArgumentException(
+                "Tanggal {$fieldLabel} tidak valid: '{$v}'."
+            );
+        }
+        return $v;
+    }
+
     public function createCycle()
     {
         if (! $this->can('performance.manage')) return $this->fail('Forbidden', 403);
@@ -87,11 +118,48 @@ class PerformanceController extends ApiController
         if ($data === null) return $this->response;
 
         if (strtotime($data['end_date']) <= strtotime($data['start_date'])) {
-            return $this->fail('end_date harus > start_date', 422);
+            return $this->fail('Tanggal selesai harus lebih besar dari tanggal mulai cycle.', 422);
+        }
+
+        // Normalisasi tanggal opsional: empty string → NULL, format
+        // dicek sekalian. Surface error sebagai 422 dengan pesan yang
+        // jelas (bukan biarkan MySQL throw "Incorrect date value: ''").
+        try {
+            $goalDeadline   = $this->nullableDate($data['goal_setting_deadline'] ?? null, 'Deadline Set Goal');
+            $reviewStart    = $this->nullableDate($data['review_start_date']     ?? null, 'Periode Review (Mulai)');
+            $reviewEnd      = $this->nullableDate($data['review_end_date']       ?? null, 'Periode Review (Selesai)');
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail($e->getMessage(), 422, 'INVALID_DATE');
+        }
+
+        // Cross-field consistency: review_end >= review_start kalau dua-duanya
+        // diisi. goal_setting_deadline tidak boleh setelah end_date.
+        if ($reviewStart && $reviewEnd && strtotime($reviewEnd) < strtotime($reviewStart)) {
+            return $this->fail(
+                'Tanggal akhir periode review tidak boleh lebih kecil dari tanggal mulai review.',
+                422
+            );
+        }
+        if ($goalDeadline && strtotime($goalDeadline) > strtotime($data['end_date'])) {
+            return $this->fail(
+                'Deadline penetapan goal tidak boleh setelah tanggal selesai cycle.',
+                422
+            );
         }
 
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return $this->response;
+
+        // Cegah duplikasi `code` per company supaya error UNIQUE key
+        // tidak muncul sebagai 500 generic.
+        $existing = $this->db()->table('performance_cycles')
+            ->where('company_id', $companyId)
+            ->where('code', $data['code'])
+            ->where('deleted_at IS NULL')
+            ->countAllResults();
+        if ($existing > 0) {
+            return $this->fail("Kode cycle '{$data['code']}' sudah dipakai.", 422, 'DUPLICATE_CODE');
+        }
 
         $now = date('Y-m-d H:i:s');
         $insert = [
@@ -101,14 +169,27 @@ class PerformanceController extends ApiController
             'cycle_type' => strtoupper($data['cycle_type']),
             'start_date' => $data['start_date'],
             'end_date' => $data['end_date'],
-            'goal_setting_deadline' => $data['goal_setting_deadline'] ?? null,
-            'review_start_date' => $data['review_start_date'] ?? null,
-            'review_end_date' => $data['review_end_date'] ?? null,
+            'goal_setting_deadline' => $goalDeadline,
+            'review_start_date' => $reviewStart,
+            'review_end_date' => $reviewEnd,
             'description' => $data['description'] ?? null,
             'status' => 'DRAFT',
             'created_at' => $now, 'updated_at' => $now,
         ];
-        $this->db()->table('performance_cycles')->insert($insert);
+
+        try {
+            $this->db()->table('performance_cycles')->insert($insert);
+        } catch (\CodeIgniter\Database\Exceptions\DatabaseException $e) {
+            // Last-resort safety net: kalau ada DB error yang lolos
+            // validasi (mis. constraint baru), kasih pesan yang dipakai
+            // user, bukan stack trace SQL.
+            log_message('error', 'createCycle DB error: ' . $e->getMessage());
+            return $this->fail(
+                'Gagal menyimpan cycle. Periksa kembali data tanggal & kode cycle.',
+                422,
+                'DB_ERROR'
+            );
+        }
         $id = (int) $this->db()->insertID();
 
         try {
@@ -136,6 +217,35 @@ class PerformanceController extends ApiController
         if (! $this->can('performance.manage')) return $this->fail('Forbidden', 403);
         $id = (int) $id;
         $data = $this->getJsonInput();
+
+        // Field tanggal opsional — empty string harus jadi NULL supaya
+        // MySQL tidak reject. Field tanggal wajib (start_date/end_date)
+        // tidak boleh dikosongkan saat update.
+        $nullableDateFields = [
+            'goal_setting_deadline' => 'Deadline Set Goal',
+            'review_start_date'     => 'Periode Review (Mulai)',
+            'review_end_date'       => 'Periode Review (Selesai)',
+        ];
+        try {
+            foreach ($nullableDateFields as $field => $label) {
+                if (array_key_exists($field, $data)) {
+                    $data[$field] = $this->nullableDate($data[$field], $label);
+                }
+            }
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail($e->getMessage(), 422, 'INVALID_DATE');
+        }
+        // start_date/end_date wajib non-null kalau dikirim
+        foreach (['start_date', 'end_date'] as $reqDate) {
+            if (array_key_exists($reqDate, $data)) {
+                $v = trim((string) ($data[$reqDate] ?? ''));
+                if ($v === '') {
+                    return $this->fail("Tanggal {$reqDate} tidak boleh dikosongkan.", 422);
+                }
+                $data[$reqDate] = $v;
+            }
+        }
+
         $update = [];
         foreach (['code','name','cycle_type','start_date','end_date','goal_setting_deadline',
                  'review_start_date','review_end_date','description','status'] as $f) {
@@ -143,7 +253,17 @@ class PerformanceController extends ApiController
         }
         if (! $update) return $this->fail('Tidak ada perubahan', 400);
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $this->db()->table('performance_cycles')->where('id', $id)->update($update);
+
+        try {
+            $this->db()->table('performance_cycles')->where('id', $id)->update($update);
+        } catch (\CodeIgniter\Database\Exceptions\DatabaseException $e) {
+            log_message('error', 'updateCycle DB error: ' . $e->getMessage());
+            return $this->fail(
+                'Gagal mengupdate cycle. Periksa kembali data tanggal.',
+                422,
+                'DB_ERROR'
+            );
+        }
         return $this->ok(['id' => $id]);
     }
 

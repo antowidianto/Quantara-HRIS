@@ -209,15 +209,36 @@ class PayrollPeriodController extends ApiController
         $audit = Services::audit()->forModule('PAYROLL')->start();
         try {
             $summary = Services::payroll()->calculatePeriod($id);
+
+            // Audit description berbeda kalau ada pending approvals,
+            // supaya audit trail jelas: hitung dilakukan tetap, tapi ada
+            // transaksi yang diabaikan & menunggu approval.
+            $hasWarnings = ! empty($summary['warnings']);
+            $description = $hasWarnings
+                ? sprintf(
+                    'Menghitung payroll periode #%d dengan %d warning pending approval (%s)',
+                    $id,
+                    count($summary['warnings']),
+                    implode(', ', array_map(
+                        static fn ($w) => "{$w['type']}={$w['count']}",
+                        $summary['warnings']
+                    )),
+                )
+                : 'Menghitung payroll periode #' . $id;
+
             $audit->log(
                 action: 'payroll_period.calculate',
                 entity: 'payroll_period',
                 entityId: $id,
                 after: $summary,
-                description: 'Menghitung payroll periode #' . $id,
-                severity: 'NOTICE'
+                description: $description,
+                severity: $hasWarnings ? 'WARNING' : 'NOTICE'
             );
-            return $this->ok($summary, 'Period calculated');
+
+            $message = $hasWarnings
+                ? 'Period calculated dengan warning — ada pengajuan yang masih PENDING approval'
+                : 'Period calculated';
+            return $this->ok($summary, $message);
         } catch (\Throwable $e) {
             log_message('error', $e->getMessage());
             $audit->logFailure(
@@ -229,6 +250,69 @@ class PayrollPeriodController extends ApiController
             );
             return $this->fail($e->getMessage(), 500);
         }
+    }
+
+    /**
+     * GET /payroll-periods/(:num)/pending-approvals
+     *
+     * Pre-check sebelum HR meng-klik "Hitung". Return daftar transaksi
+     * yang memengaruhi payroll & masih PENDING approval di window
+     * periode ini, beserta pesan warning Bahasa Indonesia per kategori.
+     *
+     * Tidak memodifikasi state — purely read-only.
+     */
+    public function pendingApprovals($id = null)
+    {
+        $id = (int) $id;
+        $db = \Config\Database::connect();
+        $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        if (! $period) return $this->fail('Period not found', 404);
+
+        try {
+            $pending = Services::payroll()->pendingApprovalsForPeriod($id, $period);
+        } catch (\Throwable $e) {
+            log_message('error', 'pendingApprovalsForPeriod failed: ' . $e->getMessage());
+            return $this->fail('Gagal memuat pending approvals: ' . $e->getMessage(), 500);
+        }
+
+        // Bentuk warning string yang sama dengan calculate() supaya UI
+        // bisa render array sederhana tanpa duplikasi logic.
+        $labels = [
+            'overtime'          => 'pengajuan lembur',
+            'attendance_change' => 'koreksi absensi',
+            'reimbursement'     => 'pengajuan reimbursement',
+            'loan'              => 'pengajuan kasbon',
+            'bonus_run'         => 'bonus run',
+        ];
+        $warnings = [];
+        foreach ($pending['counts'] as $type => $count) {
+            if ($count <= 0) continue;
+            $warnings[] = [
+                'type'    => $type,
+                'count'   => $count,
+                'message' => sprintf(
+                    'Ada %d %s yang masih menunggu approval — perhitungan periode ini akan mengabaikan transaksi tersebut sampai di-approve & re-calculate.',
+                    $count,
+                    $labels[$type] ?? $type,
+                ),
+            ];
+        }
+
+        return $this->ok([
+            'period'      => [
+                'id'         => (int) $period['id'],
+                'code'       => $period['code'],
+                'name'       => $period['name'],
+                'start_date' => $period['start_date'],
+                'end_date'   => $period['end_date'],
+                'status'     => $period['status'],
+            ],
+            'total_count' => $pending['total_count'],
+            'counts'      => $pending['counts'],
+            'items'       => $pending['items'],
+            'warnings'    => $warnings,
+            'has_blocker' => false, // info-only; calculate tidak di-block
+        ]);
     }
 
     public function finalize($id = null)

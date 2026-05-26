@@ -104,11 +104,24 @@ class ResignationController extends ApiController
 
     /**
      * GET /api/v1/resignations/{id}
+     *
+     * Sprint 1 — sertakan offboarding clearance status (asset/finance/BPJS)
+     * + paklaring + final settlement supaya UI ResignationReview bisa render
+     * dalam 1 round-trip. Kalau OffboardingService gagal (mis. migration
+     * 51 belum dijalankan), `offboarding` di-set null & UI fallback ke
+     * mode tanpa clearance.
      */
     public function show($id)
     {
         $row = $this->loadRequestForUser((int) $id);
         if (! $row) return $this->fail('Tidak ditemukan atau akses ditolak', 404);
+
+        try {
+            $row['offboarding'] = Services::offboarding()->status((int) $row['id']);
+        } catch (\Throwable $e) {
+            log_message('warning', 'Resignation::show offboarding status failed: ' . $e->getMessage());
+            $row['offboarding'] = null;
+        }
 
         return $this->ok($row);
     }

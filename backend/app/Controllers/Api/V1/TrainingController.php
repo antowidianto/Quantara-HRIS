@@ -391,14 +391,20 @@ class TrainingController extends ApiController
             ->select('c.*, e.full_name AS employee_name, e.employee_number, t.title AS training_title')
             ->join('employees e', 'e.id = c.employee_id')
             ->join('trainings t', 't.id = c.training_id', 'left')
-            ->where('c.deleted_at IS NULL') 
-            ->where('c.employee_id', $this->getMyEmployeeId());
+            ->where('c.deleted_at IS NULL');
 
+        // Bug fix: sebelumnya ada hard-coded filter
+        // `->where('c.employee_id', $this->getMyEmployeeId())` yang membuat
+        // HR/superadmin TIDAK pernah lihat sertifikat karyawan lain meski
+        // punya permission `certificate.view`/`training.view`. Hapus hard-
+        // filter tersebut — privacy scope di bawah yang handle: kalau user
+        // tidak punya permission HR, applyListScope() akan otomatis paksa
+        // employeeColumn = current user's employee_id.
+        //
         // Privacy scope (lihat docs/DATA_PRIVACY.md): tanpa permission HR
         // (`training.view`/`manage`/`certificate.view`), karyawan hanya boleh
         // lihat sertifikatnya sendiri. Sebelumnya `?employee_id=X` mentah
         // → bocor.
-        
         $effective = $this->privacy()->applyListScope(
             $b, module: 'training',
             companyColumn: 'c.company_id',
@@ -407,7 +413,7 @@ class TrainingController extends ApiController
                 ? $this->getMyEmployeeId()
                 : ($requestedEmpId ?: null),
         );
-        
+
         if ($effective === null) return $this->fail('Forbidden', 403);
 
         if ($status) $b->where('c.status', $status);

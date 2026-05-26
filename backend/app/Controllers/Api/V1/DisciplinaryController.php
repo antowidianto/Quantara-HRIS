@@ -200,12 +200,15 @@ class DisciplinaryController extends ApiController
             'updated_at'  => date('Y-m-d H:i:s'),
         ]);
 
-        // Notifikasi karyawan + audit log
+        // Notifikasi karyawan + audit log.
+        // Pakai `withSeverity()` chain karena `logCreate()` shorthand tidak
+        // menerima named param `severity:` (hanya method `log()` yang
+        // terima). Dipisah supaya issuance SP tetap masuk audit dengan
+        // severity WARNING (bukan default INFO).
         $this->notifyEmployee($emp, $insert);
-        Services::audit()->forModule('HR')->logCreate(
+        Services::audit()->forModule('HR')->withSeverity('WARNING')->logCreate(
             'disciplinary_record', $id, $insert,
-            "Menerbitkan {$level} {$referenceNumber} untuk {$emp['full_name']}",
-            severity: 'WARNING'
+            "Menerbitkan {$level} {$referenceNumber} untuk {$emp['full_name']}"
         );
 
         // Sprint 14+ — webhook outbound `disciplinary.sp_issued`

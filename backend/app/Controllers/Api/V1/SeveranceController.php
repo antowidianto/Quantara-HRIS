@@ -252,6 +252,21 @@ class SeveranceController extends ApiController
             'created_at'        => $now,
             'updated_at'        => $now,
         ];
+
+        // Sprint 6 — Cost Center: tag pesangon ke cost center karyawan
+        // sehingga muncul di laporan budget vs actual kategori SEVERANCE.
+        // Resolve chain: override → employee → dept → branch → company root.
+        if (in_array('cost_center_id', $db->getFieldNames('severance_calculations'), true)) {
+            try {
+                $insert['cost_center_id'] = Services::costCenter()->resolveForEmployee(
+                    (int) $emp['id'],
+                    ['cost_center_id' => $data['cost_center_id'] ?? null],
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', 'Severance cost_center resolve failed: ' . $e->getMessage());
+            }
+        }
+
         $db->table('severance_calculations')->insert($insert);
         $id = (int) $db->insertID();
 

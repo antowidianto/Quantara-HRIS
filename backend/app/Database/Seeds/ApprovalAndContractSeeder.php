@@ -269,6 +269,20 @@ class ApprovalAndContractSeeder extends Seeder
                 'body_html'    => self::probationBody(),
                 'footer_html'  => self::footerBody(),
             ],
+            [
+                // Sprint 2 polish — default OFFER_LETTER template untuk
+                // surat penawaran kerja kandidat. Pakai placeholder yang
+                // di-build oleh OfferService::buildLetterContext().
+                'code'         => 'TPL-OFFER',
+                'name'         => 'Surat Penawaran Kerja (Offer Letter)',
+                'contract_type'=> 'OFFER_LETTER',
+                'is_default'   => 1,
+                'description'  => 'Template default surat penawaran kerja untuk kandidat di stage OFFER.',
+                'header_html'  => '<h1>SURAT PENAWARAN KERJA</h1>'
+                    . '<p style="text-align:center"><strong>Nomor: {{offer.number}}</strong></p>',
+                'body_html'    => self::offerLetterBody(),
+                'footer_html'  => self::offerLetterFooter(),
+            ],
         ];
         foreach ($templates as $t) {
             $exists = $this->db->table('contract_templates')
@@ -392,6 +406,100 @@ HTML;
     </td>
   </tr>
 </table>
+HTML;
+    }
+
+    /**
+     * Body offer letter — placeholder mengikuti `OfferService::buildLetterContext()`:
+     *   {{candidate.*}}, {{company.*}}, {{offer.*}}
+     * Allowances rendering pakai loop sederhana (kalau ContractRenderer
+     * support `{{#each}}`); kalau tidak, HR boleh edit manual lewat UI
+     * template editor untuk fine-tune format.
+     */
+    private static function offerLetterBody(): string
+    {
+        return <<<HTML
+<p>Pada hari ini, {{today_long}}, kami dari <strong>{{company.legal_name}}</strong>
+dengan senang hati menyampaikan penawaran kerja kepada:</p>
+
+<table style="margin: 8px 0 16px 24px; width: 80%;">
+  <tr><td style="width:30%">Nama</td><td>: <strong>{{candidate.full_name|upper}}</strong></td></tr>
+  <tr><td>Email</td><td>: {{candidate.email}}</td></tr>
+  <tr><td>Telepon</td><td>: {{candidate.phone}}</td></tr>
+</table>
+
+<p>Berdasarkan hasil seleksi yang telah dilakukan, kami menawarkan posisi kerja
+dengan rincian sebagai berikut:</p>
+
+<h2>1. Jabatan & Lokasi Kerja</h2>
+<table style="margin: 4px 0 8px 24px; width: 80%;">
+  <tr><td style="width:35%">Jabatan</td><td>: <strong>{{position.name}}</strong></td></tr>
+  <tr><td>Departemen</td><td>: {{department.name}}</td></tr>
+  <tr><td>Cabang / Lokasi</td><td>: {{branch.name}}</td></tr>
+</table>
+
+<h2>2. Status Hubungan Kerja</h2>
+<table style="margin: 4px 0 8px 24px; width: 80%;">
+  <tr><td style="width:35%">Tipe Kontrak</td><td>: <strong>{{offer.employment_status}}</strong></td></tr>
+  <tr><td>Tanggal Mulai Kerja</td><td>: {{offer.proposed_join_date|date_id}}</td></tr>
+  <tr><td>Masa Percobaan</td><td>: {{offer.probation_months}} bulan
+      <em>(sesuai UU 13/2003 Pasal 60, max 3 bulan)</em></td></tr>
+</table>
+
+<h2>3. Kompensasi</h2>
+<table style="margin: 4px 0 8px 24px; width: 80%;">
+  <tr><td style="width:35%">Gaji Pokok</td>
+      <td>: <strong>{{offer.basic_salary|currency_id}}</strong> per bulan</td></tr>
+  <tr><td>Bonus Bergabung</td>
+      <td>: {{offer.joining_bonus|currency_id}}</td></tr>
+</table>
+
+<p>Tunjangan dan benefit lain mengikuti kebijakan perusahaan yang berlaku, yang
+akan dijelaskan lebih lanjut pada hari pertama bekerja, antara lain mencakup:</p>
+<ul>
+  <li>BPJS Kesehatan & BPJS Ketenagakerjaan sesuai ketentuan UU SJSN</li>
+  <li>Tunjangan Hari Raya (THR) sesuai PP 36/2021</li>
+  <li>Cuti tahunan 12 hari kerja setelah masa kerja 12 bulan</li>
+  <li>Tunjangan lain mengikuti grade & departemen masing-masing</li>
+</ul>
+
+<h2>4. Persetujuan & Tindak Lanjut</h2>
+<p>Apabila Bapak/Ibu menerima penawaran ini, mohon konfirmasi paling lambat
+<strong>{{offer.response_deadline|date_id}}</strong> melalui portal kandidat
+atau menghubungi tim rekrutmen kami. Setelah konfirmasi diterima, kami akan
+mengirimkan dokumen perjanjian kerja resmi untuk ditandatangani.</p>
+
+<p>Kami sangat mengharapkan Bapak/Ibu bergabung dan berkontribusi bersama tim
+kami. Atas perhatian dan kerja sama Bapak/Ibu, kami sampaikan terima kasih.</p>
+HTML;
+    }
+
+    /**
+     * Footer offer letter — beda dari kontrak biasa karena hanya ditandatangani
+     * oleh perusahaan (kandidat respond via portal, bukan tanda tangan basah
+     * di awal).
+     */
+    private static function offerLetterFooter(): string
+    {
+        return <<<HTML
+<p>&nbsp;</p>
+<table style="border:none; margin-top: 32px;">
+  <tr style="border:none">
+    <td style="border:none; width:50%"></td>
+    <td style="border:none; text-align:left; width:50%">
+      Hormat kami,<br>
+      <strong>{{company.legal_name}}</strong>
+      <br><br><br><br>
+      <strong>Tim Rekrutmen / HR</strong>
+    </td>
+  </tr>
+</table>
+
+<p style="margin-top: 24px; font-size: 10pt; color: #666; text-align: center;">
+Surat penawaran ini diterbitkan secara digital melalui sistem HRIS dan akan
+dikonfirmasi oleh kandidat lewat portal. Status penawaran:
+<strong>{{offer.number}}</strong>.
+</p>
 HTML;
     }
 }
