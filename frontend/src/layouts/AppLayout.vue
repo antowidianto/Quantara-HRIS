@@ -13,6 +13,12 @@ import {
   // Sprint 2 / 4 polish — icons untuk menu baru
   ExclamationTriangleIcon, ChatBubbleLeftRightIcon, DocumentChartBarIcon,
   NoSymbolIcon,
+  // Horizon 1-4 frontend (Sprint 7+) — Talent, Wellbeing, Compensation
+  HomeModernIcon, GiftIcon, FunnelIcon, UserMinusIcon, CalculatorIcon,
+  ShareIcon, AcademicCapIcon, KeyIcon, SparklesIcon, HeartIcon,
+  PresentationChartLineIcon, ScaleIcon,
+  // Tambahan Sprint 7-12 — WhatsApp, Referral, Peer Review
+  ChatBubbleLeftEllipsisIcon, UserGroupIcon, TrophyIcon,
 } from '@heroicons/vue/24/outline'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useI18n } from '@/locales'
@@ -70,9 +76,21 @@ const groups = computed(() => {
         { name: t('nav.items.my_leaves'),           to: '/leaves',                  icon: CalendarDaysIcon },
         { name: t('nav.items.leave_balance'),       to: '/leaves/balance',          icon: CalendarDaysIcon },
         { name: t('nav.items.my_overtimes'),        to: '/overtimes',               icon: ClockIcon },
+        // H1.5 — Pengajuan WFH (self-service)
+        { name: 'Pengajuan WFH',                     to: '/attendance/wfh',          icon: HomeModernIcon },
         { name: t('nav.items.my_payslips'),         to: '/payslips/my',             icon: CurrencyDollarIcon },
         // Sprint 21+ — Self-service riwayat bonus
         { name: 'Riwayat Bonus',                     to: '/bonuses/my',              icon: BanknotesIcon },
+        // H4.4 — Pulse Survey aktif (semua karyawan bisa respond anonim)
+        { name: 'Pulse Survey',                      to: '/hr/pulse-survey',         icon: HeartIcon },
+        // H3.6 — Talent Marketplace (skill self-service + internal job board)
+        { name: 'Talent Marketplace',                to: '/hr/talent-marketplace',   icon: SparklesIcon },
+        // H2.5 — Employee Referral Program (share link + leaderboard)
+        { name: 'Referral Program',                  to: '/recruitment/referral',    icon: TrophyIcon },
+        // H2.3 — Peer Review 360° yang harus saya isi
+        { name: 'Peer Review',                       to: '/performance/peer-review', icon: UserGroupIcon },
+        // H1.6 — Rencana Lembur (pre-approval)
+        { name: 'Rencana Lembur',                    to: '/overtimes/plan',          icon: ClockIcon },
         { name: t('nav.items.approval_inbox'),      to: '/approvals/inbox',         icon: ClipboardDocumentListIcon },
         { name: t('nav.items.approval_delegations'),to: '/approvals/delegations',   icon: ShieldCheckIcon },
         { name: t('nav.items.my_performance'),      to: '/performance/my',          icon: ChartBarIcon },
@@ -126,6 +144,19 @@ const groups = computed(() => {
         { name: t('nav.items.training'),            to: '/training',                                   icon: ClipboardDocumentListIcon,  perm: 'training.view' },
         { name: t('nav.items.certificates'),        to: '/certificates',                               icon: ClipboardDocumentListIcon,  perm: 'certificate.view' },
         { name: t('nav.items.performance'),         to: '/performance',                                icon: ChartBarIcon,               perm: 'performance.view' },
+        // ─── Horizon 1-3 — HR analytics & talent ───────────────
+        // H1.4 Recruitment Funnel — bottleneck pipeline + stale candidates
+        { name: 'Recruitment Funnel',                to: '/recruitment/funnel',                         icon: FunnelIcon,                 perm: 'recruitment.view' },
+        // H2.6 Turnover Analytics — turnover rate + early attrition
+        { name: 'Turnover Analytics',                to: '/hr/turnover-analytics',                      icon: UserMinusIcon,              perm: 'turnover.view' },
+        // H2.2 Goals Cascading Tree — visualisasi alignment goals
+        { name: 'Goals Cascading',                   to: '/performance/goals-tree',                     icon: ShareIcon,                  perm: 'performance.view' },
+        // H3.1 Competency Library — master + position profile + gap
+        { name: 'Competency Library',                to: '/hr/competencies',                            icon: AcademicCapIcon,            perm: 'employee.update' },
+        // H3.2 Succession Planning — critical positions + successor coverage
+        { name: 'Succession Planning',               to: '/hr/succession',                              icon: KeyIcon,                    perm: 'employee.update' },
+        // H2.4 Candidate Scoring Config — bobot kriteria + bulk recompute
+        { name: 'Candidate Scoring',                 to: '/recruitment/candidate-scoring',              icon: ChartBarIcon,               perm: 'recruitment.manage' },
       ].filter(i => ! i.perm || can(i.perm)),
     },
     {
@@ -136,6 +167,11 @@ const groups = computed(() => {
         // Bonus Engine — Sprint 16+ backend, Sprint 19+ UI. Lihat docs/BONUS_ENGINE.md
         { name: 'Bonus Schemes',                to: '/payroll/bonus/schemes',  icon: BanknotesIcon,             perm: 'bonus.manage' },
         { name: 'Bonus Runs',                   to: '/payroll/bonus/runs',     icon: BanknotesIcon,             perm: 'bonus.view' },
+        // ─── Horizon 1-2 — Payroll planning & simulation ───────
+        // H1.8 THR Planning Dashboard — proyeksi total THR per tahun
+        { name: 'THR Planning',                 to: '/payroll/thr-planning',   icon: GiftIcon,                  perm: 'payroll.view' },
+        // H2.7 Payroll Simulation — what-if + compare + reverse THP
+        { name: 'Simulasi Payroll',             to: '/payroll/simulate',       icon: CalculatorIcon,            perm: 'payroll.simulate' },
       ].filter(i => ! i.perm || can(i.perm)),
     },
     {
@@ -170,6 +206,20 @@ const groups = computed(() => {
         { name: 'Compliance Reports',        to: '/hr/compliance-reports', icon: DocumentChartBarIcon, perm: 'compliance.report.view' },
       ].filter(i => ! i.perm || can(i.perm)),
     },
+    // ─── Horizon 4 — Strategic AI & Intelligence Platform ──────
+    {
+      title: 'Intelligence',
+      items: [
+        // H4.1 AI HR Copilot — chat assistant dengan PII redactor
+        { name: 'AI HR Copilot',             to: '/hr/ai-copilot',           icon: SparklesIcon,              perm: 'ai.use' },
+        // H4.4 Pulse Survey aggregates (manage/dashboard) — HR-only
+        { name: 'Pulse Survey Manage',       to: '/hr/pulse-survey?tab=manage', icon: HeartIcon,              perm: 'pulse_survey.manage' },
+        // H4.3 Workforce Scenario Modeling — Monte Carlo
+        { name: 'Workforce Scenarios',       to: '/hr/workforce-scenarios',  icon: PresentationChartLineIcon, perm: 'workforce.simulate' },
+        // H4.5 Compensation Intelligence — compa-ratio, equity, bands
+        { name: 'Compensation Intel',        to: '/hr/compensation-intel',   icon: ScaleIcon,                 perm: 'compensation.analyze' },
+      ].filter(i => ! i.perm || can(i.perm)),
+    },
     {
       title: t('nav.admin'),
       items: [
@@ -179,6 +229,8 @@ const groups = computed(() => {
         { name: t('nav.items.companies'),  to: '/admin/companies',  icon: BuildingOffice2Icon,        superAdmin: true },
         { name: t('nav.items.settings'),   to: '/admin/settings',   icon: Cog6ToothIcon,              perm: 'settings.manage' },
         { name: 'Email Settings',          to: '/admin/email-settings', icon: Cog6ToothIcon,          perm: 'settings.manage' },
+        // H1.9 WhatsApp Provider config
+        { name: 'WhatsApp Settings',       to: '/admin/whatsapp-settings', icon: ChatBubbleLeftEllipsisIcon, perm: 'settings.manage' },
       ].filter(i => (! i.perm || can(i.perm)) && (! i.superAdmin || auth.isSuperAdmin)),
     },
   ].filter(g => g.items.length > 0)

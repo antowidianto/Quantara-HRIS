@@ -31,6 +31,9 @@ const routes = [
       { path: 'profile/:id',                 name: 'candidate-profile',   component: () => import('@/views/Career/CandidateProfile.vue') },
       { path: 'tests/:id',                   name: 'candidate-test-detail', component: () => import('@/views/Career/CandidateTakeTest.vue') },
       { path: 'tests/result/:attemptId',    name: 'candidate-test-result', component: () => import('@/views/Career/CandidateTestResult.vue') },
+      // Sprint 25 / Option C — kandidat self-service review + accept/reject offer
+      { path: 'offers',                      name: 'candidate-offers',        component: () => import('@/views/Career/CandidateOffers.vue') },
+      { path: 'offers/:id',                  name: 'candidate-offer-detail',  component: () => import('@/views/Career/CandidateOfferDetail.vue') },
     ],
   },
 
@@ -85,6 +88,52 @@ const routes = [
       // Approval inbox
       { path: 'approvals/inbox', name: 'approval-inbox', component: () => import('@/views/Approvals/Inbox.vue') },
       { path: 'approvals/delegations', name: 'approval-delegations', component: () => import('@/views/Approvals/MyDelegations.vue') },
+
+      // ─── Horizon 1 (Sprint 7-9 Quick Wins) ───────────────────
+      // H1.5 WFH Mode — pengajuan & approval inbox WFH
+      { path: 'attendance/wfh', name: 'wfh-requests', component: () => import('@/views/Attendance/WfhRequests.vue') },
+      // H1.4 Recruitment Funnel Metrics — bottleneck pipeline + stale candidates
+      { path: 'recruitment/funnel', name: 'recruitment-funnel', component: () => import('@/views/Recruitment/FunnelMetrics.vue') },
+      // H1.8 THR Planning Dashboard — proyeksi total THR per tahun
+      { path: 'payroll/thr-planning', name: 'thr-planning', component: () => import('@/views/Payroll/ThrPlanning.vue') },
+
+      // ─── Horizon 2 (Sprint 10-13 Core Deepening) ─────────────
+      // H2.6 Turnover Analytics — turnover rate, early attrition, regrettable loss
+      { path: 'hr/turnover-analytics', name: 'turnover-analytics', component: () => import('@/views/HR/TurnoverAnalytics.vue') },
+      // H2.7 Payroll Simulation — what-if + compare + reverse THP
+      { path: 'payroll/simulate', name: 'payroll-simulate', component: () => import('@/views/Payroll/PayrollSimulation.vue') },
+      // H2.2 Goals Cascading Tree — visualisasi hierarchy goals
+      { path: 'performance/goals-tree', name: 'goals-tree', component: () => import('@/views/Performance/GoalsTree.vue') },
+
+      // ─── Horizon 3 (Sprint 14-17 Talent Management) ──────────
+      // H3.1 Competency Library — master + position profile + gap analysis
+      { path: 'hr/competencies', name: 'competencies', component: () => import('@/views/HR/CompetencyLibrary.vue') },
+      // H3.2 Succession Planning — critical positions + successor + coverage
+      { path: 'hr/succession', name: 'succession', component: () => import('@/views/HR/SuccessionPlanning.vue') },
+      // H3.6 Talent Marketplace — skills + internal job board + 9-box
+      { path: 'hr/talent-marketplace', name: 'talent-marketplace', component: () => import('@/views/HR/TalentMarketplace.vue') },
+
+      // ─── Horizon 4 (Sprint 19+ Platform Evolution) ───────────
+      // H4.1 AI HR Copilot — chat assistant dengan PII redactor
+      { path: 'hr/ai-copilot', name: 'ai-copilot', component: () => import('@/views/HR/AiCopilot.vue') },
+      // H4.4 Pulse Survey & Wellbeing — anonim eNPS + burnout
+      { path: 'hr/pulse-survey', name: 'pulse-survey', component: () => import('@/views/HR/PulseSurvey.vue') },
+      // H4.3 Workforce Scenarios — Monte Carlo modeling
+      { path: 'hr/workforce-scenarios', name: 'workforce-scenarios', component: () => import('@/views/HR/WorkforceScenarios.vue') },
+      // H4.5 Compensation Intelligence — compa-ratio, equity, bands, benchmarks
+      { path: 'hr/compensation-intel', name: 'compensation-intel', component: () => import('@/views/HR/CompensationIntel.vue') },
+
+      // ─── Tambahan Sprint 7-12 — Quick Wins polish & ESS ────
+      // H1.9 WhatsApp Provider config (admin)
+      { path: 'admin/whatsapp-settings', name: 'whatsapp-settings', component: () => import('@/views/Admin/WhatsAppSettings.vue') },
+      // H2.5 Employee Referral Program — share link + leaderboard
+      { path: 'recruitment/referral', name: 'referral-program', component: () => import('@/views/Recruitment/ReferralProgram.vue') },
+      // H2.3 360° Peer Review — review, nominate, hasil
+      { path: 'performance/peer-review', name: 'peer-review', component: () => import('@/views/Performance/PeerReview.vue') },
+      // H2.4 Candidate Scoring Config — bobot kriteria + bulk recompute
+      { path: 'recruitment/candidate-scoring', name: 'candidate-scoring', component: () => import('@/views/Recruitment/CandidateScoring.vue') },
+      // H1.6 Overtime Pre-Approval Plan — submit rencana + realize
+      { path: 'overtimes/plan', name: 'overtime-plan', component: () => import('@/views/Overtimes/OvertimePlan.vue') },
 
       // Disciplinary (Surat Peringatan)
       { path: 'hr/disciplinary', name: 'disciplinary', component: () => import('@/views/HR/Disciplinary.vue') },

@@ -91,6 +91,14 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('attempts/(:num)/submit',              'CandidateOnlineTestController::submitAttempt/$1');
         $routes->post('attempts/(:num)/event',               'CandidateOnlineTestController::logEvent/$1');
         $routes->get('attempts/(:num)/result',               'CandidateOnlineTestController::attemptResult/$1');
+
+        // Sprint 25 / Option C — Offer self-service
+        // Kandidat review + accept/reject offer-nya sendiri (mirror pola
+        // online test). Audit pakai source CANDIDATE_PORTAL + IP/UA
+        // metadata supaya ada trail forensic kalau ada dispute.
+        $routes->get('offers',                               'CandidateAuthController::listOffers');
+        $routes->get('offers/(:num)',                        'CandidateAuthController::showOffer/$1');
+        $routes->post('offers/(:num)/respond',               'CandidateAuthController::respondToOffer/$1');
     });
 
     // Detail & apply pakai 2 segmen slug
@@ -98,6 +106,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     $routes->get('careers/(:segment)/jobs/(:segment)',        'CareerPublicController::jobDetail/$1/$2');
     $routes->get('careers/(:segment)/jobs',                   'CareerPublicController::listJobs/$1');
     $routes->get('careers/(:segment)',                        'CareerPublicController::landing/$1');
+
+    // ─── Horizon 2 / H2.5 — Referral slug resolver (PUBLIC) ────────
+    // Pelamar klik link `/r/{slug}` → resolve ke job posting / career page.
+    $routes->get('referrals/r/(:segment)',                    'Horizon2Controller::resolveReferralSlug/$1');
 
     // ─── Authenticated routes ────────────────────────────────────────
     $routes->group('', ['filter' => 'jwt'], static function ($routes) {
@@ -868,6 +880,116 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('compliance-reports/runs/(:num)',       'ComplianceReportController::showRun/$1');
         $routes->get('compliance-reports/runs/(:num)/csv',   'ComplianceReportController::exportCsv/$1',
             ['filter' => 'throttle:export']);
+
+        // ─── Horizon 2 (Sprint 11–13) ──────────────────────────────
+        // H2.4 Candidate composite scoring
+        $routes->post('candidates/(:num)/recalculate-score',
+            'Horizon2Controller::recalcCandidateScore/$1');
+        $routes->post('job-postings/(:num)/recalculate-scores',
+            'Horizon2Controller::recalcJobPostingScores/$1');
+
+        // H2.2 Goals cascading
+        $routes->get('performance/goals/tree',
+            'Horizon2Controller::goalsTree');
+        $routes->post('performance/goals/(:num)/recompute-rollup',
+            'Horizon2Controller::recomputeGoalRollup/$1');
+
+        // H2.3 360° peer feedback
+        $routes->post('performance/cycles/(:num)/peer-nominations',
+            'Horizon2Controller::nominatePeer/$1');
+        $routes->get('performance/cycles/(:num)/peer-rating',
+            'Horizon2Controller::peerRating/$1');
+
+        // H2.5 Employee Referral
+        $routes->post('referrals/links',          'Horizon2Controller::createReferralLink');
+        $routes->get('referrals/links/me',        'Horizon2Controller::myReferralLinks');
+        $routes->get('referrals/top-referrers',   'Horizon2Controller::topReferrers');
+
+        // H2.6 Turnover Analytics
+        $routes->get('turnover/snapshot',         'Horizon2Controller::turnoverSnapshot');
+        $routes->post('turnover/snapshot',        'Horizon2Controller::turnoverSnapshotPersist');
+        $routes->get('turnover/trend',            'Horizon2Controller::turnoverTrend');
+
+        // H2.7 Payroll Simulasi (in-memory; no persist)
+        $routes->post('payroll/simulate',         'Horizon2Controller::simulatePayroll');
+        $routes->post('payroll/simulate/compare', 'Horizon2Controller::simulatePayrollCompare');
+        $routes->post('payroll/simulate/reverse', 'Horizon2Controller::simulatePayrollReverse');
+
+        // H2.8 Reimbursement OCR — extract from attachment_path
+        $routes->post('reimbursements/(:num)/ocr-extract',
+            'Horizon2Controller::ocrExtractReimbursement/$1');
+
+        // ─── Horizon 3 (Sprint 14 + 17) — Talent Management ────────
+        // H3.1 Competency Library
+        $routes->get('competencies',                          'Horizon3Controller::listCompetencies');
+        $routes->post('competencies',                         'Horizon3Controller::createCompetency');
+        $routes->get('positions/(:num)/competency-profile',
+            'Horizon3Controller::listPositionProfile/$1');
+        $routes->put('positions/(:num)/competency-profile',
+            'Horizon3Controller::setPositionProfile/$1');
+        $routes->get('employees/(:num)/competency-gap',
+            'Horizon3Controller::competencyGap/$1');
+        $routes->get('employees/(:num)/training-recommendations',
+            'Horizon3Controller::recommendTraining/$1');
+        $routes->post('employee-competency-assessments',
+            'Horizon3Controller::recordAssessment');
+
+        // H3.2 Succession Planning
+        $routes->get('critical-positions',                    'Horizon3Controller::listCriticalPositions');
+        $routes->post('critical-positions',                   'Horizon3Controller::createCriticalPosition');
+        $routes->post('critical-positions/(:num)/successors',
+            'Horizon3Controller::nominateSuccessor/$1');
+        $routes->get('critical-positions/(:num)/successors',
+            'Horizon3Controller::listSuccessors/$1');
+        $routes->post('succession-candidates/(:num)/recompute-readiness',
+            'Horizon3Controller::recomputeReadiness/$1');
+        $routes->get('succession/coverage',                   'Horizon3Controller::successionCoverage');
+
+        // H3.6 Talent Pool & Internal Marketplace
+        $routes->get('employees/(:num)/skills',               'Horizon3Controller::listEmployeeSkills/$1');
+        $routes->post('employees/(:num)/skills',              'Horizon3Controller::declareSkill/$1');
+        $routes->post('employee-skills/(:num)/validate',
+            'Horizon3Controller::validateSkill/$1');
+        $routes->get('internal-job-postings',                 'Horizon3Controller::listInternalPostings');
+        $routes->post('internal-job-postings',                'Horizon3Controller::createInternalPosting');
+        $routes->post('internal-job-postings/(:num)/apply',
+            'Horizon3Controller::applyInternal/$1');
+        $routes->get('internal-job-postings/(:num)/applications',
+            'Horizon3Controller::listInternalApplications/$1');
+        $routes->get('internal-job-postings/(:num)/recommended-candidates',
+            'Horizon3Controller::recommendInternalCandidates/$1');
+        $routes->get('talent-pool/9-box',                     'Horizon3Controller::nineBoxGrid');
+
+        // ─── Horizon 4 (Sprint 19+) — Platform Evolution ───────────
+        // H4.1 AI HR Copilot
+        $routes->get('ai/sessions',                           'Horizon4Controller::listAiSessions');
+        $routes->post('ai/sessions',                          'Horizon4Controller::startAiSession');
+        $routes->get('ai/sessions/(:num)/messages',           'Horizon4Controller::getAiMessages/$1');
+        $routes->post('ai/sessions/(:num)/messages',          'Horizon4Controller::sendAiMessage/$1');
+        $routes->post('ai/sessions/(:num)/archive',           'Horizon4Controller::archiveAiSession/$1');
+
+        // H4.3 Workforce Planning
+        $routes->get('workforce-scenarios',                   'Horizon4Controller::listScenarios');
+        $routes->post('workforce-scenarios',                  'Horizon4Controller::createScenario');
+        $routes->post('workforce-scenarios/(:num)/run',       'Horizon4Controller::runScenario/$1');
+        $routes->post('workforce-scenarios/compare',          'Horizon4Controller::compareScenarios');
+
+        // H4.4 Employee Wellbeing
+        $routes->get('pulse-surveys',                         'Horizon4Controller::listSurveys');
+        $routes->post('pulse-surveys',                        'Horizon4Controller::createSurvey');
+        $routes->post('pulse-surveys/(:num)/open',            'Horizon4Controller::openSurvey/$1');
+        $routes->get('pulse-surveys/(:num)/questions',        'Horizon4Controller::getSurveyQuestions/$1');
+        $routes->post('pulse-surveys/(:num)/respond',         'Horizon4Controller::respondSurvey/$1');
+        $routes->get('pulse-surveys/(:num)/aggregates',       'Horizon4Controller::surveyAggregates/$1');
+        $routes->post('pulse-surveys/(:num)/refresh-aggregates',
+            'Horizon4Controller::refreshSurveyAggregates/$1');
+
+        // H4.5 Compensation Intelligence
+        $routes->get('compensation/compa-ratio',              'Horizon4Controller::compaRatio');
+        $routes->get('compensation/gender-equity',            'Horizon4Controller::genderEquity');
+        $routes->get('compensation/band-recommendations',     'Horizon4Controller::bandRecommendations');
+        $routes->get('salary-benchmarks',                     'Horizon4Controller::listBenchmarks');
+        $routes->post('salary-benchmarks',                    'Horizon4Controller::createBenchmark');
     });
 });
 
