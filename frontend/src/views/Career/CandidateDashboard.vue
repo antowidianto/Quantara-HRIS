@@ -13,6 +13,10 @@ const api = candidateApi()
 const slug = computed(() => route.params.slug)
 const loading = ref(true)
 const data = ref({ account: null, applications: [], tests: [] })
+// Sprint 25 / Option C — count offer SENT yang masih menunggu respon
+// supaya kita bisa tampilkan badge di dashboard. Endpoint terpisah biar
+// /me tetap ringan & call gagal di sini tidak menggagalkan render.
+const pendingOffersCount = ref(0)
 
 onMounted(async () => {
   if (! store.isAuthenticated) {
@@ -26,6 +30,12 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // Best-effort fetch offers count — kalau gagal cuma sembunyikan badge,
+  // tidak perlu error toast karena offer fitur opsional.
+  try {
+    const res = await api.get('/careers/account/offers')
+    pendingOffersCount.value = res.data.data.pending_count || 0
+  } catch (_) { /* ignore */ }
 })
 
 async function logout() {
@@ -104,6 +114,61 @@ function fmtDate(d) {
     <div v-if="loading" class="text-center py-12 text-slate-500">Memuat...</div>
 
     <template v-else>
+      <!-- Sprint 25 / Option C — Quick access cards.
+           Kalau ada offer pending → kartu Penawaran di-highlight dengan
+           gradient amber + count. Kalau tidak ada → kartu netral
+           (warna brand, tanpa badge) supaya kandidat tetap punya cara
+           cepat ke halaman penawaran/history. -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+        <router-link
+          :to="{ name: 'candidate-offers', params: { slug } }"
+          class="block rounded-xl border-2 p-4 hover:shadow-md transition-shadow"
+          :class="pendingOffersCount > 0
+            ? 'bg-gradient-to-r from-amber-50 to-rose-50 border-amber-300'
+            : 'bg-white border-slate-200'">
+          <div class="flex items-center gap-3">
+            <div class="text-3xl">📩</div>
+            <div class="flex-1 min-w-0">
+              <div class="font-bold text-slate-900 flex items-center gap-2">
+                Penawaran Kerja
+                <span v-if="pendingOffersCount > 0"
+                  class="text-xs px-2 py-0.5 bg-rose-600 text-white rounded-full font-medium">
+                  {{ pendingOffersCount }} baru
+                </span>
+              </div>
+              <div class="text-sm text-slate-600 mt-0.5">
+                <template v-if="pendingOffersCount > 0">
+                  Anda punya {{ pendingOffersCount }} penawaran menunggu respon. Klik untuk review.
+                </template>
+                <template v-else>
+                  Lihat semua penawaran kerja yang pernah Anda terima.
+                </template>
+              </div>
+            </div>
+            <svg class="w-5 h-5 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </router-link>
+
+        <router-link
+          :to="{ name: 'career-home', params: { slug } }"
+          class="block rounded-xl border-2 border-slate-200 bg-white p-4 hover:shadow-md transition-shadow">
+          <div class="flex items-center gap-3">
+            <div class="text-3xl">🔍</div>
+            <div class="flex-1 min-w-0">
+              <div class="font-bold text-slate-900">Cari Lowongan</div>
+              <div class="text-sm text-slate-600 mt-0.5">
+                Browse lowongan kerja terbaru dan ajukan lamaran.
+              </div>
+            </div>
+            <svg class="w-5 h-5 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </router-link>
+      </div>
+
       <!-- Test online: tampilkan paling atas karena urgent -->
       <div v-if="data.tests && data.tests.length" class="mb-8">
         <h2 class="text-lg font-semibold text-slate-900 mb-3">Tes Online untuk Anda</h2>

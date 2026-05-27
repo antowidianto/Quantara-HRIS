@@ -13,13 +13,14 @@
  * Anak page bisa override branding lewat `provide('careerBrand', {...})`
  * (lihat CareerHome.vue) — layout cuma render container + nav.
  */
-import { ref, computed, provide } from 'vue'
+import { ref, computed, provide, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useCandidateAuthStore } from '@/stores/candidateAuth'
+import { useCandidateAuthStore, candidateApi } from '@/stores/candidateAuth'
 
 const route = useRoute()
 const router = useRouter()
 const candidateAuth = useCandidateAuthStore()
+const api = candidateApi()
 
 const companySlug = computed(() => route.params.slug || '')
 
@@ -36,8 +37,14 @@ function goHome() {
 const isHome = computed(() => ['career-home', 'career-job', 'career-apply'].includes(String(route.name || '')))
 const isTrack = computed(() => ['career-track', 'career-track-token'].includes(String(route.name || '')))
 const isCandidateArea = computed(() =>
-  ['candidate-login', 'candidate-register', 'candidate-dashboard', 'candidate-test-detail', 'candidate-test-result']
-    .includes(String(route.name || '')),
+  [
+    'candidate-login', 'candidate-register', 'candidate-dashboard',
+    'candidate-test-detail', 'candidate-test-result',
+    'candidate-profile',
+  ].includes(String(route.name || '')),
+)
+const isOffersArea = computed(() =>
+  ['candidate-offers', 'candidate-offer-detail'].includes(String(route.name || '')),
 )
 
 function goDashboard() {
@@ -46,8 +53,41 @@ function goDashboard() {
 
 async function logoutCandidate() {
   await candidateAuth.logout()
+  pendingOffersCount.value = 0
   router.push(`/careers/${companySlug.value}`)
 }
+
+// ─── Pending offers badge (Sprint 25 / Option C) ────────────────
+// Polling sederhana tiap 60 detik supaya badge update kalau HR send
+// offer baru sambil kandidat browsing portal. Best-effort — error
+// di-swallow karena layout tidak boleh crash kalau endpoint gagal.
+const pendingOffersCount = ref(0)
+
+async function refreshPendingOffers() {
+  if (! candidateAuth.isAuthenticated) {
+    pendingOffersCount.value = 0
+    return
+  }
+  try {
+    const res = await api.get('/careers/account/offers')
+    pendingOffersCount.value = res.data.data.pending_count || 0
+  } catch (_) { /* swallow */ }
+}
+
+onMounted(() => {
+  refreshPendingOffers()
+  // Auto-refresh tiap 60 detik. Tab inactive akan throttle oleh browser
+  // jadi tidak boros bandwidth.
+  setInterval(refreshPendingOffers, 60000)
+})
+
+// Refresh juga setiap navigasi ke route candidate area (mis. setelah
+// kandidat respond offer, count harus turun seketika).
+watch(() => route.name, (n) => {
+  if (typeof n === 'string' && (n.startsWith('candidate-') || n === 'career-home')) {
+    refreshPendingOffers()
+  }
+})
 
 const year = new Date().getFullYear()
 </script>
@@ -136,6 +176,28 @@ const year = new Date().getFullYear()
               <span class="hidden sm:inline">Dashboard Saya</span>
               <span class="sm:hidden">Saya</span>
             </router-link>
+
+            <!-- Sprint 25 / Option C — Penawaran. Selalu tampil setelah
+                 login (bukan kondisional) supaya kandidat punya menu
+                 permanent untuk akses & history offer. Badge merah hanya
+                 muncul kalau ada offer SENT yang belum direspon. -->
+            <router-link
+              :to="`/careers/${companySlug}/offers`"
+              class="relative px-3 py-1.5 rounded-md transition-colors"
+              :class="isOffersArea
+                ? 'bg-[var(--brand-color,#0F62FE)]/10 text-[var(--brand-color,#0F62FE)] font-medium'
+                : 'text-slate-700 hover:bg-slate-100'"
+            >
+              <span class="hidden sm:inline">Penawaran</span>
+              <svg class="sm:hidden w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+              </svg>
+              <span v-if="pendingOffersCount > 0"
+                class="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 text-[10px] font-bold text-white bg-rose-600 rounded-full ring-2 ring-white">
+                {{ pendingOffersCount > 9 ? '9+' : pendingOffersCount }}
+              </span>
+            </router-link>
+
             <button
               @click="logoutCandidate"
               class="px-3 py-1.5 rounded-md transition-colors text-slate-700 hover:bg-slate-100"

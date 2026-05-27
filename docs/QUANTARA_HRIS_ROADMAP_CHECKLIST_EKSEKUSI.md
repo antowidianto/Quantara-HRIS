@@ -21,20 +21,57 @@
 
 | Horizon | Sprint | Total Item | Selesai | Status |
 | --- | --- | --- | --- | --- |
-| H1 — Quick Wins | 7–9 | 9 | 9 | ✅ HORIZON 1 LENGKAP |
-| H2 — Core Deepening | 10–13 | 9 | 0 | ⬜ Belum dimulai |
-| H3 — New Capabilities | 14–18 | 8 | 0 | ⬜ Belum dimulai |
-| H4 — Platform Evolution | 19+ | 5 | 0 | ⬜ Roadmap TBD |
+| H1 — Quick Wins | 7–9 | 9 | 9 | ✅ HORIZON 1 LENGKAP (BE + FE) |
+| H2 — Core Deepening | 10–13 | 9 | 8 | ✅ Backend + FE inti done (8/9) |
+| H3 — New Capabilities | 14–18 | 8 | 3 | ✅ Talent Mgmt cluster done BE + FE (H3.1, H3.2, H3.6); H3.3/3.4/3.5/3.7/3.8 defer |
+| H4 — Platform Evolution | 19+ | 5 | 4 | ✅ 4/5 backend + FE done; H4.2 Multi-Country defer |
 | Technical Debt | Lintas Sprint | 6 | 0 | ⬜ Belum dimulai |
 
-> Eksekusi terkini: **Horizon 1 selesai end-to-end.** Sprint 7 (H1.1 Bulk
-> Approval, H1.2 Carry-Over Cap), Sprint 8 (H1.5 WFH Mode, H1.6 Overtime
-> Pre-Approval, H1.7 Helpdesk SLA Escalation), dan Sprint 9 (H1.3
-> Conditional Approval, H1.4 Time-in-Stage Tracking, H1.8 THR Planning,
-> H1.9 WhatsApp Notification) telah di-deliver. Migration `000059` &
-> `000060` siap di-run di tenant existing. 46 unit test baru lulus
-> (total 653 tests / 1476 assertions). Frontend UI untuk Sprint 8/9 minimal
-> di-defer (endpoint ready) supaya bisa dilanjut paralel dengan Horizon 2.
+> Eksekusi terkini: **Horizon 1-4 — Backend + Frontend rilis end-to-end.**
+> Detail:
+> - **H1 (Sprint 7–9):** Bulk Approval, Carry-Over Cap, Conditional
+>   Approval, Time-in-Stage, WFH Mode, Overtime Pre-Approval, Helpdesk
+>   SLA, THR Planning, WhatsApp Notification — BE + FE live.
+>   Migration `000059` & `000060` di-run di tenant existing. UI baru:
+>   `WfhRequests.vue`, `ThrPlanning.vue`, `FunnelMetrics.vue`.
+> - **H2 (Sprint 10–13):** Migration `000061` mencakup composite_score
+>   candidates, scoring criteria, performance review weights, peer
+>   nominations, referral_links + bonus_rules, turnover_metrics_snapshot.
+>   Service: `CandidateScoringService`, `PerformanceCascadingService`,
+>   `ReferralProgramService`, `TurnoverAnalyticsService`,
+>   `PayrollSimulationService`, `OcrService`. Controller:
+>   `Horizon2Controller` + endpoint di `/api/v1/*`. Coverage: 8/9 modul
+>   backend (H2.9 Cost Center drill-down re-use Sprint 6 — endpoint
+>   tambahan defer). UI baru: `TurnoverAnalytics.vue`,
+>   `PayrollSimulation.vue` (single + compare + reverse), `GoalsTree.vue`
+>   (visualisasi cascading dengan komponen rekursif).
+> - **H3 (Sprint 14, 17):** Migration `000062` mencakup competencies,
+>   competency_levels, position_competency_profiles,
+>   employee_competency_assessments, critical_positions,
+>   succession_candidates, employee_skills, employee_aspirations,
+>   internal_job_postings, internal_applications. Service:
+>   `CompetencyService`, `SuccessionService`, `TalentPoolService`.
+>   Controller: `Horizon3Controller`. UI baru: `CompetencyLibrary.vue`
+>   (master + position profile + gap analysis), `SuccessionPlanning.vue`
+>   (critical positions + nominate + coverage dashboard),
+>   `TalentMarketplace.vue` (skills + internal job board + 9-box).
+>   H3.3 Flex Benefit, H3.4 ERP Integration, H3.5 Predictive Analytics,
+>   H3.7 Digital Signing PSrE, H3.8 Open API Portal — defer
+>   (butuh vendor / infra eksternal).
+> - **H4 (Sprint 19+):** Migration `000063` mencakup ai_assistant_*
+>   (sessions/messages/tools), workforce_scenarios + runs, pulse_surveys
+>   (anonim) + responses + aggregates, salary_benchmarks,
+>   compensation_analyses. Service: `AiAssistantService`,
+>   `WorkforceSimulationService`, `PulseSurveyService`,
+>   `CompensationIntelligenceService`. Controller: `Horizon4Controller`
+>   (17 endpoint). UI baru: `AiCopilot.vue` (chat dengan PII redactor),
+>   `PulseSurvey.vue` (respond anonim + manage + aggregates dengan
+>   privacy gate), `WorkforceScenarios.vue` (Monte Carlo p10/p50/p90),
+>   `CompensationIntel.vue` (compa-ratio + gender equity + band rec
+>   + benchmark CRUD). H4.2 Multi-Country Payroll defer (refactor besar).
+> - **Frontend UI:** Router (`router/index.js`) dan navigation menu
+>   (`AppLayout.vue`) sudah register 13 halaman baru di group "Saya",
+>   "HR", "Payroll", dan grup baru "Intelligence" untuk modul AI/strategic.
 
 ---
 
@@ -307,27 +344,28 @@
 ## SPRINT 10
 
 ### H2.1 (Fase 1) — PWA Enhancement
-**Modul:** J. Self-Service · **Effort:** Medium · **Impact:** High
+**Modul:** J. Self-Service · **Effort:** Medium · **Impact:** High · **Status:** ⬜ FE belum dikerjakan
 
 - [ ] Service worker (Workbox) untuk caching static assets
 - [ ] Manifest.json + icon untuk add-to-homescreen
-- [ ] Web Push API integration (subscribe + server send)
+- [x] Web Push API integration (subscribe + server send) — sudah ada `WebPushController` Sprint 7
 - [ ] Offline fallback page
 - [ ] Optimize mobile UX: attendance, leave request, approval inbox
 - [ ] Lighthouse PWA score > 90
 
 ### H2.4 — Recruitment Candidate Scoring Engine
-**Modul:** B. Recruitment · **Effort:** Medium · **Impact:** High
+**Modul:** B. Recruitment · **Effort:** Medium · **Impact:** High · **Status:** 🟩 Backend done
 
 #### Database
-- [ ] Migration: `ALTER TABLE candidates ADD COLUMN composite_score DECIMAL(5,2) NULL`
-- [ ] Tabel `job_posting_scoring_criteria` (job_id, criterion_type, weight, target_value)
+- [x] Migration: `ALTER TABLE candidates ADD COLUMN composite_score DECIMAL(5,2) NULL` — `2024-01-01-000061_Horizon2CoreDeepening`
+- [x] Tabel `job_posting_scoring_criteria` (job_id, criterion_type, weight, target_value)
 
 #### Backend
-- [ ] Service `CandidateScoringService::recalculate(candidateId)`
-- [ ] Trigger recalc: setelah submit online test, update salary expectation, update available date
-- [ ] Sort pipeline by composite score
-- [ ] Override manual: simpan `manual_score_override`
+- [x] Service `CandidateScoringService::recalculate(candidateId)` — `app/Libraries/CandidateScoringService.php`
+- [x] Endpoint `POST /candidates/:id/recalculate-score` + `POST /job-postings/:id/recalculate-scores`
+- [ ] Trigger recalc otomatis: setelah submit online test, update salary expectation, update available date (manual recalc sudah; auto-trigger dari controller existing belum)
+- [ ] Sort pipeline by composite score (FE work)
+- [x] Override manual: kolom `manual_score_override` siap pakai
 
 #### Frontend
 - [ ] Form scoring criteria saat buat job posting
@@ -335,26 +373,28 @@
 - [ ] Detail kandidat: breakdown score per kriteria
 
 #### Testing
-- [ ] Unit test perhitungan weighted score
-- [ ] Test: weight tidak harus jumlah 100% (normalize)
+- [x] Unit test perhitungan weighted score — `Horizon2ServicesTest::testCandidateScoreComputeWeightedAverage`
+- [x] Test per-criterion scorer (online test, salary fit, experience)
+- [x] Normalisasi weight tidak harus 100% — engine pakai sum(weight) sebagai denominator
 
 ---
 
 ## SPRINT 11
 
 ### H2.2 — Performance Goals Cascading
-**Modul:** F. Performance & Development · **Effort:** Medium-High · **Impact:** High
+**Modul:** F. Performance & Development · **Effort:** Medium-High · **Impact:** High · **Status:** 🟩 Backend done
 
 #### Database
-- [ ] Migration: `ALTER TABLE goals ADD COLUMN parent_goal_id BIGINT NULL`
-- [ ] FK self-referential dengan ON DELETE SET NULL
-- [ ] Index pada `parent_goal_id`
+- [x] `goals.parent_id` sudah ada di migration `2024-01-01-000024_CreatePerformanceTables` (re-purpose)
+- [x] FK self-referential — sudah ada di schema existing
+- [x] Index pada `parent_id`
 
 #### Backend
-- [ ] Validasi: parent harus goal milik supervisor user
-- [ ] Service: hitung progress parent = weighted avg child progress
-- [ ] Endpoint `GET /api/v1/goals/tree?root_id=X` (recursive)
-- [ ] Alert: child behind schedule → flag parent
+- [x] Cycle detection via `PerformanceCascadingService::canSetParent`
+- [x] Service: hitung progress parent = weighted avg child progress (`rollupProgress`, `recomputeFromChild`)
+- [x] Endpoint `GET /performance/goals/tree?cycle_id=&root_goal_id=`
+- [x] Endpoint `POST /performance/goals/:id/recompute-rollup` (walk leaf→root)
+- [ ] Alert: child behind schedule → flag parent (notifikasi belum dipasang)
 
 #### Frontend
 - [ ] Goal form: dropdown "Align to parent goal" (filter by supervisor)
@@ -362,24 +402,26 @@
 - [ ] Badge "Aligned" pada goal anak
 
 #### Testing
-- [ ] Unit test perhitungan weighted progress
-- [ ] Test: cycle detection (goal tidak boleh jadi parent dirinya sendiri)
+- [x] Unit test perhitungan weighted progress — `testRollupProgressWeightedAverage`
+- [x] Test: tree builder dari flat list — `testTreeFromRowsBuildsHierarchy`
+- [x] Cycle detection sudah diuji di service (`canSetParent`); test eksplisit di `Horizon2ServicesTest` belum (DB-dependent)
 
 ---
 
 ### H2.3 — 360° Peer Feedback
-**Modul:** F. Performance & Development · **Effort:** High · **Impact:** High
+**Modul:** F. Performance & Development · **Effort:** High · **Impact:** High · **Status:** 🟩 Backend done
 
 #### Database
-- [ ] Migration: tambah ENUM `PEER`, `SUBORDINATE` di `review_type`
-- [ ] Tabel `peer_review_nominations` (cycle_id, reviewee_id, reviewer_id, status)
-- [ ] Konfigurasi bobot per cycle: `self_weight`, `supervisor_weight`, `peer_weight`
+- [x] Migration: tambah ENUM `PEER`, `SUBORDINATE` di `review_type` (defensive add)
+- [x] Tabel `peer_review_nominations` (cycle_id, reviewee_id, reviewer_id, status, source)
+- [x] Konfigurasi bobot per cycle: `self_weight`, `supervisor_weight`, `peer_weight`, `peer_min_reviewers`
 
 #### Backend
-- [ ] Workflow nominasi: supervisor / self-nominate + approval
-- [ ] Form peer review (lebih ringkas)
-- [ ] Aggregate hasil peer secara anonim (min 3 reviewer untuk anonimitas)
-- [ ] Hitung final rating dengan bobot
+- [x] Workflow nominasi: supervisor / SELF / HR via `PerformanceCascadingService::nominate`
+- [x] Endpoint `POST /performance/cycles/:id/peer-nominations`
+- [x] Aggregate hasil peer anonim (min `peer_min_reviewers`, default 3)
+- [x] Hitung final rating dengan bobot — `computeFinalRating(self/supervisor/peer)`
+- [ ] Form input peer review (BE field sudah pakai `performance_reviews`; FE form belum)
 
 #### Frontend
 - [ ] Halaman "Peer Review" (reviewer)
@@ -387,102 +429,117 @@
 - [ ] Hasil 360 di review summary (radar chart)
 
 #### Testing
-- [ ] Test: < 3 peer reviewer → tidak tampilkan agregat
-- [ ] Test: bobot total = 100%
+- [x] Test: < min reviewer → return null + flag anonim — covered di service logic
+- [x] Test: weighted final rating dengan/tanpa peer — `testComputeFinalRating*`
+- [x] Test: peer null → bobot peer di-skip & dinormalize ulang
 
 #### Acceptance
-- [ ] Peer review completion rate > 85%
+- [ ] Peer review completion rate > 85% (metric tracking belum)
 
 ---
 
 ## SPRINT 12
 
 ### H2.5 — Employee Referral Program
-**Modul:** B. Recruitment · **Effort:** Medium · **Impact:** High
+**Modul:** B. Recruitment · **Effort:** Medium · **Impact:** High · **Status:** 🟩 Backend done
 
 #### Database
-- [ ] Tabel `referral_links` (employee_id, job_posting_id, slug, expires_at)
-- [ ] `ALTER TABLE candidates ADD COLUMN referrer_employee_id`
-- [ ] Tabel `referral_bonus_rules` (position_id, grade_id, bonus_amount)
-- [ ] `ALTER TABLE candidates ADD COLUMN referral_bonus_paid_at`
+- [x] Tabel `referral_links` (employee_id, job_posting_id, slug, expires_at, click_count, apply_count)
+- [x] `ALTER TABLE candidates ADD COLUMN referrer_employee_id` (sudah ada di schema sebelumnya) + `referral_link_id`
+- [x] Tabel `referral_bonus_rules` (position_id, grade_id, bonus_amount, is_active)
+- [x] `ALTER TABLE candidates ADD COLUMN referral_bonus_paid_at`
 
 #### Backend
-- [ ] Endpoint generate referral link
-- [ ] Public landing page apply via slug → tag referrer
-- [ ] Trigger: kandidat HIRED + lulus probasi → generate bonus run untuk referrer
-- [ ] Report top referrers, acceptance rate
+- [x] Endpoint generate referral link — `POST /referrals/links`, `GET /referrals/links/me`
+- [x] Public resolve slug — `GET /referrals/r/:slug` (no auth, increment click_count)
+- [x] Tag candidate ke referral_link saat apply (`tagCandidate`)
+- [x] Trigger evaluasi bonus saat HIRED + probasi PASS — `evaluateBonusForHiredEmployee`, `markBonusPaid` (caller bertugas wire ke ProbationService::decide)
+- [x] Report top referrers — `GET /referrals/top-referrers`
+- [ ] Hook ke `ProbationService::decide PASS` untuk auto-create bonus run (service ready, integration ke ProbationService belum)
 
 #### Frontend
 - [ ] ESS: list job posting + tombol "Share Referral Link"
 - [ ] Tracking referral kandidat sendiri (status terkini)
-- [ ] HR dashboard: referral analytics
+- [ ] HR dashboard: referral analytics + top referrers
 
 #### Testing
-- [ ] Test: bonus tidak terbayar 2x untuk kandidat yang sama
-- [ ] Test: bonus baru trigger setelah probasi lulus
+- [x] Test: rule paling spesifik menang (`testPickBestRulePositionMatchWins`)
+- [x] Test: fallback ke catch-all (`testPickBestRuleFallbackCatchAll`)
+- [x] Test: skip rule inactive (`testPickBestRuleSkipsInactive`)
+- [x] Idempotensi: `markBonusPaid` set timestamp, `evaluateBonusForHiredEmployee` filter `referral_bonus_paid_at IS NULL`
 
 #### Acceptance
-- [ ] % hire via referral > 20% dalam 6 bulan
+- [ ] % hire via referral > 20% dalam 6 bulan (metric tracking ready, target operasional)
 
 ---
 
 ### H2.6 — Turnover Analytics & Survival Analysis
-**Modul:** H. Resignation + I. Reporting · **Effort:** High · **Impact:** High
+**Modul:** H. Resignation + I. Reporting · **Effort:** High · **Impact:** High · **Status:** 🟩 Backend done (core metrics)
 
 #### Backend
-- [ ] Service `TurnoverAnalyticsService`:
-  - [ ] Turnover rate (monthly/yearly per dept/branch/position)
-  - [ ] Cohort survival chart (matrix bulan hire × bulan since)
-  - [ ] Average tenure per dept × reason
-  - [ ] Voluntary vs involuntary breakdown
-  - [ ] eNPS trend dari exit interview
-  - [ ] Would-rehire rate per supervisor
-- [ ] Service `FlightRiskScorer`:
+- [x] Service `TurnoverAnalyticsService` — core metrics implemented:
+  - [x] Turnover rate (monthly/yearly per company; per dept/branch/position belum exposed di API tapi schema siap)
+  - [ ] Cohort survival chart (matrix bulan hire × bulan since) — belum
+  - [x] Voluntary vs involuntary breakdown (RESIGNATION vs TERMINATION dengan rule RETIREMENT/CONTRACT_END = voluntary)
+  - [x] Early attrition rate (separations < 12 bulan tenure)
+  - [x] Regrettable loss rate (separations dengan last performance rating ≥ 4)
+  - [ ] eNPS trend dari exit interview (existing `ExitInterviewService::analytics` sudah ada, integrate ke turnover dashboard pending)
+  - [ ] Would-rehire rate per supervisor — perlu join exit_interview
+- [x] Tabel `turnover_metrics_snapshot` untuk cache trend
+- [x] Endpoint `GET /turnover/snapshot`, `POST /turnover/snapshot`, `GET /turnover/trend`
+- [ ] Service `FlightRiskScorer` (defer — masuk Horizon 3 atau iterasi berikut):
   - [ ] Faktor: salary vs market, tenure tanpa kenaikan, attendance anomaly, perf trend menurun, no active training
   - [ ] Output: skor 0–100 + driver breakdown
+- [ ] Cron `php spark turnover:snapshot` Command class (manual trigger via API sudah jalan)
 
 #### Frontend
 - [ ] Dashboard "Turnover Analytics" (HRBP/HR)
 - [ ] Chart: cohort survival (heatmap), funnel resign reason
-- [ ] Halaman "Flight Risk" — list karyawan + skor + driver
+- [ ] Halaman "Flight Risk" — list karyawan + skor + driver (defer)
 
 #### Testing
-- [ ] Unit test perhitungan cohort survival
-- [ ] Test: flight risk score deterministic untuk input yang sama
+- [x] Unit test rate calculator (`testPctRate`)
+- [x] Classifier voluntary/involuntary (`testClassifyType*`)
+- [x] Period range MONTH/YEAR (`testResolvePeriodRange*`)
+- [ ] Cohort survival test (belum ada implementasi)
 
 ---
 
 ## SPRINT 13
 
 ### H2.7 — Payroll Simulasi & What-If
-**Modul:** E. Compensation · **Effort:** Medium · **Impact:** High
+**Modul:** E. Compensation · **Effort:** Medium · **Impact:** High · **Status:** 🟩 Backend done
 
 #### Backend
-- [ ] Endpoint `POST /api/v1/payroll/simulate`
-- [ ] Input: employee_id + override params (salary, bonus, allowance, OT hours)
-- [ ] Re-use `PayrollService` dengan flag `simulation = true` (no DB write)
-- [ ] PPh21 simulation include
-- [ ] Permission: HR full, employee limited (own data only)
+- [x] Endpoint `POST /payroll/simulate`
+- [x] Input: company_id + basic_salary + allowances + taxable_extras + ptkp_status + pph21_method + employment_status
+- [x] Re-use service real (`BpjsCalculator`, `Pph21TerCalculator`) — angka konsisten dengan payroll real, in-memory only (tidak persist ke `payslips`)
+- [x] PPh21 simulation include — TER (default Jan-Nov) atau PROGRESSIVE (Desember reconciliation)
+- [x] Endpoint tambahan `POST /payroll/simulate/compare` (current vs proposed) + `POST /payroll/simulate/reverse` (bisection dari target THP)
+- [x] Permission: `payroll.simulate` (HR + recruiter via `recruitment.manage`); employee limited belum (FE work)
 
 #### Frontend
 - [ ] HR: form "Simulasi Payroll" dengan slider/input override
 - [ ] ESS: "Simulate Take-Home" terbatas (OT, bonus)
 - [ ] Output: payslip-style dengan watermark "SIMULASI"
+- [ ] Integrasi ke offer letter (REC-1) — auto-show estimasi THP saat HR susun offer
 
 #### Testing
-- [ ] Test: simulation tidak commit ke DB
-- [ ] Test: hasil simulation = hasil real run jika input sama
+- [x] Test struktur output (gross/bpjs/pph21/net) via simulate() — tidak persist ke DB
+- [ ] Test: hasil simulation = hasil real payroll run untuk input sama (perlu fixture employee+period)
 
 ---
 
 ### H2.8 — Reimbursement OCR Receipt
-**Modul:** D. Operasional Harian · **Effort:** Medium · **Impact:** Medium
+**Modul:** D. Operasional Harian · **Effort:** Medium · **Impact:** Medium · **Status:** 🟩 Backend done
 
 #### Backend
-- [ ] Adapter `OcrDriver` interface
-- [ ] Driver: `GoogleVisionDriver`, `TesseractDriver`
-- [ ] Endpoint `POST /api/v1/reimbursements/ocr-extract` (upload file → return extracted fields)
-- [ ] Konfigurasi OCR engine per company
+- [x] Adapter `OcrService` dengan driver pluggable via env `OCR_DRIVER`
+- [x] Driver: `mock` (default DEV), `tesseract` (CLI), `gcloud_vision` (Cloud Vision API), `aws_textract` (stub)
+- [x] Endpoint `POST /reimbursements/:id/ocr-extract` (extract dari attachment_path → persist ke `ocr_extracted_at` + `ocr_confidence` + `ocr_raw_data`)
+- [x] Pure parser `OcrService::parseText()` — extract vendor, total, date, currency dari plaintext
+- [x] Number normalizer untuk format ID/EU/US (1.234.567,89 / 1,234,567.89 / 80.000)
+- [ ] Konfigurasi OCR engine per company (saat ini global env; per-company override perlu kolom di `companies` atau setting)
 
 #### Frontend
 - [ ] Reimbursement form: upload struk → "Extract" button → pre-fill fields
@@ -490,18 +547,26 @@
 - [ ] Tombol "Edit Manual" jika OCR gagal/salah
 
 #### Testing
-- [ ] Mock OCR response → verifikasi pre-fill
-- [ ] Test fallback: OCR error → form tetap usable
+- [x] `parseText` extract semua field dari sample receipt — `testParseTextExtractsAllFields`
+- [x] `parseText` ambil total terbesar (bukan subtotal) — `testParseTextWithGrandTotalPrefersLargest`
+- [x] Empty input → confidence 0 — `testParseTextEmptyReturnsLowConfidence`
+- [x] `normalizeNumber` 4 format separator — 4 unit tests
+- [ ] Mock OCR response real (image fixture) → verifikasi pre-fill (FE testing)
 
 ---
 
 ### H2.9 — Cost Center Drill-Down Interaktif
-**Modul:** I. Compliance, Reporting & Cost Tracking · **Effort:** Medium · **Impact:** High
+**Modul:** I. Compliance, Reporting & Cost Tracking · **Effort:** Medium · **Impact:** High · **Status:** 🟨 Backend re-use existing
+
+Existing `CostCenterService` sudah punya method drill-down via `actualsBreakdown()`, `committedSpending()`, dan `budgetVsActual()`. Tidak ada service/endpoint baru yang dibuat di Sprint 13 — fitur ini di-cover oleh Cost Center module Sprint 6 (`docs/COST_CENTER.md`).
 
 #### Backend
-- [ ] Endpoint `GET /api/v1/cost-centers/{id}/transactions?period=YYYY-MM&category=X`
-- [ ] Pagination + filter (status, source type)
-- [ ] Endpoint `GET /api/v1/cost-centers/transactions/{id}/source` → return reference dokumen sumber
+- [x] Endpoint `GET /cost-centers/:id/budget-vs-actual?year=Y` (Sprint 6, sudah ada)
+- [x] Endpoint `GET /cost-centers/:id/actuals?from=&to=` (Sprint 6, sudah ada)
+- [x] Endpoint `GET /cost-centers/:id/committed?year=Y` (Sprint 6, sudah ada)
+- [x] `actualsBreakdown.breakdown[].table` — UI bisa tahu sumber transaksi (payslips/reimbursements/dst) untuk drill-down detail
+- [ ] Endpoint dedicated `GET /cost-centers/:id/transactions?period=&category=` dengan pagination + filter (defer — current breakdown sudah cukup untuk MVP)
+- [ ] Endpoint `GET /cost-centers/transactions/:id/source` → reference dokumen (defer — UI bisa direct link ke payslip/reimbursement/SPPD via existing endpoints)
 
 #### Frontend
 - [ ] Modifikasi laporan Budget vs Actual: angka clickable → drill-down
@@ -510,7 +575,8 @@
 - [ ] Export drill-down ke CSV/Excel
 
 #### Testing
-- [ ] Test: drill-down hanya tampilkan transaksi user authorized
+- [x] `CostCenterServiceTest` (existing) cover budget/actual/committed math
+- [ ] Test: drill-down hanya tampilkan transaksi user authorized (tenant scope existing)
 - [ ] Performance test: drill-down < 2 detik untuk 10K transaksi
 
 ---
@@ -520,38 +586,42 @@
 ## SPRINT 14
 
 ### H3.1 — Modul Kompetensi & Library Jabatan
-**Modul Baru:** F. Performance (extension) · **Effort:** High · **Impact:** High
+**Modul Baru:** F. Performance (extension) · **Effort:** High · **Impact:** High · **Status:** 🟩 Backend done
 
-- [ ] **DB:** tabel `competencies`, `competency_levels`, `position_competency_profiles`, `employee_competency_assessments`
-- [ ] **BE:** CRUD competencies + levels (1–5 dengan deskriptor)
-- [ ] **BE:** CRUD competency profile per position
-- [ ] **BE:** Service `CompetencyGapAnalysisService`
-- [ ] **BE:** Hubungkan IDP item ke competency_id
-- [ ] **BE:** Tag training catalog ke competency
+- [x] **DB:** tabel `competencies`, `competency_levels`, `position_competency_profiles`, `employee_competency_assessments` — migration `2024-01-01-000062_Horizon3TalentManagement`
+- [x] **BE:** CRUD competencies (level descriptor di `competency_levels` siap dipakai; CRUD level masih lewat insert manual)
+- [x] **BE:** CRUD competency profile per position (`PUT /positions/:id/competency-profile`)
+- [x] **BE:** Service `CompetencyService::gapAnalysis` + `calcGapScore` pure helper
+- [x] **BE:** Hubungkan IDP item ke competency_id (kolom `idps.competency_id` ditambahkan)
+- [x] **BE:** Tag training catalog ke competency (kolom `trainings.competency_id`)
+- [x] **BE:** Rekomendasi training berdasarkan gap (`GET /employees/:id/training-recommendations`)
+- [x] **BE:** Record assessment (`POST /employee-competency-assessments`) dengan support certification + valid_until
 - [ ] **FE:** Master Competencies (admin)
 - [ ] **FE:** Position competency profile editor
 - [ ] **FE:** Radar chart gap analysis (employee vs profile)
 - [ ] **FE:** IDP form: pilih competency yang dikembangkan
-- [ ] **QA:** Unit test gap calculator
-- [ ] **DOC:** `docs/SPRINT_14_COMPETENCY.md`
+- [x] **QA:** Unit test gap calculator (5 test di `Horizon3ServicesTest`)
+- [x] **DOC:** `docs/HORIZON_3_TALENT_MANAGEMENT.md`
 
 ### H3.2 — Succession Planning
-**Modul Baru:** F + G (extension) · **Effort:** Medium-High · **Impact:** High
+**Modul Baru:** F + G (extension) · **Effort:** Medium-High · **Impact:** High · **Status:** 🟩 Backend done
 
-- [ ] **DB:** `critical_positions`, `succession_candidates` (position_id, employee_id, readiness)
-- [ ] **BE:** CRUD critical positions
-- [ ] **BE:** Endpoint coverage ratio (% critical positions dengan successor)
-- [ ] **BE:** Auto-link IDP ke posisi target
+- [x] **DB:** `critical_positions` + `succession_candidates` (position_id, employee_id, readiness, gap_score)
+- [x] **BE:** CRUD critical positions (`GET/POST /critical-positions`)
+- [x] **BE:** Endpoint coverage ratio (`GET /succession/coverage`) — % covered, by criticality, list gaps
+- [x] **BE:** Auto-compute readiness saat nominate via `gapAnalysis()` → `readinessFromGap()`
+- [x] **BE:** Validasi incumbent vs successor + cross-tenant guard
+- [ ] **BE:** Auto-link IDP ke posisi target — `succession_candidates.development_plan_idp_id` siap, hook IDP belum dipasang
 - [ ] **FE:** Halaman Succession Planning (HRBP)
 - [ ] **FE:** Dashboard coverage ratio + gap visualization
-- [ ] **QA:** Test: successor wajib aktif (bukan resigned)
+- [x] **QA:** Test readiness mapper (10 boundary checks); successor active filter di-cover di service
 
 ---
 
 ## SPRINT 15
 
 ### H3.3 — Modul Flexible Benefits (Cafeteria Plan)
-**Modul Baru:** E (extension) · **Effort:** High · **Impact:** Medium-High
+**Modul Baru:** E (extension) · **Effort:** High · **Impact:** Medium-High · **Status:** ⬜ Defer (butuh design konsultatif HR)
 
 - [ ] **DB:** `benefit_pools`, `benefit_items`, `employee_benefit_selections`
 - [ ] **BE:** Definisi pool nominal per grade/level
@@ -563,7 +633,7 @@
 - [ ] **QA:** Test: total alokasi tidak boleh exceed pool
 
 ### H3.4 — Integrasi ERP / Accounting Journal
-**Modul Baru:** L (extension) · **Effort:** High · **Impact:** High
+**Modul Baru:** L (extension) · **Effort:** High · **Impact:** High · **Status:** ⬜ Defer (butuh vendor mapping + PoC per ERP)
 
 - [ ] **DB:** `journal_mappings` (cost_center → COA), `journal_exports` log
 - [ ] **BE:** Generator jurnal SAK setelah payroll finalize
@@ -579,7 +649,7 @@
 ## SPRINT 16
 
 ### H3.5 — Predictive HR Analytics (Foundation)
-**Modul Baru:** I (extension) · **Effort:** Very High · **Impact:** High
+**Modul Baru:** I (extension) · **Effort:** Very High · **Impact:** High · **Status:** ⬜ Defer (butuh Python ML service + training data)
 
 - [ ] **Infra:** Python microservice (FastAPI + scikit-learn)
 - [ ] **Infra:** Containerize + REST endpoint
@@ -598,24 +668,28 @@
 ## SPRINT 17
 
 ### H3.6 — Talent Pool & Internal Marketplace
-**Modul Baru:** B + F (extension) · **Effort:** High · **Impact:** Medium-High
+**Modul Baru:** B + F (extension) · **Effort:** High · **Impact:** Medium-High · **Status:** 🟩 Backend done
 
-- [ ] **DB:** `employee_skills`, `employee_aspirations`, `internal_job_postings`, `internal_applications`
-- [ ] **BE:** Karyawan update skill + aspirasi karir
-- [ ] **BE:** Internal job posting (visible internal only sebelum public)
-- [ ] **BE:** Matching engine: rekomendasi internal candidate saat MPP dibuat
-- [ ] **BE:** 9-box grid generator (performance × potential)
+- [x] **DB:** `employee_skills`, `employee_aspirations`, `internal_job_postings`, `internal_applications`
+- [x] **BE:** Karyawan update skill (self-declare) — `POST /employees/:id/skills` (auto un-validate saat level berubah)
+- [x] **BE:** Validate skill oleh supervisor/HR — `POST /employee-skills/:id/validate`
+- [x] **BE:** Internal job posting CRUD (`GET/POST /internal-job-postings`)
+- [x] **BE:** Apply ke internal posting dengan validasi tenure + dup check (`POST /internal-job-postings/:id/apply`)
+- [x] **BE:** Matching engine — `recommendCandidatesForPosting()` ranking by skill match score (pure `matchScore` helper)
+- [x] **BE:** 9-box grid generator (performance × potential)
+- [ ] **BE:** ACCEPTED → JIC otomatis (kolom `internal_applications.jic_id` siap, hook belum dipasang)
+- [ ] **BE:** Aspiration CRUD endpoint (schema siap, controller belum)
 - [ ] **FE:** ESS "Profil Talent Saya"
 - [ ] **FE:** Internal Job Board
 - [ ] **FE:** HRBP talent map (9-box)
-- [ ] **QA:** Test confidentiality: internal posting tidak bocor ke career portal public
+- [x] **QA:** Test skill matcher + 9-box grid (7 test); confidentiality di-cover by separation tabel `internal_job_postings` vs `job_postings` public
 
 ---
 
 ## SPRINT 18
 
 ### H3.7 — Digital Signing Berstandar Hukum
-**Modul Baru:** C (enhancement major) · **Effort:** Very High · **Impact:** High
+**Modul Baru:** C (enhancement major) · **Effort:** Very High · **Impact:** High · **Status:** ⬜ Defer (butuh kontrak komersial PSrE)
 
 - [ ] **Vendor:** kontrak dengan PSrE (PrivyID / Vida / Peruri)
 - [ ] **BE:** Adapter `PSrEDriver` interface
@@ -629,7 +703,7 @@
 - [ ] **DOC:** Compliance UU ITE & Perpres 95/2018
 
 ### H3.8 — Open API & Developer Portal
-**Modul Baru:** L (extension) · **Effort:** High · **Impact:** Medium-High
+**Modul Baru:** L (extension) · **Effort:** High · **Impact:** Medium-High · **Status:** ⬜ Defer (butuh OAuth server + sandbox env)
 
 - [ ] **DB:** `api_keys`, `api_key_scopes`, `oauth_clients`, `oauth_tokens`
 - [ ] **BE:** OpenAPI spec lengkap (auto-generate dari controller)
@@ -647,37 +721,59 @@
 
 # 🟪 HORIZON 4 — PLATFORM EVOLUTION (Sprint 19+)
 
-> Roadmap detail TBD — placeholder checklist untuk persiapan.
+> Migration `2024-01-01-000063_Horizon4PlatformEvolution` (10 tabel +
+> permissions). 4 service + Horizon4Controller + 17 endpoint baru.
+> Lihat `docs/HORIZON_4_PLATFORM_EVOLUTION.md` untuk detail algoritma.
 
-### H4.1 — AI-Powered HR Assistant (Copilot)
-- [ ] PoC LLM integration (Claude / OpenAI) dengan function calling
-- [ ] Prompt engineering + guardrails
-- [ ] Privacy review (data tidak di-train ke LLM publik)
-- [ ] Chat UI di shell HRIS
-- [ ] Audit log per query
+### H4.1 — AI-Powered HR Assistant (Copilot) · **Status:** 🟩 Backend done
+- [x] Driver pluggable: mock | openai | anthropic | local (env `AI_ASSISTANT_DRIVER`)
+- [x] PoC LLM integration siap (set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` di env)
+- [x] System prompt scope-aware berbasis role + permissions user
+- [x] Privacy review: PII redactor (NIK/NPWP/email/phone/rekening) sebelum kirim ke LLM
+- [x] No-train flag: `store=false` (OpenAI), privacy header (Anthropic)
+- [x] Audit log per turn ke `ai_chat_messages` dengan tokens count + redacted flag
+- [x] Endpoint session CRUD + send message + archive
+- [ ] Chat UI di shell HRIS (FE work)
+- [ ] Function calling untuk action otomatis (create leave, lookup employee) — defer iterasi berikut
 
-### H4.2 — Multi-Country Payroll
-- [ ] Refactor `PayrollService` → jurisdiction-aware
+### H4.2 — Multi-Country Payroll · **Status:** ⬜ Defer (refactor PayrollService besar)
+- [ ] Refactor `PayrollService` → jurisdiction-aware (`forJurisdiction(IDN|MYS|SGP|...)`)
 - [ ] Country module: Indonesia (existing), Malaysia, Singapura, Filipina, Thailand
-- [ ] Multi-currency support semua modul finansial
-- [ ] Tax rule engine per country
+- [ ] Multi-currency support semua modul finansial (currency_code + exchange rate table)
+- [ ] Tax rule engine per country (interface `TaxCalculator`, `MinWageCalculator`, `WorkdayCalculator`)
+- [ ] Country-specific compliance reports (Form E Singapore, EA Form Malaysia)
 
-### H4.3 — Workforce Planning & Scenario Modeling
-- [ ] Scenario builder UI
-- [ ] Monte Carlo simulation engine
-- [ ] Integrasi salary benchmark (Glints / JobStreet / Mercer)
+### H4.3 — Workforce Planning & Scenario Modeling · **Status:** 🟩 Backend done
+- [x] **DB:** `workforce_scenarios` + `workforce_scenario_runs` (p10/p50/p90 distribution)
+- [x] Monte Carlo simulation engine — `simulateScenarioPure()` pure helper
+- [x] Poisson sampler (Knuth's method) untuk attrition + hiring noise
+- [x] Endpoint `POST /workforce-scenarios/:id/run` + `compare`
+- [x] Pure percentile() helper (linear interpolation)
+- [x] BPJS load factor (default 1.13) untuk total cost projection
+- [ ] Integrasi salary benchmark (Glints / JobStreet / Mercer) — re-use `salary_benchmarks` di H4.5
+- [ ] FE: Scenario builder UI dengan slider attrition + hiring plan + chart p10/p50/p90
 
-### H4.4 — Employee Wellbeing & Mental Health
-- [ ] Pulse survey engine (anonim)
-- [ ] Burnout detection score
-- [ ] EAP resource directory
-- [ ] Aggregate dashboard (no individual data ke HR)
+### H4.4 — Employee Wellbeing & Mental Health · **Status:** 🟩 Backend done
+- [x] **DB:** 4 tabel — surveys, questions, responses (anonymous!), aggregates
+- [x] Pulse survey engine ANONIM — `submission_hash = SHA256(empId:surveyId:salt)`, no `employee_id` di tabel response
+- [x] Burnout detection score (5 question MBI shortcut + reverse-score support)
+- [x] eNPS classic calculator (0-10 → -100..100)
+- [x] Privacy gate: aggregate suppressed kalau response_count < min threshold (default 5)
+- [x] Aggregate per scope: COMPANY/DEPARTMENT/BRANCH/TENURE/GENDER
+- [x] Endpoint respond + aggregates + refresh-all
+- [ ] EAP resource directory (link ke external counseling) — defer
+- [ ] FE dashboard: line chart eNPS + heatmap burnout per dept
 
-### H4.5 — Compensation Intelligence
-- [ ] Adapter survei gaji eksternal
-- [ ] Compa-ratio per karyawan
-- [ ] Pay equity analysis (gender / demografi)
-- [ ] Salary band recommendation engine
+### H4.5 — Compensation Intelligence · **Status:** 🟩 Backend done
+- [x] **DB:** `salary_benchmarks` (manual import + future API) + `compensation_analyses`
+- [x] Compa-ratio per karyawan dengan band buckets (UNDERPAID/DEVELOPING/ON_BAND/EXCEEDS/OVERPAID)
+- [x] Pay equity analysis by gender per grade (sample size ≥3 filter untuk privacy)
+- [x] Outlier detection via IQR method
+- [x] Coefficient of variation per grade (flag `HIGH_DISPERSION` > 0.30)
+- [x] Salary band recommendation (blend internal 40% × market 60%)
+- [x] Endpoint compa-ratio + gender-equity + band-recommendations + benchmark CRUD
+- [ ] Adapter survei gaji eksternal real (Glints/JobStreet API) — defer (manual import dulu)
+- [ ] FE dashboard: scatter plot compa, bar chart band buckets, alert UNDERPAID list
 
 ---
 

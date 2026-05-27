@@ -207,6 +207,157 @@ class Services extends BaseService
     }
 
     /**
+     * CandidateScoringService — Sprint 11 / H2.4. Hitung composite score
+     * weighted dari online test, salary fit, experience, availability,
+     * education, interview rating. Output explainable breakdown untuk UI.
+     */
+    public static function candidateScoring(bool $getShared = true): \App\Libraries\CandidateScoringService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('candidateScoring');
+        }
+        return new \App\Libraries\CandidateScoringService();
+    }
+
+    /**
+     * PerformanceCascadingService — Sprint 11 / H2.2 + H2.3. Goals
+     * cascading (parent/child + weighted progress rollup) + 360° peer
+     * feedback (nominate, aggregate, anonymize).
+     */
+    public static function performanceCascading(bool $getShared = true): \App\Libraries\PerformanceCascadingService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('performanceCascading');
+        }
+        return new \App\Libraries\PerformanceCascadingService();
+    }
+
+    /**
+     * ReferralProgramService — Sprint 12 / H2.5. Generator referral link
+     * + bonus auto-trigger setelah kandidat HIRED + lulus probasi.
+     */
+    public static function referralProgram(bool $getShared = true): \App\Libraries\ReferralProgramService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('referralProgram');
+        }
+        return new \App\Libraries\ReferralProgramService();
+    }
+
+    /**
+     * TurnoverAnalyticsService — Sprint 12 / H2.6. Compute turnover &
+     * retention metric per period + snapshot trend untuk dashboard.
+     */
+    public static function turnoverAnalytics(bool $getShared = true): \App\Libraries\TurnoverAnalyticsService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('turnoverAnalytics');
+        }
+        return new \App\Libraries\TurnoverAnalyticsService();
+    }
+
+    /**
+     * PayrollSimulationService — Sprint 13 / H2.7. What-if calculator
+     * gross → BPJS → PPh21 → THP. Re-use BpjsCalculator + Pph21TerCalculator.
+     */
+    public static function payrollSimulation(bool $getShared = true): \App\Libraries\PayrollSimulationService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('payrollSimulation');
+        }
+        return new \App\Libraries\PayrollSimulationService();
+    }
+
+    /**
+     * OcrService — Sprint 13 / H2.8. Extract field dari struk
+     * reimbursement (vendor, total, date) dengan driver pluggable
+     * (mock|tesseract|gcloud_vision|aws_textract via env OCR_DRIVER).
+     */
+    public static function ocr(bool $getShared = true): \App\Libraries\OcrService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('ocr');
+        }
+        return new \App\Libraries\OcrService();
+    }
+
+    /**
+     * CompetencyService — Sprint 14 / H3.1. Library kompetensi +
+     * gap analysis terhadap profile posisi + rekomendasi training.
+     */
+    public static function competency(bool $getShared = true): \App\Libraries\CompetencyService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('competency');
+        }
+        return new \App\Libraries\CompetencyService();
+    }
+
+    /**
+     * SuccessionService — Sprint 14 / H3.2. Critical positions +
+     * succession candidates + coverage ratio dashboard.
+     */
+    public static function succession(bool $getShared = true): \App\Libraries\SuccessionService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('succession');
+        }
+        return new \App\Libraries\SuccessionService();
+    }
+
+    /**
+     * TalentPoolService — Sprint 17 / H3.6. Skill matrix + internal
+     * job marketplace + 9-box grid.
+     */
+    public static function talentPool(bool $getShared = true): \App\Libraries\TalentPoolService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('talentPool');
+        }
+        return new \App\Libraries\TalentPoolService();
+    }
+
+    /**
+     * AiAssistantService — Sprint 19+ / H4.1. AI HR Copilot dengan
+     * driver pluggable (mock|openai|anthropic|local) + PII redactor.
+     */
+    public static function aiAssistant(bool $getShared = true): \App\Libraries\AiAssistantService
+    {
+        if ($getShared) return static::getSharedInstance('aiAssistant');
+        return new \App\Libraries\AiAssistantService();
+    }
+
+    /**
+     * WorkforceSimulationService — Sprint 19+ / H4.3. Monte Carlo
+     * scenario modeling untuk forecasting headcount + cost.
+     */
+    public static function workforceSim(bool $getShared = true): \App\Libraries\WorkforceSimulationService
+    {
+        if ($getShared) return static::getSharedInstance('workforceSim');
+        return new \App\Libraries\WorkforceSimulationService();
+    }
+
+    /**
+     * PulseSurveyService — Sprint 19+ / H4.4. Anonymous pulse survey
+     * dengan eNPS + burnout score + privacy gate.
+     */
+    public static function pulseSurvey(bool $getShared = true): \App\Libraries\PulseSurveyService
+    {
+        if ($getShared) return static::getSharedInstance('pulseSurvey');
+        return new \App\Libraries\PulseSurveyService();
+    }
+
+    /**
+     * CompensationIntelligenceService — Sprint 19+ / H4.5. Compa-ratio,
+     * pay equity (gender), salary band recommendation.
+     */
+    public static function compensationIntelligence(bool $getShared = true): \App\Libraries\CompensationIntelligenceService
+    {
+        if ($getShared) return static::getSharedInstance('compensationIntelligence');
+        return new \App\Libraries\CompensationIntelligenceService();
+    }
+
+    /**
      * PaklaringService — generator Surat Keterangan Kerja (paklaring) untuk
      * karyawan yang berhenti. Wajib menurut UU 13/2003 Pasal 153, biasanya
      * jadi syarat aplikasi kerja di perusahaan baru. Lihat docs/RESIGNATION.md

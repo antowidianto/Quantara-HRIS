@@ -20,6 +20,8 @@ class EmployeeController extends ApiController
         $branchId     = (int) ($this->request->getGet('branch_id') ?? 0);
         $positionId   = (int) ($this->request->getGet('position_id') ?? 0);
         $jobGradeId   = (int) ($this->request->getGet('job_grade_id') ?? 0);
+        $minGradeLvl  = (int) ($this->request->getGet('min_grade_level') ?? 0);
+        $positionTier = trim((string) $this->request->getGet('position_tier'));
         $status       = trim((string) $this->request->getGet('status'));
         $employmentStatus = trim((string) $this->request->getGet('employment_status'));
         $employmentType   = trim((string) $this->request->getGet('employment_type'));
@@ -30,8 +32,9 @@ class EmployeeController extends ApiController
                 e.employment_status, e.employment_type, e.is_active,
                 e.join_date, e.resign_date, e.basic_salary, e.avatar_path,
                 e.department_id, e.position_id, e.branch_id, e.job_grade_id,
-                d.name AS department_name, p.name AS position_name,
-                b.name AS branch_name, jg.name AS job_grade_name, jg.code AS job_grade_code')
+                d.name AS department_name, p.name AS position_name, p.tier AS position_tier,
+                b.name AS branch_name, jg.name AS job_grade_name, jg.code AS job_grade_code,
+                jg.level AS job_grade_level')
             ->join('departments d', 'd.id = e.department_id', 'left')
             ->join('positions p', 'p.id = e.position_id', 'left')
             ->join('branches b', 'b.id = e.branch_id', 'left')
@@ -51,6 +54,18 @@ class EmployeeController extends ApiController
         if ($branchId)   $builder->where('e.branch_id', $branchId);
         if ($positionId) $builder->where('e.position_id', $positionId);
         if ($jobGradeId) $builder->where('e.job_grade_id', $jobGradeId);
+        // Filter by minimum job grade level — dipakai mis. picker manager
+        // (yang harus level Manager keatas, bukan Staff). Default seeder
+        // memakai level: 7 = Manager, 8 = VP, 10 = Direktur, 11 = Komisaris.
+        if ($minGradeLvl > 0) {
+            $builder->where('jg.level >=', $minGradeLvl);
+        }
+        // Filter by position tier (MANAGER / ASST_MANAGER / SUPERVISOR / STAFF).
+        // Untuk picker manager cost center: tier=MANAGER, ASST_MANAGER.
+        if ($positionTier !== '' &&
+            in_array($positionTier, ['MANAGER','ASST_MANAGER','SUPERVISOR','STAFF'], true)) {
+            $builder->where('p.tier', $positionTier);
+        }
         if ($status === 'active')   $builder->where('e.is_active', 1);
         if ($status === 'inactive') $builder->where('e.is_active', 0);
         if ($employmentStatus !== '' &&

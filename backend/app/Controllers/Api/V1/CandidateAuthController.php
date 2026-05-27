@@ -305,6 +305,218 @@ class CandidateAuthController extends BaseController
         return $this->ok($this->serializeApplication($fresh, $account), 'Profil lamaran berhasil diperbarui');
     }
 
+    // ─── Offers (Sprint 25 / Option C) ──────────────────────────────
+    //
+    // Kandidat self-service review + accept/reject offer-nya, mirror
+    // pola yang sudah ada untuk online test. Audit trail pakai source
+    // CANDIDATE_PORTAL + metadata IP/UA → trail forensic kalau ada
+    // dispute "saya nggak pernah accept".
+    //
+    // Routes:
+    //   GET  /careers/account/offers                — list offer milik account
+    //   GET  /careers/account/offers/{id}           — detail offer (decoded)
+    //   POST /careers/account/offers/{id}/respond   — accept/reject self-service
+
+    /**
+     * GET /careers/account/offers
+     *
+     * List semua offer (semua status) untuk lamaran milik kandidat ini.
+     * Frontend yang highlight badge merah untuk SENT yang masih bisa
+     * direspon — backend tetap return semua supaya kandidat bisa lihat
+     * history (offer yang sudah expired, withdrawn, dll).
+     */
+    public function listOffers()
+    {
+        $account = $this->candidateAccount();
+        if (! $account) return $this->fail('Not authenticated', 401);
+
+        $db = \Config\Database::connect();
+        // Scope: semua offer untuk semua candidate row yang dimiliki account ini.
+        // Kandidat bisa apply ke beberapa lowongan → bisa punya beberapa offer.
+        $rows = $db->table('candidate_offers o')
+            ->select('o.id, o.offer_number, o.status, o.basic_salary, o.currency,'
+                . ' o.employment_status, o.proposed_join_date, o.probation_months,'
+                . ' o.response_deadline, o.sent_at, o.responded_at,'
+                . ' o.candidate_id,'
+                . ' c.full_name AS candidate_name,'
+                . ' jp.title AS job_title, jp.reference_number AS job_reference,'
+                . ' p.name AS position_name, d.name AS department_name')
+            ->join('candidates c', 'c.id = o.candidate_id')
+            ->join('job_postings jp', 'jp.id = o.job_posting_id', 'left')
+            ->join('positions p', 'p.id = o.position_id', 'left')
+            ->join('departments d', 'd.id = o.department_id', 'left')
+            ->where('c.candidate_account_id', (int) $account['id'])
+            ->where('o.deleted_at IS NULL')
+            ->orderBy('o.created_at', 'DESC')
+            ->get()->getResultArray();
+
+        // Hitung counter untuk dashboard widget
+        $pending = 0;
+        foreach ($rows as $r) {
+            if ($r['status'] === 'SENT') $pending++;
+        }
+
+        return $this->ok([
+            'offers'        => $rows,
+            'pending_count' => $pending,
+        ]);
+    }
+
+    /**
+     * GET /careers/account/offers/{id}
+     *
+     * Detail offer untuk halaman review. Hanya offer yang status SENT,
+     * ACCEPTED, REJECTED, atau EXPIRED yang boleh dilihat kandidat —
+     * DRAFT internal HR tidak boleh leak.
+     */
+    public function showOffer($id = null)
+    {
+        $account = $this->candidateAccount();
+        if (! $account) return $this->fail('Not authenticated', 401);
+
+        $offer = $this->ownedOfferOrFail((int) $id, $account);
+        if (! $offer) return $this->response;
+
+        // Block DRAFT — itu masih internal HR, belum di-send
+        if ($offer['status'] === 'DRAFT') {
+            return $this->fail('Offer belum tersedia. Hubungi tim HR.', 404, 'OFFER_NOT_VISIBLE');
+        }
+
+        // Load full detail via service (sudah decode JSON allowances/benefits)
+        try {
+            $detail = \Config\Services::offer()->loadOffer((int) $offer['id']);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 404);
+        }
+
+        // Sanitize: jangan kirim field internal HR
+        $hidden = ['internal_notes', 'created_by', 'sent_by'];
+        foreach ($hidden as $h) unset($detail[$h]);
+
+        // Tambah job context biar frontend bisa tampilkan ringkasan
+        $db = \Config\Database::connect();
+        $job = null;
+        if (! empty($detail['job_posting_id'])) {
+            $job = $db->table('job_postings')
+                ->select('id, title, reference_number, public_slug, work_arrangement, city, employment_type')
+                ->where('id', (int) $detail['job_posting_id'])
+                ->get()->getRowArray();
+        }
+        $company = $db->table('companies')
+            ->select('id, name, career_slug, logo_url')
+            ->where('id', (int) $detail['company_id'])
+            ->get()->getRowArray();
+
+        // Flag: bisa direspon atau tidak (status SENT + deadline belum lewat)
+        $canRespond = $detail['status'] === 'SENT'
+            && (empty($detail['response_deadline'])
+                || strtotime($detail['response_deadline'] . ' 23:59:59') >= time());
+
+        return $this->ok([
+            'offer'       => $detail,
+            'job'         => $job,
+            'company'     => $company,
+            'can_respond' => $canRespond,
+            'expired'     => $detail['status'] === 'SENT'
+                && ! empty($detail['response_deadline'])
+                && strtotime($detail['response_deadline'] . ' 23:59:59') < time(),
+        ]);
+    }
+
+    /**
+     * POST /careers/account/offers/{id}/respond
+     *
+     * Body: { decision: 'ACCEPTED'|'REJECTED', note: string|null,
+     *         rejection_reason: string|null }
+     *
+     * Kandidat self-service accept/reject offer-nya. Audit + IP/UA
+     * di-record via OfferService::recordResponseByCandidate().
+     */
+    public function respondToOffer($id = null)
+    {
+        $account = $this->candidateAccount();
+        if (! $account) return $this->fail('Not authenticated', 401);
+
+        $offer = $this->ownedOfferOrFail((int) $id, $account);
+        if (! $offer) return $this->response;
+
+        $body = $this->getBody();
+        $decision = strtoupper((string) ($body['decision'] ?? ''));
+        if (! in_array($decision, ['ACCEPTED', 'REJECTED'], true)) {
+            return $this->fail('decision harus ACCEPTED atau REJECTED', 422, 'INVALID_INPUT');
+        }
+        $note = isset($body['note']) ? mb_substr(trim((string) $body['note']), 0, 2000) : null;
+        $rejectionReason = isset($body['rejection_reason'])
+            ? mb_substr(trim((string) $body['rejection_reason']), 0, 1000)
+            : null;
+        if ($decision === 'REJECTED' && empty($rejectionReason)) {
+            return $this->fail('Alasan penolakan wajib diisi (minimal 5 karakter)', 422, 'REJECTION_REASON_REQUIRED');
+        }
+        if ($decision === 'REJECTED' && mb_strlen($rejectionReason) < 5) {
+            return $this->fail('Alasan penolakan minimal 5 karakter', 422, 'REJECTION_REASON_TOO_SHORT');
+        }
+
+        $ip = $this->request->getIPAddress();
+        $ua = $this->request->getHeaderLine('User-Agent');
+
+        try {
+            $result = Services::offer()->recordResponseByCandidate(
+                (int) $offer['id'],
+                $decision,
+                (int) $account['id'],
+                $note,
+                $rejectionReason,
+                $ip ?: null,
+                $ua ?: null,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail($e->getMessage(), 422, 'INVALID_INPUT');
+        } catch (\RuntimeException $e) {
+            return $this->fail($e->getMessage(), 422, 'OFFER_BLOCKED');
+        } catch (\Throwable $e) {
+            log_message('error', 'Candidate offer respond failed: ' . $e->getMessage());
+            return $this->fail('Gagal mencatat respon. Silakan coba lagi.', 500);
+        }
+
+        $message = $decision === 'ACCEPTED'
+            ? 'Penawaran berhasil diterima. Tim HR akan menghubungi Anda untuk proses berikutnya.'
+            : 'Penawaran berhasil ditolak. Terima kasih atas waktunya.';
+
+        // Sanitize sebelum return — sama seperti showOffer
+        unset($result['internal_notes'], $result['created_by'], $result['sent_by']);
+
+        return $this->ok([
+            'offer'    => $result,
+            'decision' => $decision,
+        ], $message);
+    }
+
+    /**
+     * Helper — pastikan offer milik kandidat ini (via candidates.candidate_account_id).
+     * Kandidat bisa punya banyak candidate row (apply ke banyak job),
+     * jadi join candidates.candidate_account_id ke account ID.
+     */
+    private function ownedOfferOrFail(int $id, array $account): ?array
+    {
+        if ($id <= 0) {
+            $this->response = $this->fail('ID offer tidak valid', 400);
+            return null;
+        }
+        $db = \Config\Database::connect();
+        $row = $db->table('candidate_offers o')
+            ->select('o.*')
+            ->join('candidates c', 'c.id = o.candidate_id')
+            ->where('o.id', $id)
+            ->where('c.candidate_account_id', (int) $account['id'])
+            ->where('o.deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $row) {
+            $this->response = $this->fail('Penawaran tidak ditemukan atau bukan milik Anda', 404);
+            return null;
+        }
+        return $row;
+    }
+
     /**
      * Helper — pastikan application milik account yang sedang login &
      * load row lengkap. Set $this->response untuk error supaya caller

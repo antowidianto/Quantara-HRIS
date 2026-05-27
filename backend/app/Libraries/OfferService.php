@@ -422,6 +422,122 @@ class OfferService
     }
 
     /**
+     * Record response dari kandidat sendiri (Candidate Portal — Option C).
+     *
+     * Beda dari `recordResponse()`:
+     *   - Caller = candidate account (bukan user internal)
+     *   - Audit log pakai source = CANDIDATE_PORTAL + metadata berisi
+     *     candidate_account_id, IP, user_agent → trail forensic kalau ada
+     *     dispute "saya nggak pernah accept".
+     *   - Tidak butuh permission internal (`recruitment.offer.respond`),
+     *     tapi WAJIB ownership check di caller (offer.candidate_account_id
+     *     harus sama dengan account yang login).
+     *
+     * Sisanya identik dengan recordResponse(): validasi status SENT,
+     * cek deadline, auto-progress ke HIRED kalau ACCEPTED, notify HR.
+     *
+     * @throws \RuntimeException kalau status bukan SENT atau deadline lewat
+     */
+    public function recordResponseByCandidate(
+        int $offerId,
+        string $decision,
+        int $candidateAccountId,
+        ?string $responseNote = null,
+        ?string $rejectionReason = null,
+        ?string $ipAddress = null,
+        ?string $userAgent = null,
+    ): array {
+        $decision = strtoupper($decision);
+        if (! in_array($decision, ['ACCEPTED', 'REJECTED'], true)) {
+            throw new \InvalidArgumentException('decision harus ACCEPTED atau REJECTED');
+        }
+
+        $db = Database::connect();
+        $offer = $this->loadOffer($offerId);
+        if ($offer['status'] !== 'SENT') {
+            throw new \RuntimeException(
+                "Offer tidak bisa di-respond di status {$offer['status']}. "
+                . "Hanya SENT yang bisa direspon."
+            );
+        }
+        if ($offer['response_deadline'] && strtotime($offer['response_deadline'] . ' 23:59:59') < time()) {
+            $this->expire($offerId, 'system');
+            throw new \RuntimeException(
+                "Offer sudah expired (deadline {$offer['response_deadline']}). "
+                . "Hubungi HR untuk re-issue offer baru."
+            );
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $update = [
+            'status'         => $decision,
+            'responded_at'   => $now,
+            'response_note'  => $responseNote,
+            'updated_at'     => $now,
+        ];
+        if ($decision === 'REJECTED' && $rejectionReason) {
+            $update['rejection_reason'] = $rejectionReason;
+        }
+        $db->table('candidate_offers')->where('id', $offerId)->update($update);
+
+        if ($decision === 'ACCEPTED') {
+            $cand = $db->table('candidates')->where('id', $offer['candidate_id'])->get()->getRowArray();
+            if ($cand && $cand['current_stage'] !== 'HIRED') {
+                try {
+                    Services::recruitment()->moveStage(
+                        (int) $offer['candidate_id'],
+                        'HIRED',
+                        ['feedback' => "Offer {$offer['offer_number']} diterima kandidat (self-service via portal). " . ($responseNote ?: '')],
+                    );
+                } catch (\Throwable $e) {
+                    log_message('warning', 'Auto-progress to HIRED after candidate self-accept failed: ' . $e->getMessage());
+                }
+            }
+            $this->notifyHr($offer['company_id'], 'offer.accepted',
+                'Offer diterima oleh kandidat (self-service)',
+                "Kandidat {$offer['candidate_name']} menerima offer {$offer['offer_number']} via Career Portal. "
+                . "Silakan klik tombol 'Hire' di pipeline untuk convert ke employee."
+            );
+        } else {
+            // REJECTED — kabari HR juga supaya bisa re-engage atau cari kandidat lain
+            $this->notifyHr($offer['company_id'], 'offer.rejected',
+                'Offer ditolak oleh kandidat',
+                "Kandidat {$offer['candidate_name']} menolak offer {$offer['offer_number']} via Career Portal."
+                . ($rejectionReason ? "\n\nAlasan: {$rejectionReason}" : '')
+            );
+        }
+
+        // Audit dengan trail kandidat — source CANDIDATE_PORTAL supaya gampang
+        // di-filter saat investigasi dispute.
+        try {
+            Services::audit()
+                ->forModule('RECRUITMENT')
+                ->withSource('CANDIDATE_PORTAL')
+                ->log(
+                    action: 'offer.' . strtolower($decision),
+                    entity: 'candidate_offer',
+                    entityId: $offerId,
+                    description: "Offer {$offer['offer_number']} {$decision} oleh kandidat (self-service)"
+                        . ($responseNote ? ': ' . mb_substr($responseNote, 0, 100) : ''),
+                    severity: $decision === 'REJECTED' ? 'WARNING' : 'NOTICE',
+                    metadata: [
+                        'actor'                => 'candidate',
+                        'candidate_account_id' => $candidateAccountId,
+                        'candidate_name'       => $offer['candidate_name'] ?? null,
+                        'candidate_email'      => $offer['candidate_email'] ?? null,
+                        'ip_address'           => $ipAddress,
+                        'user_agent'           => $userAgent ? mb_substr($userAgent, 0, 255) : null,
+                        'rejection_reason'     => $decision === 'REJECTED' ? $rejectionReason : null,
+                    ],
+                );
+        } catch (\Throwable $e) {
+            log_message('warning', 'Audit candidate offer response failed: ' . $e->getMessage());
+        }
+
+        return $this->loadOffer($offerId);
+    }
+
+    /**
      * HR withdraw offer (mis. salah salary). Hanya allowed dari DRAFT/SENT.
      */
     public function withdraw(int $offerId, int $userId, string $reason): array

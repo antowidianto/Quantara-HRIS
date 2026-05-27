@@ -29,3 +29,38 @@ auth.bootstrap().finally(() => {
   app.use(router)
   app.mount('#app')
 })
+
+// ─── PWA Service Worker (H2.1 Sprint 10) ───────────────────────────
+// Register sw.js dari /public. SW kasih offline app shell + API GET cache
+// + queue mutation saat offline + Web Push. Lihat public/sw.js untuk detail.
+// Dilindungi flag env supaya bisa di-disable saat dev/debugging.
+if (
+  'serviceWorker' in navigator
+  && import.meta.env.PROD
+  && import.meta.env.VITE_PWA_DISABLED !== '1'
+) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .then((reg) => {
+        // Auto-flush queue mutation saat browser kembali online
+        window.addEventListener('online', () => {
+          if (reg.active) reg.active.postMessage({ type: 'flush-queue' })
+        })
+      })
+      .catch((err) => {
+        // Silent fail — PWA enhancement, bukan critical path
+        console.warn('[PWA] Service worker registration failed:', err)
+      })
+  })
+
+  // Listen pesan dari SW (mis. queue-flushed setelah online lagi)
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data || {}
+    if (data.type === 'queue-flushed' && data.success > 0) {
+      // Show toast via lightweight notification (Toast may not be ready
+      // saat SW message datang, jadi pakai console + custom event)
+      window.dispatchEvent(new CustomEvent('pwa:queue-flushed', { detail: data }))
+    }
+  })
+}

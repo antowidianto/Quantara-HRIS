@@ -23,6 +23,7 @@ import {
   ChevronDownIcon, ArrowPathIcon, BuildingOffice2Icon,
 } from '@heroicons/vue/24/outline'
 import CostCenterNode from './CostCenterNode.vue'
+import EmployeePicker from '@/components/EmployeePicker.vue'
 
 const toast = useToast()
 
@@ -46,7 +47,6 @@ const saving = ref(false)
 const parentOptions = ref([]) // picker for parent select
 const departments = ref([])
 const branches = ref([])
-const employees = ref([])
 
 // Budget tab
 const selectedCcId = ref(null)
@@ -168,14 +168,15 @@ async function loadPickers() {
   } catch (_) { /* silent */ }
 }
 
-async function loadEmployeesPicker() {
-  if (employees.value.length > 0) return
+/**
+ * Refresh hanya picker parent (dipanggil sebelum buka modal Create/Edit
+ * supaya cost center yang baru dibuat ikut muncul di dropdown).
+ */
+async function reloadParentOptions() {
   try {
-    const res = await api.get('/employees', {
-      params: { per_page: 500, is_active: 1 },
-    })
-    employees.value = res.data.data || []
-  } catch (_) {}
+    const res = await api.get('/cost-centers/picker')
+    parentOptions.value = res.data.data || []
+  } catch (_) { /* silent */ }
 }
 
 // ─── CRUD ──────────────────────────────────────────────────────
@@ -183,7 +184,8 @@ function openCreate() {
   form.value = emptyForm()
   editing.value = false
   showModal.value = true
-  loadEmployeesPicker()
+  // Refresh parent dropdown supaya CC yang baru dibuat ikut muncul.
+  reloadParentOptions()
 }
 
 function openEdit(item) {
@@ -194,7 +196,8 @@ function openEdit(item) {
   }
   editing.value = true
   showModal.value = true
-  loadEmployeesPicker()
+  // Refresh parent dropdown supaya semua CC terbaru muncul (kecuali diri sendiri).
+  reloadParentOptions()
 }
 
 async function saveForm() {
@@ -208,7 +211,8 @@ async function saveForm() {
       toast.success('Cost center dibuat')
     }
     showModal.value = false
-    await fetchList()
+    // Refresh list + picker supaya CC baru langsung tersedia sebagai parent.
+    await Promise.all([fetchList(), reloadParentOptions()])
     if (tab.value === 'tree') await fetchTree()
   } catch (e) {
     const msg = e.response?.data?.message
@@ -235,6 +239,7 @@ async function remove(item) {
     await api.delete(`/cost-centers/${item.id}`)
     toast.success('Cost center dihapus')
     fetchList()
+    reloadParentOptions()
     if (tab.value === 'tree') fetchTree()
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal menghapus')
@@ -797,13 +802,18 @@ watch(tab, async (val) => {
               </select>
             </div>
             <div>
-              <label class="label">Manager</label>
-              <select v-model="form.manager_employee_id" class="input">
-                <option :value="null">— Tidak ada —</option>
-                <option v-for="e in employees" :key="e.id" :value="e.id">
-                  {{ e.full_name }} ({{ e.employee_number }})
-                </option>
-              </select>
+              <label class="label">
+                Manager
+                <span class="text-xs font-normal text-gray-500">
+                  (level Manager keatas)
+                </span>
+              </label>
+              <EmployeePicker
+                v-model="form.manager_employee_id"
+                :min-grade-level="7"
+                placeholder="— Tidak ada / cari & pilih manager —"
+                help-text="Hanya menampilkan Manager, GM/VP, Direktur, dan Komisaris. Ketik untuk cari nama, NIK, atau email."
+              />
             </div>
           </div>
 

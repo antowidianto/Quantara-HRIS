@@ -48,5 +48,10 @@ class SeedAll extends Seeder
         echo "  - Manager:      rina.wati@hris.local    / Demo@12345\n";
         echo "  - Employee:     siti.aminah@hris.local  / Demo@12345\n";
         echo "  - Finance:      andi.pratama@hris.local / Demo@12345\n\n";
+
+        echo "ALTERNATIF (production-realistic Indonesian PT structure):\n";
+        echo "  php spark db:seed IndonesianStakeholderSeeder\n";
+        echo "  → Reset penuh + 68 stakeholder lengkap (Komisaris → Junior Staff)\n";
+        echo "  → Default password: Quantara@2026 (must_change=1)\n\n";
     }
 }
