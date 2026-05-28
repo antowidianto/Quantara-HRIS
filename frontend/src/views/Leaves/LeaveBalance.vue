@@ -9,6 +9,7 @@ import {
   InformationCircleIcon, ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 /**
  * Halaman saldo cuti karyawan dengan breakdown:
@@ -130,9 +131,18 @@ const totals = computed(() => {
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <CalendarDaysIcon class="w-6 h-6" /> Saldo Cuti
       </h1>
-      <button class="btn-secondary" @click="fetchBalance" :disabled="loading">
-        <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
-      </button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- Sprint 3 — bulk import saldo cuti awal dari xlsx -->
+        <ExcelImporter
+          v-if="auth.can('leave_balances.bulk_import')"
+          resource="leave_balances"
+          button-label="Import Saldo Cuti"
+          @committed="fetchBalance()"
+        />
+        <button class="btn-secondary" @click="fetchBalance" :disabled="loading">
+          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
+        </button>
+      </div>
     </div>
 
     <!-- Filter -->

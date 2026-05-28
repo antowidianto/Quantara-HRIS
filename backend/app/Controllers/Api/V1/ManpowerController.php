@@ -51,6 +51,7 @@ class ManpowerController extends ApiController
         $type    = strtoupper((string) ($this->request->getGet('request_type') ?? ''));
         $deptId  = (int) ($this->request->getGet('department_id') ?? 0);
         $mineOnly = (int) ($this->request->getGet('mine') ?? 0) === 1;
+        $overdueOnly = (int) ($this->request->getGet('overdue_only') ?? 0) === 1;
 
         $builder = $db->table('manpower_requests mr')
             ->select('mr.*, d.name AS department_name, p.name AS position_name, b.name AS branch_name,'
@@ -73,6 +74,19 @@ class ManpowerController extends ApiController
         if ($type   !== '')           $builder->where('mr.request_type', $type);
         if ($deptId > 0)              $builder->where('mr.department_id', $deptId);
         if ($mineOnly)                $builder->where('mr.requested_by_user_id', $this->userId());
+
+        // Migration #066 — server-side filter "overdue_only". Pakai
+        // kolom vacancy_started_at + status terminal exclusion supaya
+        // total pagination tetap akurat (tidak hanya ngandalkan v-show
+        // di FE yang cuma filter halaman saat ini).
+        if ($overdueOnly) {
+            $cols = array_map(fn ($c) => strtolower($c->name), $db->getFieldData('manpower_requests'));
+            if (in_array('vacancy_started_at', $cols, true)) {
+                $builder->where('mr.vacancy_started_at IS NOT NULL')
+                    ->where('mr.vacancy_started_at <', date('Y-m-d'))
+                    ->whereIn('mr.status', ['DRAFT','SUBMITTED','APPROVED','HIRING']);
+            }
+        }
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('mr.created_at', 'DESC')
@@ -632,8 +646,70 @@ class ManpowerController extends ApiController
         if (! $this->canView()) return $this->fail('Forbidden', 403);
         $companyId = $this->companyId();
         if (! $companyId) return $this->fail('Company context required', 400);
-        $stats = Services::manpower()->stats($companyId);
+        $svc = Services::manpower();
+        $stats = $svc->stats($companyId);
+
+        // Migration #066 — extra counter: aktif yang OVERDUE (vacancy_started_at
+        // sudah lewat, status masih DRAFT/SUBMITTED/APPROVED/HIRING) dan yang
+        // ABOUT_TO_BE_OVERDUE (≤ 30 hari lagi). Frontend pakai untuk badge
+        // dashboard "X MPP overdue, Y akan overdue".
+        try {
+            $overdue = $svc->overdueRequests($companyId);
+            $upcoming = $svc->aboutToBeOverdueRequests($companyId, 30);
+            $stats['overdue'] = [
+                'count'             => count($overdue),
+                'total_headcount'   => array_sum(array_map(fn ($r) => (int) $r['headcount'] - (int) $r['hired_count'], $overdue)),
+                'oldest_days'       => count($overdue) > 0 ? (int) $overdue[0]['days_overdue'] : 0,
+            ];
+            $stats['about_to_be_overdue'] = [
+                'count'           => count($upcoming),
+                'total_headcount' => array_sum(array_map(fn ($r) => (int) $r['headcount'] - (int) $r['hired_count'], $upcoming)),
+            ];
+        } catch (\Throwable $e) {
+            // Schema mungkin belum migrate — return stats biasa saja
+            log_message('warning', 'MPP overdue stats failed: ' . $e->getMessage());
+        }
+
         return $this->ok($stats);
+    }
+
+    /**
+     * GET /manpower-requests/overdue (Migration #066).
+     *
+     * MPP yang `vacancy_started_at < today` dan status masih
+     * DRAFT/SUBMITTED/APPROVED/HIRING (belum FILLED). Plus yang akan
+     * overdue dalam 30 hari (untuk warning proaktif HRD).
+     *
+     * Query:
+     *   - scope=overdue (default) | upcoming | all
+     *   - days=30 (untuk upcoming)
+     */
+    public function overdue()
+    {
+        if (! $this->canView()) return $this->fail('Forbidden', 403);
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+
+        $scope = strtolower((string) ($this->request->getGet('scope') ?? 'overdue'));
+        $days  = max(1, min(180, (int) ($this->request->getGet('days') ?? 30)));
+
+        $svc = Services::manpower();
+        $overdue  = $scope === 'upcoming' ? [] : $svc->overdueRequests($companyId);
+        $upcoming = $scope === 'overdue'  ? [] : $svc->aboutToBeOverdueRequests($companyId, $days);
+
+        return $this->ok([
+            'overdue'  => $overdue,
+            'upcoming' => $upcoming,
+            'today'    => date('Y-m-d'),
+            'threshold_days' => $days,
+            'summary'  => [
+                'overdue_count'           => count($overdue),
+                'overdue_total_headcount' => array_sum(array_map(
+                    fn ($r) => (int) $r['headcount'] - (int) $r['hired_count'], $overdue
+                )),
+                'upcoming_count'          => count($upcoming),
+            ],
+        ]);
     }
 
     /**

@@ -1,0 +1,94 @@
+<?php
+
+namespace App\Database\Migrations;
+
+use CodeIgniter\Database\Migration;
+
+/**
+ * Migration #069 — Permissions baru untuk batch ketiga bulk import.
+ *
+ * Sprint 3 menambahkan 3 modul transactional data import:
+ *
+ *   - leave_balances    — saldo cuti awal (opening balance saat go-live)
+ *   - shift_schedules   — roster/jadwal shift bulanan
+ *   - attendances       — backfill data absensi dari mesin fingerprint/sistem lama
+ *
+ * Resource ini di-handle oleh `App\Libraries\Import\ImportRegistry` dan
+ * dispatcher generic `ImportController` yang sudah dibuat di #067.
+ *
+ * Fitur baru di XlsxImportService:
+ *   - composite_unique: validasi unik gabungan (employee + leave_type + year)
+ *   - upsert_on_conflict: shift_schedules akan UPDATE kalau sudah ada
+ *   - datetime type coercion: untuk clock_in_at / clock_out_at
+ *   - Auto-inject is_corrected + correction_reason untuk attendances
+ *
+ * Idempotent: aman dijalankan dua kali.
+ */
+class AddImportPermissionsBatch3 extends Migration
+{
+    public function up(): void
+    {
+        $db = $this->db;
+        if (! $db->tableExists('permissions')) return;
+
+        $newPermissions = [
+            ['slug' => 'leave_balances.bulk_import',   'name' => 'Bulk Import Saldo Cuti Awal dari Excel',       'group' => 'leave'],
+            ['slug' => 'shift_schedules.bulk_import',  'name' => 'Bulk Import Roster/Jadwal Shift dari Excel',   'group' => 'attendance'],
+            ['slug' => 'attendances.bulk_import',      'name' => 'Bulk Import Backfill Absensi dari Excel',      'group' => 'attendance'],
+        ];
+
+        $permCols = $db->getFieldNames('permissions');
+        $now = date('Y-m-d H:i:s');
+
+        foreach ($newPermissions as $p) {
+            $existing = $db->table('permissions')->where('slug', $p['slug'])->get()->getRowArray();
+            if ($existing) continue;
+            $insert = $p;
+            if (in_array('created_at', $permCols, true)) $insert['created_at'] = $now;
+            if (in_array('updated_at', $permCols, true)) $insert['updated_at'] = $now;
+            $insert = array_intersect_key($insert, array_flip($permCols));
+            $db->table('permissions')->insert($insert);
+        }
+
+        // Auto-grant ke role admin standar
+        if ($db->tableExists('roles') && $db->tableExists('role_permissions')) {
+            $rpCols = $db->getFieldNames('role_permissions');
+            $roles = $db->table('roles')
+                ->whereIn('slug', ['super_admin', 'hr_admin'])
+                ->get()->getResultArray();
+            foreach ($roles as $r) {
+                foreach ($newPermissions as $p) {
+                    $perm = $db->table('permissions')->where('slug', $p['slug'])->get()->getRowArray();
+                    if (! $perm) continue;
+                    $exists = $db->table('role_permissions')
+                        ->where('role_id', $r['id'])
+                        ->where('permission_id', $perm['id'])
+                        ->countAllResults();
+                    if ($exists > 0) continue;
+                    $rpInsert = ['role_id' => $r['id'], 'permission_id' => $perm['id']];
+                    if (in_array('created_at', $rpCols, true)) $rpInsert['created_at'] = $now;
+                    $rpInsert = array_intersect_key($rpInsert, array_flip($rpCols));
+                    $db->table('role_permissions')->insert($rpInsert);
+                }
+            }
+        }
+    }
+
+    public function down(): void
+    {
+        $db = $this->db;
+        if (! $db->tableExists('permissions')) return;
+
+        $slugs = [
+            'leave_balances.bulk_import',
+            'shift_schedules.bulk_import',
+            'attendances.bulk_import',
+        ];
+        $perms = $db->table('permissions')->whereIn('slug', $slugs)->get()->getResultArray();
+        $ids = array_column($perms, 'id');
+        if (! empty($ids) && $db->tableExists('role_permissions')) {
+            $db->table('role_permissions')->whereIn('permission_id', $ids)->delete();
+        }
+        $db->table('permissions')->whereIn('slug', $slugs)->delete();
+    }
+}

@@ -30,9 +30,14 @@ Migration `2024-01-01-000012_EnhanceLeaveBalance.php` menambah 4 kolom di
 | `is_carry_over_allowed` | tinyint | 0 | Sisa boleh di-carry ke tahun depan |
 | `carry_over_max_days` | decimal(6,2) | NULL | Cap hari yang di-carry (NULL = tanpa batas) |
 | `carry_over_expires_in_months` | int | 6 | Carry-over kedaluwarsa setelah X bulan |
+| `carry_over_basis` | enum | YEAR_END | YEAR_END (reset 1 Jan) atau ANNIVERSARY (reset di tanggal join) |
 
 Default untuk kategori `ANNUAL`: `is_carry_over_allowed=1`, `max_days=6`,
 `expires_in_months=6` (sesuai UU 13/2003 Pasal 79 ayat 5).
+
+> **Migration #064 (Mei 2026)** menambahkan kolom `carry_over_basis`
+> + `leave_balances.basis` + `anniversary_processed_at` untuk
+> mendukung mode anniversary.
 
 3 permission baru:
 - `leave_balance.view` — lihat detail saldo karyawan lain
@@ -70,6 +75,8 @@ GET    /api/v1/leaves/team-calendar?branch_id=&department_id=&start_date=&end_da
 
 ### Command CLI
 
+#### Mode YEAR_END (default — reset 1 Januari)
+
 ```bash
 # Default: dari tahun lalu ke tahun ini, semua company aktif
 php spark hr:leave-yearend
@@ -92,6 +99,56 @@ Cron yang disarankan (jalan otomatis tiap 1 Januari jam 01:00):
 
 Setiap eksekusi tercatat di audit log dengan `module=LEAVE`,
 `action=leave.year_end_carryover`.
+
+#### Mode ANNIVERSARY (reset di tanggal join — Mei 2026+)
+
+UU 13/2003 Pasal 79 ayat (5) mensyaratkan cuti tahunan timbul setelah
+12 bulan kerja **terus-menerus**. Kalau perusahaan ingin menerapkan
+aturan ini secara strict (saldo penuh muncul tepat di hari ulang tahun
+kerja, bukan 1 Januari massal), set `leave_types.carry_over_basis =
+ANNIVERSARY` lalu pasang cron harian:
+
+```bash
+# Hari ini, semua company
+php spark hr:leave-anniversary-carry
+
+# Override tanggal (untuk testing / backfill)
+php spark hr:leave-anniversary-carry --date 2026-05-15
+
+# Hanya 1 company
+php spark hr:leave-anniversary-carry --company 1
+
+# Dry-run
+php spark hr:leave-anniversary-carry --dry-run
+```
+
+Cron harian (jam 00:30):
+
+```cron
+30 0 * * *  cd /path/to/backend && php spark hr:leave-anniversary-carry >> writable/logs/leave-anniversary.log 2>&1
+```
+
+Bagaimana algoritmanya?
+- Setiap pagi cron scan karyawan yang `MM-DD(join_date) == today`.
+- Untuk leave_type berbasis ANNIVERSARY, saldo karyawan tahun lama
+  → `carried_over` (capped) di entry tahun anniversary baru.
+- `allocated` = `default_days` penuh (karyawan sudah ≥ 12 bulan kerja).
+- `expires_at` = today + `carry_over_expires_in_months` bulan.
+- Karyawan baru hire (tenure < 12 bulan) di-skip.
+- Idempotent: kolom `anniversary_processed_at` mencegah double-carry
+  dalam sehari.
+- Edge case 29 Februari: kalau today = 28 Feb di tahun non-leap,
+  ikut sertakan karyawan yang lahir 29 Feb supaya tidak skipped permanen.
+
+Kapan pakai mana?
+
+| Mode | Kapan dipakai |
+|---|---|
+| `YEAR_END` | Mayoritas perusahaan Indonesia. Simpel administratif: semua karyawan reset 1 Jan, payroll team tinggal sekali jalan setahun. |
+| `ANNIVERSARY` | Strict per UU. Cocok untuk perusahaan yang punya banyak hire pertengahan tahun & ingin fairness — karyawan yang join Mei tidak rugi karena cuti penuh "milik tahun lalu" yg tidak sempat dipakai. |
+
+HR boleh **mix** — mis. Cuti Tahunan basis ANNIVERSARY, Cuti Sakit
+basis YEAR_END.
 
 ### Frontend
 

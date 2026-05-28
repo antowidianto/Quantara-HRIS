@@ -67,5 +67,6 @@ const fields = [
     :columns="columns"
     :fields="fields"
     :defaults="{ is_active: 1, allow_clock_here: 1, type: 'BRANCH_OFFICE' }"
+    import-resource="work_locations"
   />
 </template>

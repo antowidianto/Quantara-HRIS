@@ -12,6 +12,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import EmployeeModal from './EmployeeModal.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -253,9 +254,18 @@ function getInitials(name) {
         <h1 class="text-2xl font-bold">Karyawan</h1>
         <p class="text-gray-500 text-sm">Kelola data karyawan perusahaan</p>
       </div>
-      <button v-if="auth.can('employee.create')" class="btn-primary self-start md:self-auto" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Tambah Karyawan
-      </button>
+      <div class="flex items-center gap-2 self-start md:self-auto flex-wrap">
+        <!-- Migration #067 — bulk import dari xlsx -->
+        <ExcelImporter
+          v-if="auth.can('employees.bulk_import')"
+          resource="employees"
+          button-label="Import Excel"
+          @committed="fetch()"
+        />
+        <button v-if="auth.can('employee.create')" class="btn-primary" @click="openCreate">
+          <PlusIcon class="w-4 h-4" /> Tambah Karyawan
+        </button>
+      </div>
     </div>
 
     <div class="card">

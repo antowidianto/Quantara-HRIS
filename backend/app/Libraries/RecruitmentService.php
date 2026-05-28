@@ -79,30 +79,69 @@ class RecruitmentService
      * tuntas (best_result PENDING/REVIEW), tolak pemindahan ke stage di
      * atas online test (INTERVIEW_HR / INTERVIEW_USER / OFFER / HIRED)
      * supaya HR tidak accidentally lewatkan tahap test atau review-nya.
+     *
+     * Migration #065 — kalau job_posting kandidat pakai pipeline_template,
+     * stage divalidasi terhadap stages template (bisa custom seperti
+     * PSIKOTEST, FGD, INTERVIEW_BOD). Online test gate juga lebih granular:
+     * cek per-stage `required_test_category_id` (kalau di-set), bukan blanket
+     * check semua test.
      */
     public function moveStage(int $candidateId, string $newStage, array $params = []): int
     {
         $db = \Config\Database::connect();
-        if (! in_array($newStage, self::STAGES, true)) {
-            throw new \InvalidArgumentException("Stage tidak valid: {$newStage}");
-        }
         $cand = $db->table('candidates')->where('id', $candidateId)->get()->getRowArray();
         if (! $cand) throw new \InvalidArgumentException("Candidate not found");
 
-        if (in_array($cand['current_stage'], self::TERMINAL_STAGES, true)
-            && ! in_array($newStage, self::TERMINAL_STAGES, true)) {
-            throw new \RuntimeException(
-                "Candidate sudah di stage final {$cand['current_stage']}, tidak bisa kembali ke {$newStage}"
-            );
-        }
+        // Resolve pipeline template kalau ada — dapat list valid stages,
+        // mapping ke stage_type, dan flag terminal per code stage.
+        $tplStages   = $this->resolvePipelineStages((int) $cand['job_posting_id']);
+        $usingTemplate = ! empty($tplStages);
+        $newStage    = strtoupper(trim($newStage));
 
-        // Sprint 23+ — verify online test selesai sebelum boleh maju ke
-        // stage post-test. Allow REJECTED/WITHDRAWN tanpa check (HR bisa
-        // tolak kapan saja).
-        if (in_array($newStage, self::POST_ONLINE_TEST_STAGES, true)) {
-            $status = $this->onlineTestCompletionStatus($candidateId);
-            if ($status['has_assignments'] && ! $status['all_done']) {
-                throw new \RuntimeException($status['blocker_reason']);
+        if ($usingTemplate) {
+            // Validasi stage code harus exist di template
+            $stageCodes = array_column($tplStages, 'code');
+            if (! in_array($newStage, $stageCodes, true)) {
+                throw new \InvalidArgumentException(
+                    "Stage '{$newStage}' tidak ada di pipeline template kandidat. "
+                    . 'Stage valid: ' . implode(', ', $stageCodes)
+                );
+            }
+            $newStageRow = null;
+            foreach ($tplStages as $s) {
+                if ($s['code'] === $newStage) { $newStageRow = $s; break; }
+            }
+            // Cek terminal status (template-aware)
+            $terminalCodes = [];
+            foreach ($tplStages as $s) {
+                if ((int) $s['is_terminal'] === 1) $terminalCodes[] = $s['code'];
+            }
+            if (in_array($cand['current_stage'], $terminalCodes, true)
+                && ! in_array($newStage, $terminalCodes, true)) {
+                throw new \RuntimeException(
+                    "Candidate sudah di stage final {$cand['current_stage']}, tidak bisa kembali ke {$newStage}"
+                );
+            }
+            // Online test gate berdasarkan stage config
+            $this->checkPipelineTestGate($candidateId, $newStageRow, $tplStages);
+        } else {
+            // Backward compat — pakai hardcoded STAGES list
+            if (! in_array($newStage, self::STAGES, true)) {
+                throw new \InvalidArgumentException("Stage tidak valid: {$newStage}");
+            }
+            if (in_array($cand['current_stage'], self::TERMINAL_STAGES, true)
+                && ! in_array($newStage, self::TERMINAL_STAGES, true)) {
+                throw new \RuntimeException(
+                    "Candidate sudah di stage final {$cand['current_stage']}, tidak bisa kembali ke {$newStage}"
+                );
+            }
+            // Sprint 23+ — verify online test selesai sebelum boleh maju ke
+            // stage post-test. Allow REJECTED/WITHDRAWN tanpa check.
+            if (in_array($newStage, self::POST_ONLINE_TEST_STAGES, true)) {
+                $status = $this->onlineTestCompletionStatus($candidateId);
+                if ($status['has_assignments'] && ! $status['all_done']) {
+                    throw new \RuntimeException($status['blocker_reason']);
+                }
             }
         }
 
@@ -859,7 +898,9 @@ class RecruitmentService
     }
 
     /**
-     * Stats untuk dashboard recruitment.
+     * Stats untuk dashboard recruitment. Kalau job_posting punya pipeline
+     * template, return dict pakai stage codes dari template (urutan
+     * mengikuti order_index). Kalau tidak, fallback ke STAGES hardcoded.
      */
     public function pipelineStats(int $companyId, ?int $jobPostingId = null): array
     {
@@ -870,11 +911,163 @@ class RecruitmentService
             ->where('deleted_at IS NULL');
         if ($jobPostingId) $builder->where('job_posting_id', $jobPostingId);
         $rows = $builder->groupBy('current_stage')->get()->getResultArray();
-        $stats = array_fill_keys(self::STAGES, 0);
+
+        // Resolve template buat ordering kalau ada
+        $tplStages = $jobPostingId !== null ? $this->resolvePipelineStages($jobPostingId) : [];
+        if (! empty($tplStages)) {
+            $stats = [];
+            foreach ($tplStages as $s) $stats[$s['code']] = 0;
+        } else {
+            $stats = array_fill_keys(self::STAGES, 0);
+        }
         foreach ($rows as $r) {
-            if (isset($stats[$r['current_stage']])) $stats[$r['current_stage']] = (int) $r['total'];
+            $stage = (string) $r['current_stage'];
+            // Selalu hitung — bahkan stage di luar template (kandidat lama
+            // sebelum template di-assign) supaya HR aware ada inkonsistensi.
+            if (! isset($stats[$stage])) $stats[$stage] = 0;
+            $stats[$stage] = (int) $r['total'];
         }
         return $stats;
+    }
+
+    /**
+     * Resolve daftar stages aktif untuk satu job_posting.
+     *
+     * Algoritma:
+     *   1. Lihat `job_postings.pipeline_template_id`.
+     *   2. Kalau NULL, fallback ke template `is_default=1` di company.
+     *   3. Kalau masih tidak ada, return array kosong → caller pakai
+     *      STAGES hardcoded (backward compat).
+     *
+     * @return array<int, array{id:int, code:string, name:string, stage_type:string,
+     *   order_index:int, required_test_category_id:?int, is_terminal:int,
+     *   is_optional:int, sla_hours:?int}>
+     */
+    public function resolvePipelineStages(int $jobPostingId): array
+    {
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('recruitment_pipeline_stages')) return [];
+        if (! $jobPostingId) return [];
+
+        $job = $db->table('job_postings')->where('id', $jobPostingId)->get()->getRowArray();
+        if (! $job) return [];
+
+        $tplId = isset($job['pipeline_template_id']) && $job['pipeline_template_id'] !== null
+            ? (int) $job['pipeline_template_id'] : 0;
+
+        // Fallback ke default template per company
+        if ($tplId === 0) {
+            $defTpl = $db->table('recruitment_pipeline_templates')
+                ->where('company_id', (int) $job['company_id'])
+                ->where('is_default', 1)
+                ->where('is_active', 1)
+                ->where('deleted_at IS NULL')
+                ->limit(1)->get()->getRowArray();
+            if ($defTpl) $tplId = (int) $defTpl['id'];
+        }
+        if ($tplId === 0) return [];
+
+        return $db->table('recruitment_pipeline_stages')
+            ->where('template_id', $tplId)
+            ->orderBy('order_index', 'ASC')
+            ->orderBy('id', 'ASC')
+            ->get()->getResultArray();
+    }
+
+    /**
+     * Online test gate per-stage.
+     *
+     * Kalau stage tujuan adalah `ONLINE_TEST` type → tidak ada gate (kandidat
+     * baru masuk untuk mulai test).
+     *
+     * Kalau stage tujuan datang **setelah** stage type ONLINE_TEST di
+     * template → cek semua test category-nya (yg di-set `required_test_category_id`)
+     * sudah completed + di-grade.
+     *
+     * Throws \RuntimeException kalau gate gagal.
+     */
+    private function checkPipelineTestGate(int $candidateId, ?array $newStageRow, array $allStages): void
+    {
+        if (! $newStageRow) return;
+        $newType  = (string) ($newStageRow['stage_type'] ?? '');
+        $newOrder = (int) ($newStageRow['order_index'] ?? 0);
+
+        // Kandidat REJECTED/WITHDRAWN tidak perlu lewat gate
+        if (in_array($newType, ['REJECTED', 'WITHDRAWN'], true)) return;
+        // Kalau target adalah ONLINE_TEST sendiri, tidak gate (justru sedang masuk)
+        if ($newType === 'ONLINE_TEST') return;
+
+        // Kumpulkan semua ONLINE_TEST stage yang order-nya < newOrder.
+        // Stage-stage ini "harus sudah lewat" sebelum maju.
+        $priorTestStages = [];
+        foreach ($allStages as $s) {
+            if ((string) ($s['stage_type'] ?? '') === 'ONLINE_TEST'
+                && (int) ($s['order_index'] ?? 0) < $newOrder) {
+                $priorTestStages[] = $s;
+            }
+        }
+        if (empty($priorTestStages)) return;
+
+        // Kalau salah satu prior stage punya required_test_category_id,
+        // kita check khusus kategori tsb. Kalau tidak set, fallback ke
+        // legacy "all assignments completed" check.
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('online_test_assignments')) return;
+
+        $hasCategoryGate = false;
+        foreach ($priorTestStages as $s) {
+            if (! empty($s['required_test_category_id'])) { $hasCategoryGate = true; break; }
+        }
+
+        if (! $hasCategoryGate) {
+            // Legacy gate
+            $status = $this->onlineTestCompletionStatus($candidateId);
+            if ($status['has_assignments'] && ! $status['all_done']) {
+                throw new \RuntimeException($status['blocker_reason']);
+            }
+            return;
+        }
+
+        // Per-category gate: untuk setiap kategori yang di-require di prior
+        // stages, verify ada minimal 1 assignment completed + graded.
+        foreach ($priorTestStages as $s) {
+            $catId = isset($s['required_test_category_id']) && $s['required_test_category_id'] !== null
+                ? (int) $s['required_test_category_id'] : 0;
+            if ($catId === 0) continue;
+
+            $rows = $db->table('online_test_assignments ota')
+                ->select('ota.id, ota.status, ota.best_result, ot.name AS test_name')
+                ->join('online_tests ot', 'ot.id = ota.online_test_id')
+                ->where('ota.candidate_id', $candidateId)
+                ->where('ot.category_id', $catId)
+                ->get()->getResultArray();
+
+            if (empty($rows)) {
+                // Tidak ada assignment kategori ini sama sekali → blok
+                $catName = $db->table('online_test_categories')
+                    ->select('name')->where('id', $catId)->get()->getRow()?->name ?? "kategori #{$catId}";
+                throw new \RuntimeException(
+                    "Stage '{$s['name']}' butuh test kategori '{$catName}', tapi belum ada assignment "
+                    . 'untuk kandidat ini.'
+                );
+            }
+
+            // Apakah minimal 1 selesai + di-grade?
+            $okCount = 0;
+            foreach ($rows as $r) {
+                if ((string) $r['status'] === 'COMPLETED'
+                    && in_array((string) ($r['best_result'] ?? ''), ['PASSED', 'FAILED'], true)) {
+                    $okCount++;
+                }
+            }
+            if ($okCount === 0) {
+                $analyzed = self::analyzeOnlineTestRows($rows);
+                throw new \RuntimeException(
+                    "Stage '{$s['name']}': " . ($analyzed['blocker_reason']
+                        ?? 'test belum selesai atau belum di-grade.')
+                );
+            }
+        }
     }
 
     /**

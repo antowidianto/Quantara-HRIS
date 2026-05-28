@@ -146,6 +146,14 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->resource('positions', ['controller' => 'PositionController']);
         $routes->resource('job-grades', ['controller' => 'JobGradeController']);
 
+        // Master Job Titles — standar nama jabatan untuk reporting & WLKP.
+        // Migration #064 menambahkan tabel ini + auto-backfill dari positions.
+        // Endpoint khusus didefinisikan SEBELUM resource agar /picker dan
+        // /(:num)/usage tidak nyangkut sebagai resource id.
+        $routes->get('job-titles/picker',          'JobTitleController::picker');
+        $routes->get('job-titles/(:num)/usage',    'JobTitleController::usage/$1');
+        $routes->resource('job-titles', ['controller' => 'JobTitleController']);
+
         // ─── Cost Centers (Sprint 6) ───────────────────────────────
         // Endpoint khusus didefinisikan SEBELUM /(:num) supaya path
         // /tree, /picker, /backfill-employees tidak nyangkut sebagai id.
@@ -465,6 +473,21 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('attendance-devices/(:num)/trust',      'AnomalyController::trustDevice/$1');
         $routes->post('attendance-devices/(:num)/block',      'AnomalyController::blockDevice/$1');
 
+        // ─── Bulk Import (xlsx) ───────────────────────────────────
+        // Migration #067. Generic dispatcher pakai ImportRegistry +
+        // XlsxImportService. Lihat docs/XLSX_IMPORT_AUDIT.md untuk
+        // daftar resource yg saat ini siap di-import (departments,
+        // branches, job_titles, job_grades, positions, employees).
+        // Endpoint statis didefinisikan duluan supaya tidak nyangkut
+        // sebagai (:segment) dynamic di pattern di bawahnya.
+        $routes->get('imports/resources',                     'ImportController::listResources');
+        $routes->get('imports/batches/(:num)',                'ImportController::batch/$1');
+        $routes->post('imports/batches/(:num)/cancel',        'ImportController::cancel/$1');
+        $routes->get('imports/(:segment)/template',           'ImportController::template/$1');
+        $routes->post('imports/(:segment)/preview',           'ImportController::preview/$1');
+        $routes->post('imports/(:segment)/commit/(:num)',     'ImportController::commit/$1/$2');
+        $routes->get('imports/(:segment)/history',            'ImportController::history/$1');
+
         // ─── HR Helpdesk / Tickets ─────────────────────────────────
         $routes->get('helpdesk/stats',                       'HelpdeskController::stats');
         $routes->get('helpdesk/tickets',                     'HelpdeskController::index');
@@ -483,6 +506,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // path /manpower-requests/stats & /inbox tidak nyangkut sebagai id.
         $routes->get('manpower-requests/stats',                  'ManpowerController::stats');
         $routes->get('manpower-requests/inbox',                  'ManpowerController::inbox');
+        // Migration #066 — MPP yg vacancy_started_at sudah lewat / mendekati
+        $routes->get('manpower-requests/overdue',                'ManpowerController::overdue');
         $routes->get('manpower-requests',                        'ManpowerController::index');
         $routes->post('manpower-requests',                       'ManpowerController::create');
         $routes->get('manpower-requests/(:num)',                 'ManpowerController::show/$1');
@@ -563,6 +588,29 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // ─── Online Tests (HR admin) ───────────────────────────────
         // Lihat docs/ONLINE_TEST.md. Kandidat-side endpoint terpisah
         // (filter: candidatejwt) — yang ini full-feature untuk HR.
+
+        // Master kategori test (Migration #065) — built-in 14 kategori
+        // populer di HR Indonesia (TPA, Pauli, Kraepelin, DISC, MBTI,
+        // Wartegg, Holland, dll). HR boleh tambah kategori custom.
+        // Endpoint khusus didefinisikan SEBELUM (:num).
+        $routes->get('online-test-categories/picker',         'OnlineTestCategoryController::picker');
+        $routes->get('online-test-categories',                'OnlineTestCategoryController::index');
+        $routes->post('online-test-categories',               'OnlineTestCategoryController::create');
+        $routes->get('online-test-categories/(:num)',         'OnlineTestCategoryController::show/$1');
+        $routes->put('online-test-categories/(:num)',         'OnlineTestCategoryController::update/$1');
+        $routes->delete('online-test-categories/(:num)',      'OnlineTestCategoryController::delete/$1');
+
+        // Master pipeline rekrutmen — HR bisa custom urutan stages
+        // (mis. ONLINE_TEST sebelum/sesudah HR Interview, FGD, Psikotest, dst).
+        // Lihat docs/RECRUITMENT_PIPELINE.md.
+        $routes->get('recruitment-pipelines/picker',          'RecruitmentPipelineController::picker');
+        $routes->get('recruitment-pipelines',                 'RecruitmentPipelineController::index');
+        $routes->post('recruitment-pipelines',                'RecruitmentPipelineController::create');
+        $routes->get('recruitment-pipelines/(:num)',          'RecruitmentPipelineController::show/$1');
+        $routes->put('recruitment-pipelines/(:num)',          'RecruitmentPipelineController::update/$1');
+        $routes->delete('recruitment-pipelines/(:num)',       'RecruitmentPipelineController::delete/$1');
+        $routes->post('recruitment-pipelines/(:num)/duplicate','RecruitmentPipelineController::duplicate/$1');
+
         // Endpoint khusus didefinisikan SEBELUM (:num) supaya path
         // /categories tidak nyangkut sebagai resource id.
         $routes->get('online-test-questions-bank/categories', 'OnlineTestController::bankCategories');

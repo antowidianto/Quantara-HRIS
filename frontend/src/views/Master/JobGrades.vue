@@ -16,4 +16,13 @@ const fields = [
   { key: 'max_salary', label: 'Gaji Max', type: 'number' },
 ]
 </script>
-<template><SimpleMaster endpoint="/job-grades" title="Job Grade" :columns="columns" :fields="fields" :defaults="{ is_active: 1, level: 1 }" /></template>
+<template>
+  <SimpleMaster
+    endpoint="/job-grades"
+    title="Job Grade"
+    :columns="columns"
+    :fields="fields"
+    :defaults="{ is_active: 1, level: 1 }"
+    import-resource="job_grades"
+  />
+</template>

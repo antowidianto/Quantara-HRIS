@@ -183,7 +183,11 @@ const groups = computed(() => {
         { name: t('nav.items.work_locations'),     to: '/master/work-locations',     icon: BuildingOffice2Icon,        perm: 'branch.view' },
         { name: t('nav.items.departments'),        to: '/master/departments',        icon: BuildingOffice2Icon,        perm: 'department.view' },
         { name: t('nav.items.positions'),          to: '/master/positions',          icon: BuildingOffice2Icon,        perm: 'position.view' },
+        { name: 'Master Jabatan',                  to: '/master/job-titles',         icon: BuildingOffice2Icon,        perm: 'job_title.view' },
         { name: t('nav.items.job_grades'),         to: '/master/job-grades',         icon: BuildingOffice2Icon,        perm: 'position.view' },
+        // Migration #065 — Pipeline rekrutmen custom + jenis test online
+        { name: 'Pipeline Rekrutmen',              to: '/master/recruitment-pipelines', icon: ClipboardDocumentListIcon, perm: 'recruitment_pipeline.view' },
+        { name: 'Jenis Test Online',               to: '/master/online-test-categories', icon: AcademicCapIcon,         perm: 'online_tests.view' },
         { name: t('nav.items.shifts'),             to: '/master/shifts',             icon: ClockIcon,                  perm: 'shift.view' },
         { name: t('nav.items.shift_assignments'),  to: '/master/shift-assignments',  icon: ClockIcon,                  perm: 'shift.view' },
         { name: t('nav.items.shift_patterns'),     to: '/master/shift-patterns',     icon: CalendarDaysIcon,           perm: 'shift_pattern.view' },

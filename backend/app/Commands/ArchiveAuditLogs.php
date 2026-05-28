@@ -16,8 +16,18 @@ use Config\Services;
  * Setelah 5 tahun, archived rows boleh dipindah ke storage offline
  * (CSV S3 / cold backup) lewat varian command `--purge` (future).
  *
- * Cron mingguan:
- *   0 3 * * 0  cd /var/www/hris/backend && php spark hr:archive-audit
+ * **Cron mingguan — setiap Minggu 00:00 (window paling sepi traffic):**
+ *
+ *   Linux/Unix crontab:
+ *     0 0 * * 0  cd /var/www/hris/backend && php spark hr:archive-audit \
+ *                >> writable/logs/archive-audit.log 2>&1
+ *
+ *   Windows Task Scheduler (PowerShell):
+ *     schtasks /Create /SC WEEKLY /D SUN /ST 00:00 /TN "HRIS-Archive-Audit" \
+ *       /TR "cmd /c cd /d D:\path\to\backend && php spark hr:archive-audit"
+ *
+ *   Docker (docker-compose exec, host crontab):
+ *     0 0 * * 0  docker compose exec -T backend php spark hr:archive-audit
  *
  * Default retention: 730 hari (2 tahun) — sesuai requirement audit
  * UU PDP & ISO 27001. Override dengan --before atau --days.

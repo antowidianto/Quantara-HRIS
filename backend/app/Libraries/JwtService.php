@@ -100,36 +100,51 @@ class JwtService
 
     /**
      * Validate a refresh token, ensuring it's not revoked.
+     *
+     * Hanya menelan exception yang berasal dari library JWT (token rusak,
+     * expired, signature mismatch). Exception lain — terutama
+     * `DatabaseException` — dibiarkan naik supaya kegagalan operasional
+     * (DB down, credential salah, plugin auth tidak kompatibel) tidak
+     * tersamar jadi "INVALID_REFRESH" yang menyesatkan.
      */
     public function validateRefresh(string $token): ?array
     {
         try {
             $decoded = JWT::decode($token, new Key($this->config->refreshSecret, $this->config->algo));
-            $payload = (array) $decoded;
-
-            if (($payload['type'] ?? null) !== 'refresh') {
-                return null;
-            }
-
-            $db = \Config\Database::connect();
-            $row = $db->table('refresh_tokens')
-                ->where('jti', $payload['jti'])
-                ->where('revoked', 0)
-                ->get()
-                ->getRowArray();
-
-            if (! $row) {
-                return null;
-            }
-
-            if (strtotime($row['expires_at']) < time()) {
-                return null;
-            }
-
-            return $payload;
-        } catch (\Throwable $e) {
+        } catch (
+            \Firebase\JWT\ExpiredException
+            | \Firebase\JWT\SignatureInvalidException
+            | \Firebase\JWT\BeforeValidException
+            | \UnexpectedValueException
+            | \DomainException
+            | \InvalidArgumentException $e
+        ) {
+            // Token memang invalid — log untuk audit, return null.
+            log_message('info', 'JwtService::validateRefresh JWT invalid: ' . $e->getMessage());
             return null;
         }
+
+        $payload = (array) $decoded;
+        if (($payload['type'] ?? null) !== 'refresh') {
+            return null;
+        }
+
+        $db = \Config\Database::connect();
+        $row = $db->table('refresh_tokens')
+            ->where('jti', $payload['jti'])
+            ->where('revoked', 0)
+            ->get()
+            ->getRowArray();
+
+        if (! $row) {
+            return null;
+        }
+
+        if (strtotime($row['expires_at']) < time()) {
+            return null;
+        }
+
+        return $payload;
     }
 
     /**

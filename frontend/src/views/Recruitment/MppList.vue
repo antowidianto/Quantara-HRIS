@@ -42,7 +42,32 @@ const items   = ref([])
 const total   = ref(0)
 const loading = ref(false)
 const stats   = ref({})
-const filters = reactive({ q: '', status: '', request_type: '', mine: 0, page: 1, per_page: 20 })
+const filters = reactive({ q: '', status: '', request_type: '', mine: 0, overdue_only: 0, page: 1, per_page: 20 })
+
+// Migration #066 — overdue helper. Backend kirim `vacancy_started_at`
+// di setiap row MPP. Hitung "X hari overdue" / "X hari lagi" di client
+// supaya tidak perlu join ulang ke resignation_requests.
+function overdueInfo(row) {
+  if (! row?.vacancy_started_at) return null
+  // Skip status terminal
+  if (['FILLED', 'CLOSED', 'REJECTED', 'CANCELLED'].includes(row.status)) return null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const vac = new Date(row.vacancy_started_at)
+  vac.setHours(0, 0, 0, 0)
+  const diffMs = today.getTime() - vac.getTime()
+  const days = Math.round(diffMs / 86400000)
+  if (days > 0) {
+    return { kind: 'overdue', days, label: `Overdue ${days} hari`, cls: 'bg-red-100 text-red-700 border border-red-200' }
+  }
+  if (days === 0) {
+    return { kind: 'today', days: 0, label: 'Vacancy hari ini', cls: 'bg-amber-100 text-amber-800 border border-amber-200' }
+  }
+  if (days >= -30) {
+    return { kind: 'upcoming', days: Math.abs(days), label: `H-${Math.abs(days)} vacancy`, cls: 'bg-amber-50 text-amber-700 border border-amber-200' }
+  }
+  return null
+}
 
 const showForm = ref(false)
 const editing  = ref(null)
@@ -454,6 +479,36 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
       </div>
     </div>
 
+    <!-- Migration #066 — Overdue summary banner -->
+    <div v-if="(stats.overdue?.count || 0) > 0 || (stats.about_to_be_overdue?.count || 0) > 0"
+      class="rounded-lg border p-3 mb-4 flex items-center gap-3 flex-wrap"
+      :class="(stats.overdue?.count || 0) > 0
+        ? 'bg-red-50 border-red-200 text-red-800'
+        : 'bg-amber-50 border-amber-200 text-amber-800'">
+      <ClockIcon class="w-5 h-5 flex-shrink-0" />
+      <div class="flex-1 text-sm">
+        <template v-if="(stats.overdue?.count || 0) > 0">
+          <strong>{{ stats.overdue.count }} MPP overdue</strong> —
+          {{ stats.overdue.total_headcount }} posisi belum terisi padahal sudah lewat target tanggal kosong.
+          Terlama {{ stats.overdue.oldest_days }} hari.
+        </template>
+        <template v-else>
+          <strong>{{ stats.about_to_be_overdue.count }} MPP akan overdue</strong> dalam ≤ 30 hari
+          ({{ stats.about_to_be_overdue.total_headcount }} posisi). Mohon segera proses fulfillment.
+        </template>
+      </div>
+      <button v-if="!filters.overdue_only"
+        class="text-xs px-3 py-1 rounded bg-white border hover:bg-gray-50"
+        @click="filters.overdue_only = 1; applyFilter()">
+        Tampilkan saja yg overdue
+      </button>
+      <button v-else
+        class="text-xs px-3 py-1 rounded bg-white border hover:bg-gray-50"
+        @click="filters.overdue_only = 0; applyFilter()">
+        Reset filter
+      </button>
+    </div>
+
     <!-- Filters -->
     <div class="card card-body mb-4">
       <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -509,10 +564,21 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
             <tr v-else-if="items.length === 0">
               <td colspan="8" class="text-center py-12 text-gray-400">Belum ada pengajuan MPP.</td>
             </tr>
-            <tr v-for="r in items" :key="r.id" class="cursor-pointer hover:bg-gray-50" @click="viewDetail(r)">
+            <tr v-for="r in items" :key="r.id"
+              v-show="!filters.overdue_only || overdueInfo(r)?.kind === 'overdue'"
+              class="cursor-pointer hover:bg-gray-50" @click="viewDetail(r)">
               <td class="font-mono text-xs">{{ r.reference_number }}</td>
               <td>
-                <div class="font-medium">{{ r.proposed_title }}</div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-medium">{{ r.proposed_title }}</span>
+                  <!-- Migration #066 — overdue / upcoming badge -->
+                  <span v-if="overdueInfo(r)"
+                    class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    :class="overdueInfo(r).cls"
+                    :title="r.vacancy_started_at ? `Vacancy: ${r.vacancy_started_at}` : ''">
+                    {{ overdueInfo(r).label }}
+                  </span>
+                </div>
                 <div class="text-xs text-gray-500">
                   {{ r.department_name || '-' }} · {{ REASON_LABEL[r.reason] || r.reason }}
                 </div>

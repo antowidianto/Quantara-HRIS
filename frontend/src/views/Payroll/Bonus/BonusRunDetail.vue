@@ -4,11 +4,13 @@ import { useRoute, RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { fmtDate, fmtCurrency } from '@/composables/useResource'
 import { useToast } from 'vue-toastification'
+import { useAuthStore } from '@/stores/auth'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   CalculatorIcon, CheckBadgeIcon, CurrencyDollarIcon, ArrowLeftIcon,
   PencilSquareIcon, EyeSlashIcon, EyeIcon, UserPlusIcon,
 } from '@heroicons/vue/24/outline'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 /**
  * Bonus Run Detail (Sprint 19+)
@@ -21,6 +23,7 @@ import {
  */
 const route = useRoute()
 const toast = useToast()
+const auth = useAuthStore()
 const runId = computed(() => parseInt(route.params.id))
 
 const run = ref(null)
@@ -323,6 +326,13 @@ const overridesCount = computed(() => recipients.value.filter(r => r.amount_over
           >
             <UserPlusIcon class="w-4 h-4" /> Include All ({{ excludedCount }})
           </button>
+          <!-- Sprint 4 — bulk import bonus recipients dari xlsx -->
+          <ExcelImporter
+            v-if="auth.can('bonus_recipients.bulk_import')"
+            resource="bonus_recipients"
+            button-label="Import Recipient"
+            @committed="loadRecipients()"
+          />
           <div class="ml-auto flex items-center gap-4 text-xs text-gray-600">
             <span><strong class="text-green-700">{{ includedCount }}</strong> included</span>
             <span v-if="excludedCount > 0">

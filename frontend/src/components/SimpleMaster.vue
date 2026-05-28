@@ -2,9 +2,11 @@
 import { ref, onMounted, watch, reactive } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
+import { useAuthStore } from '@/stores/auth'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, MagnifyingGlassIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import LocationPicker from '@/components/LocationPicker.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const props = defineProps({
   endpoint: { type: String, required: true },
@@ -12,9 +14,13 @@ const props = defineProps({
   columns: { type: Array, required: true }, // [{ key, label, formatter? }]
   fields: { type: Array, required: true },  // [{ key, label, type, options?, required? }]
   defaults: { type: Object, default: () => ({}) },
+  // Migration #067 — kalau di-set, render tombol "Import Excel" di toolbar.
+  // Slug-nya harus sama dengan ImportRegistry di backend.
+  importResource: { type: String, default: '' },
 })
 
 const toast = useToast()
+const auth = useAuthStore()
 const items = ref([])
 const meta = ref({ total: 0, page: 1, pages: 1, per_page: 20 })
 const loading = ref(false)
@@ -95,9 +101,16 @@ function go(page) { params.page = page; fetchData() }
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold">{{ title }}</h1>
-      <button class="btn-primary" @click="openCreate"><PlusIcon class="w-4 h-4" /> Tambah</button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <ExcelImporter v-if="importResource && auth.can(importResource + '.bulk_import')"
+          :resource="importResource"
+          :button-label="'Import Excel'"
+          @committed="fetchData()"
+        />
+        <button class="btn-primary" @click="openCreate"><PlusIcon class="w-4 h-4" /> Tambah</button>
+      </div>
     </div>
 
     <div class="card">

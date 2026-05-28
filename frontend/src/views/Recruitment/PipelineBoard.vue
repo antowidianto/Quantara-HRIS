@@ -135,16 +135,86 @@ function copyAllCredentials() {
   copyToClipboard(text, 'all')
 }
 
-const STAGES = [
-  { code: 'NEW',            label: '🆕 Baru',         color: 'bg-gray-100' },
-  { code: 'SCREENING',      label: '📋 Screening',    color: 'bg-blue-50' },
-  { code: 'ONLINE_TEST',    label: '📝 Tes Online',    color: 'bg-cyan-50' },
-  { code: 'INTERVIEW_HR',   label: '🗣️ Interview HR',  color: 'bg-indigo-50' },
-  { code: 'INTERVIEW_USER', label: '👥 Interview User',color: 'bg-purple-50' },
-  { code: 'OFFER',          label: '💰 Offer',         color: 'bg-amber-50' },
-  { code: 'HIRED',          label: '✅ Hired',         color: 'bg-emerald-50' },
+// Migration #065 — STAGES dinamis dari pipeline template kalau job pakai
+// custom pipeline. Default fallback: 7-stage classic (backward compat).
+// Color & emoji ditentukan dari stage_type supaya visual konsisten lintas
+// nama-nama custom (mis. "PSIKOTEST" dapat warna sama dengan "ONLINE_TEST").
+const STAGE_TYPE_DECOR = {
+  SCREENING:        { emoji: '📋', color: 'bg-blue-50' },
+  ONLINE_TEST:      { emoji: '📝', color: 'bg-cyan-50' },
+  INTERVIEW:        { emoji: '🗣️', color: 'bg-indigo-50' },
+  ASSESSMENT:       { emoji: '🎯', color: 'bg-pink-50' },
+  OFFER:            { emoji: '💰', color: 'bg-amber-50' },
+  BACKGROUND_CHECK: { emoji: '🔍', color: 'bg-cyan-50' },
+  MEDICAL_CHECK:    { emoji: '🏥', color: 'bg-teal-50' },
+  CUSTOM:           { emoji: '🔹', color: 'bg-gray-50' },
+  HIRED:            { emoji: '✅', color: 'bg-emerald-50' },
+  REJECTED:         { emoji: '❌', color: 'bg-red-50' },
+  WITHDRAWN:        { emoji: '🚪', color: 'bg-stone-50' },
+}
+
+// Default fallback stages — dipakai ketika job posting tidak punya
+// pipeline_template_id dan tidak ada default template di company.
+const DEFAULT_STAGES = [
+  { code: 'NEW',            name: 'Baru Masuk',     stage_type: 'SCREENING',   is_terminal: 0, order_index: 0 },
+  { code: 'SCREENING',      name: 'CV Screening',   stage_type: 'SCREENING',   is_terminal: 0, order_index: 1 },
+  { code: 'ONLINE_TEST',    name: 'Online Test',    stage_type: 'ONLINE_TEST', is_terminal: 0, order_index: 2 },
+  { code: 'INTERVIEW_HR',   name: 'Interview HR',   stage_type: 'INTERVIEW',   is_terminal: 0, order_index: 3 },
+  { code: 'INTERVIEW_USER', name: 'Interview User', stage_type: 'INTERVIEW',   is_terminal: 0, order_index: 4 },
+  { code: 'OFFER',          name: 'Offer Letter',   stage_type: 'OFFER',       is_terminal: 0, order_index: 5 },
+  { code: 'HIRED',          name: 'Hired',          stage_type: 'HIRED',       is_terminal: 1, order_index: 6 },
 ]
-const TERMINAL = ['HIRED','REJECTED','WITHDRAWN']
+
+// Pipeline stages (raw) — di-load dari API atau fallback DEFAULT_STAGES
+const pipelineStages = ref(DEFAULT_STAGES)
+
+// STAGES = computed, sembunyikan REJECTED/WITHDRAWN dari kolom papan utama
+const STAGES = computed(() => {
+  return pipelineStages.value
+    .filter(s => ! ['REJECTED', 'WITHDRAWN'].includes(s.stage_type))
+    .map(s => {
+      const decor = STAGE_TYPE_DECOR[s.stage_type] || STAGE_TYPE_DECOR.CUSTOM
+      return {
+        code: s.code,
+        label: `${decor.emoji} ${s.name}`,
+        color: decor.color,
+        stage_type: s.stage_type,
+        is_terminal: s.is_terminal,
+        required_test_category_id: s.required_test_category_id || null,
+      }
+    })
+})
+
+// Terminal codes — gabungan stage_type=HIRED/REJECTED/WITHDRAWN dari template
+const TERMINAL = computed(() => {
+  const codes = pipelineStages.value
+    .filter(s => Number(s.is_terminal) === 1)
+    .map(s => s.code)
+  return Array.from(new Set([...codes, 'HIRED', 'REJECTED', 'WITHDRAWN']))
+})
+
+async function loadPipelineStages() {
+  try {
+    if (! job.value) return
+    const tplId = job.value.pipeline_template_id
+    if (tplId) {
+      const res = await api.get(`/recruitment-pipelines/${tplId}`)
+      const stages = res.data?.data?.stages || []
+      if (stages.length) { pipelineStages.value = stages; return }
+    }
+    // Fallback ke default template per company
+    const picker = await api.get('/recruitment-pipelines/picker')
+    const def = (picker.data?.data || []).find(t => Number(t.is_default) === 1)
+    if (def) {
+      const detail = await api.get(`/recruitment-pipelines/${def.id}`)
+      const stages = detail.data?.data?.stages || []
+      if (stages.length) { pipelineStages.value = stages; return }
+    }
+    pipelineStages.value = DEFAULT_STAGES
+  } catch (_) {
+    pipelineStages.value = DEFAULT_STAGES
+  }
+}
 const SOURCES = ['WEBSITE','LINKEDIN','JOBSTREET','REFERRAL','WALK_IN','OTHER']
 
 const canManage = computed(() => auth.can('recruitment.manage'))
@@ -152,7 +222,7 @@ const canHire = computed(() => auth.can('recruitment.hire'))
 
 const candidatesByStage = computed(() => {
   const map = {}
-  STAGES.forEach(s => map[s.code] = [])
+  STAGES.value.forEach(s => map[s.code] = [])
   // Distribusikan ke kolom sesuai current_stage. REJECTED & WITHDRAWN
   // otomatis terpisah karena bukan key valid di map (lihat counter
   // rejectedCount untuk badge "X ditolak"). HIRED tetap muncul di
@@ -174,6 +244,8 @@ async function fetchAll() {
     ])
     job.value = j.data.data
     candidates.value = c.data.data || []
+    // Migration #065 — load custom stages dari pipeline_template (atau default)
+    await loadPipelineStages()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
   finally { loading.value = false }
 }
@@ -210,10 +282,23 @@ async function openCandidateDetail(c) {
 // sebelum boleh maju ke INTERVIEW_HR/USER/OFFER/HIRED. Backend juga
 // enforce di moveStage(); frontend cek dulu untuk UX yang bagus
 // (warning + tombol disabled, bukan klik-error-baru-tahu).
-const POST_TEST_STAGES = ['INTERVIEW_HR', 'INTERVIEW_USER', 'OFFER', 'HIRED']
+// Migration #065 — gate "online test must be completed" sekarang dynamic:
+// cek apakah targetStage berada SETELAH stage ber-stage_type ONLINE_TEST
+// di pipeline template. Default fallback ke daftar legacy.
+const POST_TEST_STAGES_FALLBACK = ['INTERVIEW_HR', 'INTERVIEW_USER', 'OFFER', 'HIRED']
+
+function isPostOnlineTestStage(targetStage) {
+  const list = pipelineStages.value || []
+  if (! list.length) return POST_TEST_STAGES_FALLBACK.includes(targetStage)
+  const target = list.find(s => s.code === targetStage)
+  if (! target) return false
+  // Cari prior ONLINE_TEST (order_index lebih kecil dari target)
+  return list.some(s => s.stage_type === 'ONLINE_TEST'
+    && Number(s.order_index || 0) < Number(target.order_index || 0))
+}
 
 function onlineTestBlocker(candidate, targetStage) {
-  if (! POST_TEST_STAGES.includes(targetStage)) return null
+  if (! isPostOnlineTestStage(targetStage)) return null
   const status = candidate?.online_test_status
   if (! status || ! status.has_assignments || status.all_done) return null
   return status.blocker_reason || 'Online test belum selesai dikerjakan / belum di-review HR.'
@@ -529,9 +614,10 @@ function offerLetterUrl(offerId, format = 'pdf') {
 }
 
 function nextStage(currentStage) {
-  const idx = STAGES.findIndex(s => s.code === currentStage)
-  if (idx === -1 || idx === STAGES.length - 1) return null
-  return STAGES[idx + 1].code
+  const list = STAGES.value
+  const idx = list.findIndex(s => s.code === currentStage)
+  if (idx === -1 || idx === list.length - 1) return null
+  return list[idx + 1].code
 }
 
 // Gabungan dokumen: prioritas `documents` dari candidate_documents,
