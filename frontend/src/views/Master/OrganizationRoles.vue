@@ -29,6 +29,7 @@ import {
   CheckBadgeIcon, ExclamationCircleIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -265,7 +266,13 @@ function toggleScope(scope) {
           single source of truth untuk routing approval di seluruh modul.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <ExcelImporter
+          v-if="canManage"
+          resource="organization_structures"
+          button-label="Import Excel"
+          @committed="load()"
+        />
         <button class="btn-secondary" @click="load" :disabled="loading">
           <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
         </button>

@@ -34,4 +34,4 @@ const fields = [
   { key: 'description', label: 'Deskripsi', type: 'textarea' },
 ]
 </script>
-<template><SimpleMaster endpoint="/leave-types" title="Tipe Cuti" :columns="columns" :fields="fields" :defaults="{ is_active: 1, is_paid: 1, default_days: 12, min_tenure_months: 12, gender_restriction: 'ALL', reset_yearly: 1 }" /></template>
+<template><SimpleMaster endpoint="/leave-types" title="Tipe Cuti" :columns="columns" :fields="fields" :defaults="{ is_active: 1, is_paid: 1, default_days: 12, min_tenure_months: 12, gender_restriction: 'ALL', reset_yearly: 1 }" import-resource="leave_types" /></template>

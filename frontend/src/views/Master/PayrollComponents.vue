@@ -32,4 +32,4 @@ const fields = [
   { key: 'amount', label: 'Default Nominal', type: 'number' },
 ]
 </script>
-<template><SimpleMaster endpoint="/payroll-components" title="Komponen Gaji" :columns="columns" :fields="fields" :defaults="{ is_active: 1, is_taxable: 1, is_fixed: 1, amount: 0 }" /></template>
+<template><SimpleMaster endpoint="/payroll-components" title="Komponen Gaji" :columns="columns" :fields="fields" :defaults="{ is_active: 1, is_taxable: 1, is_fixed: 1, amount: 0 }" import-resource="payroll_components" /></template>

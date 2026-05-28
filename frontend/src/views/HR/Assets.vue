@@ -11,6 +11,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -197,9 +198,17 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         </h1>
         <p class="text-sm text-gray-500">Tracking laptop, HP, kendaraan, ID card, dll dengan BAST otomatis.</p>
       </div>
-      <button v-if="canManage" class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Tambah Aset
-      </button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <ExcelImporter
+          v-if="auth.can('assets.bulk_import')"
+          resource="assets"
+          button-label="Import Excel"
+          @committed="fetchData()"
+        />
+        <button v-if="canManage" class="btn-primary" @click="openCreate">
+          <PlusIcon class="w-4 h-4" /> Tambah Aset
+        </button>
+      </div>
     </div>
 
     <div class="card card-body mb-4">

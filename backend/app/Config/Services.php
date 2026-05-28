@@ -191,6 +191,20 @@ class Services extends BaseService
     }
 
     /**
+     * XlsxImportService — pipeline bulk import dari xlsx (Migration #067).
+     * Backed by phpoffice/phpspreadsheet. Lihat docs/XLSX_IMPORT_AUDIT.md
+     * dan ImportRegistry untuk daftar resource yang siap di-import.
+     */
+    public static function xlsxImport(bool $getShared = true): \App\Libraries\Import\XlsxImportService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('xlsxImport');
+        }
+
+        return new \App\Libraries\Import\XlsxImportService();
+    }
+
+    /**
      * CostCenterService — dimensi accounting cost center (Sprint 6).
      * Resolver chain employee → department → branch → company root,
      * CRUD master + budget periodisasi, budget vs actual reporting.

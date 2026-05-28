@@ -23,6 +23,19 @@ const filters = reactive({ q: '', status: '', page: 1, per_page: 20 })
 const showForm = ref(false)
 const editing = ref(null)
 
+// Migration #065 — pipeline templates picker untuk pilih urutan stages
+// custom (mis. Sales Pipeline, Eksekutif, dll). Kalau kosong / tidak
+// dipilih, posting pakai default template company.
+const pipelineTemplates = ref([])
+async function loadPipelineTemplates() {
+  try {
+    const res = await api.get('/recruitment-pipelines/picker')
+    pipelineTemplates.value = res.data?.data || []
+  } catch (_) {
+    pipelineTemplates.value = []
+  }
+}
+
 const STATUS_BADGE = {
   DRAFT:  { label: 'Draft',     cls: 'bg-gray-100 text-gray-600' },
   OPEN:   { label: 'Buka',      cls: 'bg-emerald-100 text-emerald-700' },
@@ -52,12 +65,15 @@ function openCreate() {
     title: '', employment_type: 'PKWTT', description: '', requirements: '',
     salary_min: 0, salary_max: 0, salary_visible: 0, headcount: 1,
     opened_at: '', closed_at: '', notes: '',
+    pipeline_template_id: null,
   }
+  loadPipelineTemplates()
   showForm.value = true
 }
 
 function openEdit(row) {
   editing.value = JSON.parse(JSON.stringify(row))
+  loadPipelineTemplates()
   showForm.value = true
 }
 
@@ -294,6 +310,19 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           <div>
             <label class="label">Tgl Tutup (deadline)</label>
             <input type="date" v-model="editing.closed_at" class="input" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label">Pipeline Rekrutmen</label>
+            <select v-model="editing.pipeline_template_id" class="input">
+              <option :value="null">— Pakai default company —</option>
+              <option v-for="t in pipelineTemplates" :key="t.id" :value="t.id">
+                {{ t.name }} ({{ t.code }}){{ Number(t.is_default) === 1 ? ' • default' : '' }}
+              </option>
+            </select>
+            <p class="text-xs text-gray-500 mt-1">
+              Urutan stages (Online Test, Interview HR, Psikotest, dst) ditentukan oleh template.
+              Atur template di <strong>Master Data → Pipeline Rekrutmen</strong>.
+            </p>
           </div>
           <div>
             <label class="label">Salary Min (Rp)</label>

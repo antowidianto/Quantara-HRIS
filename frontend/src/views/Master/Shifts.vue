@@ -64,6 +64,7 @@ function formatWorkingDays(csv) {
     title="Shift Kerja"
     :columns="columns"
     :fields="fields"
+    import-resource="shifts"
     :defaults="{
       is_active: 1,
       break_minutes: 60,

@@ -6,6 +6,14 @@ vendor/
 .env
 .env.local
 .env.*.local
+.env.backup
+
+# Env templates: commit *.env.example but NEVER commit actual secret files.
+# Templates live in backend/env-templates/ and frontend/env-templates/.
+backend/env-templates/*.env
+frontend/env-templates/*.env
+!backend/env-templates/*.env.example
+!frontend/env-templates/*.env.example
 
 # Build artifacts
 dist/

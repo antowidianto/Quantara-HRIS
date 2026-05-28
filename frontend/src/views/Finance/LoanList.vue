@@ -10,6 +10,7 @@ import {
   ArrowPathIcon, InformationCircleIcon,
 } from '@heroicons/vue/24/outline'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 /**
  * Halaman Kasbon / Pinjaman.
@@ -178,9 +179,17 @@ function go(page) { filters.page = page; fetchData() }
           Kasbon yang disetujui otomatis dipotong dari gaji bulanan saat payroll dihitung.
         </p>
       </div>
-      <button class="btn-primary" @click="openForm">
-        <PlusIcon class="w-4 h-4" /> Ajukan Kasbon
-      </button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <ExcelImporter
+          v-if="auth.can('loans.bulk_import')"
+          resource="loans"
+          button-label="Import Pinjaman"
+          @committed="fetchData()"
+        />
+        <button class="btn-primary" @click="openForm">
+          <PlusIcon class="w-4 h-4" /> Ajukan Kasbon
+        </button>
+      </div>
     </div>
 
     <!-- Info banner integrasi payroll -->

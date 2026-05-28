@@ -547,8 +547,139 @@ class ManpowerService
             'created_at'                  => $now,
             'updated_at'                  => $now,
         ];
+        // Migration #066 — `vacancy_started_at` snapshot effective_date
+        // resigner. Dipakai cron overdue + UI untuk hitung "kosong X hari"
+        // tanpa join ulang ke resignation_requests.
+        $cols = $db->getFieldNames('manpower_requests');
+        if (in_array('vacancy_started_at', $cols, true)) {
+            $insert['vacancy_started_at'] = $effectiveDate;
+        }
         $db->table('manpower_requests')->insert($insert);
         return (int) $db->insertID();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Overdue tracking (Migration #066)
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * Status MPP yang dianggap "aktif" — masih perlu di-fulfill.
+     * FILLED/CLOSED/REJECTED/CANCELLED tidak dihitung sebagai overdue.
+     */
+    public const ACTIVE_STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'HIRING'];
+
+    /**
+     * MPP yang dianggap "akan overdue" (warning H-N hari).
+     *
+     * Definisi:
+     *   - status ∈ ACTIVE_STATUSES (belum FILLED/CLOSED/REJECTED/CANCELLED)
+     *   - vacancy_started_at BETWEEN today AND today + $days
+     *   - belum kirim warning dalam 7 hari terakhir (anti-spam)
+     *
+     * @return array<int, array<string,mixed>>
+     */
+    public function aboutToBeOverdueRequests(int $companyId, int $days = 30): array
+    {
+        $db = Database::connect();
+        $cols = $db->getFieldNames('manpower_requests');
+        if (! in_array('vacancy_started_at', $cols, true)) return [];
+
+        $today = date('Y-m-d');
+        $threshold = date('Y-m-d', strtotime("+{$days} days"));
+        $oneWeekAgo = date('Y-m-d H:i:s', strtotime('-7 days'));
+
+        $b = $db->table('manpower_requests mr')
+            ->select('mr.id, mr.reference_number, mr.proposed_title, mr.status, mr.headcount, mr.hired_count,'
+                . ' mr.vacancy_started_at, mr.target_start_date, mr.department_id, mr.requested_by_user_id,'
+                . ' mr.replacement_for_employee_id, mr.overdue_warning_sent_at,'
+                . ' d.name AS department_name, e.full_name AS resigner_name')
+            ->join('departments d', 'd.id = mr.department_id', 'left')
+            ->join('employees e',   'e.id = mr.replacement_for_employee_id', 'left')
+            ->where('mr.company_id', $companyId)
+            ->where('mr.deleted_at IS NULL')
+            ->whereIn('mr.status', self::ACTIVE_STATUSES)
+            ->where('mr.vacancy_started_at IS NOT NULL')
+            ->where('mr.vacancy_started_at >=', $today)
+            ->where('mr.vacancy_started_at <=', $threshold)
+            // Anti-spam: skip yang sudah pernah dikirim warning < 7 hari lalu
+            ->groupStart()
+                ->where('mr.overdue_warning_sent_at IS NULL')
+                ->orWhere('mr.overdue_warning_sent_at <', $oneWeekAgo)
+            ->groupEnd()
+            ->orderBy('mr.vacancy_started_at', 'ASC');
+
+        return $b->get()->getResultArray();
+    }
+
+    /**
+     * MPP yang sudah overdue — vacancy_started_at < today, masih belum FILLED.
+     *
+     * Untuk badge UI + dashboard. Cron juga pakai ini untuk eskalasi ke
+     * Direktur (sekali per minggu, anti-spam via overdue_escalated_at).
+     *
+     * @return array<int, array<string,mixed>>
+     */
+    public function overdueRequests(int $companyId, bool $onlyNeedingEscalation = false): array
+    {
+        $db = Database::connect();
+        $cols = $db->getFieldNames('manpower_requests');
+        if (! in_array('vacancy_started_at', $cols, true)) return [];
+
+        $today = date('Y-m-d');
+        $oneWeekAgo = date('Y-m-d H:i:s', strtotime('-7 days'));
+
+        // Inline literal di SELECT — CI4 query builder tidak support
+        // parameter binding di select() string. Today ISO format aman
+        // untuk literal SQL.
+        $todayLiteral = $db->escape($today);
+        $b = $db->table('manpower_requests mr')
+            ->select("mr.id, mr.reference_number, mr.proposed_title, mr.status, mr.headcount, mr.hired_count,"
+                . " mr.vacancy_started_at, mr.target_start_date, mr.department_id, mr.requested_by_user_id,"
+                . " mr.replacement_for_employee_id, mr.overdue_escalated_at,"
+                . " d.name AS department_name, e.full_name AS resigner_name,"
+                // days_overdue dihitung di SQL — bypass binding via escape literal
+                . " DATEDIFF({$todayLiteral}, mr.vacancy_started_at) AS days_overdue", false)
+            ->join('departments d', 'd.id = mr.department_id', 'left')
+            ->join('employees e',   'e.id = mr.replacement_for_employee_id', 'left')
+            ->where('mr.company_id', $companyId)
+            ->where('mr.deleted_at IS NULL')
+            ->whereIn('mr.status', self::ACTIVE_STATUSES)
+            ->where('mr.vacancy_started_at IS NOT NULL')
+            ->where('mr.vacancy_started_at <', $today);
+
+        if ($onlyNeedingEscalation) {
+            $b->groupStart()
+                ->where('mr.overdue_escalated_at IS NULL')
+                ->orWhere('mr.overdue_escalated_at <', $oneWeekAgo)
+            ->groupEnd();
+        }
+
+        return $b->orderBy('mr.vacancy_started_at', 'ASC')->get()->getResultArray();
+    }
+
+    /**
+     * Tandai MPP sudah dikirim H-30 reminder. Dipanggil cron setelah
+     * sukses send notif supaya MPP tidak di-spam.
+     */
+    public function markOverdueWarningSent(int $mppId): void
+    {
+        $db = Database::connect();
+        $db->table('manpower_requests')->where('id', $mppId)->update([
+            'overdue_warning_sent_at' => date('Y-m-d H:i:s'),
+            'updated_at'              => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
+     * Tandai MPP sudah dieskalasi ke Direktur. Anti-spam timestamp.
+     */
+    public function markOverdueEscalated(int $mppId): void
+    {
+        $db = Database::connect();
+        $db->table('manpower_requests')->where('id', $mppId)->update([
+            'overdue_escalated_at' => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
     }
 
     /**

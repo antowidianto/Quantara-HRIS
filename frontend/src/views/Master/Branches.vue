@@ -29,5 +29,12 @@ const fields = [
 </script>
 
 <template>
-  <SimpleMaster endpoint="/branches" title="Cabang" :columns="columns" :fields="fields" :defaults="{ is_active: 1 }" />
+  <SimpleMaster
+    endpoint="/branches"
+    title="Cabang"
+    :columns="columns"
+    :fields="fields"
+    :defaults="{ is_active: 1 }"
+    import-resource="branches"
+  />
 </template>

@@ -62,6 +62,12 @@
           class="px-4 py-2 rounded bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium">
           + Goal
         </button>
+        <ExcelImporter
+          v-if="auth.can('goals.bulk_import')"
+          resource="goals"
+          button-label="Import Goals"
+          @committed="fetchGoals()"
+        />
       </div>
 
       <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -342,6 +348,7 @@ import { useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const route = useRoute()
 const auth = useAuthStore()

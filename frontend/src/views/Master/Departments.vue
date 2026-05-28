@@ -12,4 +12,13 @@ const fields = [
   { key: 'description', label: 'Deskripsi', type: 'textarea' },
 ]
 </script>
-<template><SimpleMaster endpoint="/departments" title="Departemen" :columns="columns" :fields="fields" :defaults="{ is_active: 1 }" /></template>
+<template>
+  <SimpleMaster
+    endpoint="/departments"
+    title="Departemen"
+    :columns="columns"
+    :fields="fields"
+    :defaults="{ is_active: 1 }"
+    import-resource="departments"
+  />
+</template>

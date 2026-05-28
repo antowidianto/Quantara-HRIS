@@ -69,7 +69,13 @@ const routes = [
       { path: 'master/work-locations', name: 'work-locations', component: () => import('@/views/Master/WorkLocations.vue') },
       { path: 'master/departments', name: 'departments', component: () => import('@/views/Master/Departments.vue') },
       { path: 'master/positions', name: 'positions', component: () => import('@/views/Master/Positions.vue') },
+      { path: 'master/job-titles', name: 'job-titles', component: () => import('@/views/Master/JobTitles.vue') },
       { path: 'master/job-grades', name: 'job-grades', component: () => import('@/views/Master/JobGrades.vue') },
+      // Recruitment master — pipeline + jenis test online (Migration #065)
+      { path: 'master/recruitment-pipelines', name: 'recruitment-pipelines',
+        component: () => import('@/views/Master/RecruitmentPipelines.vue') },
+      { path: 'master/online-test-categories', name: 'online-test-categories',
+        component: () => import('@/views/Master/OnlineTestCategories.vue') },
       { path: 'master/shifts', name: 'shifts', component: () => import('@/views/Master/Shifts.vue') },
       { path: 'master/shift-assignments', name: 'shift-assignments', component: () => import('@/views/Master/ShiftAssignments.vue') },
       { path: 'master/shift-patterns', name: 'shift-patterns', component: () => import('@/views/Master/ShiftPatterns.vue') },

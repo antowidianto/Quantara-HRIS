@@ -7,6 +7,7 @@ import { fmtCurrency } from '@/composables/useResource'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -213,7 +214,15 @@ async function recomputeAll() {
           karyawan dengan jarak rumah ↔ cabang ≥ 30 km akan mendapat tunjangan.
         </p>
       </div>
-      <button v-if="canManage" class="btn-secondary" @click="recomputeAll">Hitung Ulang Semua</button>
+      <div class="flex items-center gap-2 flex-wrap">
+        <ExcelImporter
+          v-if="auth.can('allowance_types.bulk_import')"
+          resource="allowance_types"
+          button-label="Import Excel"
+          @committed="fetchTypes()"
+        />
+        <button v-if="canManage" class="btn-secondary" @click="recomputeAll">Hitung Ulang Semua</button>
+      </div>
     </div>
 
     <div class="flex gap-2 mb-4 border-b border-gray-200">

@@ -2,12 +2,14 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
+import { useAuthStore } from '@/stores/auth'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   CalendarDaysIcon, MagnifyingGlassIcon, ArrowPathIcon,
   PaintBrushIcon, ChevronLeftIcon, ChevronRightIcon, TrashIcon, BoltIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 /**
  * Roster — matriks Employee × Tanggal.
@@ -26,6 +28,7 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
  */
 
 const toast = useToast()
+const auth = useAuthStore()
 
 const today = new Date().toISOString().slice(0, 10)
 const filters = reactive({
@@ -271,6 +274,13 @@ const visibleEmployeeCount = computed(() => matrix.value.rows.length)
         <CalendarDaysIcon class="w-6 h-6" /> Roster Shift
       </h1>
       <div class="flex gap-2 flex-wrap">
+        <!-- Sprint 3 — bulk import roster dari xlsx -->
+        <ExcelImporter
+          v-if="auth.can('shift_schedules.bulk_import')"
+          resource="shift_schedules"
+          button-label="Import Roster"
+          @committed="fetchData()"
+        />
         <button class="btn-secondary" @click="fetchData" :disabled="loading">
           <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
         </button>

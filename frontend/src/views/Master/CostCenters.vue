@@ -24,6 +24,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import CostCenterNode from './CostCenterNode.vue'
 import EmployeePicker from '@/components/EmployeePicker.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const toast = useToast()
 
@@ -412,7 +413,12 @@ watch(tab, async (val) => {
           Dimensi accounting untuk transaksi payroll, reimbursement, loan, travel, bonus, dan severance.
         </p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
+        <ExcelImporter
+          resource="cost_centers"
+          button-label="Import Excel"
+          @committed="fetchList(); fetchTree()"
+        />
         <button class="btn-secondary" @click="backfillEmployees">
           <ArrowPathIcon class="w-4 h-4" />
           Backfill Karyawan

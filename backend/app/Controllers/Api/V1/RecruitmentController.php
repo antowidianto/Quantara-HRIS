@@ -157,6 +157,9 @@ class RecruitmentController extends ApiController
             'salary_max'      => isset($data['salary_max']) ? (float) $data['salary_max'] : null,
             'salary_visible'  => (int) (bool) ($data['salary_visible'] ?? 0),
             'headcount'       => max(1, (int) ($data['headcount'] ?? 1)),
+            // Migration #065 — pipeline rekrutmen custom. NULL = pakai default.
+            'pipeline_template_id' => isset($data['pipeline_template_id']) && $data['pipeline_template_id'] !== ''
+                ? (int) $data['pipeline_template_id'] : null,
             'opened_at'       => $data['opened_at'] ?? null,
             'closed_at'       => $data['closed_at'] ?? null,
             'status'          => 'DRAFT',
@@ -184,6 +187,11 @@ class RecruitmentController extends ApiController
             'title','department_id','position_id','branch_id','employment_type',
             'description','requirements','salary_min','salary_max','salary_visible',
             'headcount','opened_at','closed_at','hiring_manager_id','notes',
+            // Migration #065 — pipeline_template_id boleh diganti selama
+            // belum ada kandidat aktif (RecruitmentPipelineController yg
+            // enforce kalau update template stages, tapi swap antar template
+            // di-allow di sini supaya HR bisa migrasi posting ke template baru).
+            'pipeline_template_id',
         ]));
         if (isset($update['salary_visible'])) $update['salary_visible'] = (int) (bool) $update['salary_visible'];
         if (isset($update['headcount'])) $update['headcount'] = max(1, (int) $update['headcount']);

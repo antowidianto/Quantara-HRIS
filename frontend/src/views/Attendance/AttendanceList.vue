@@ -5,6 +5,7 @@ import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
 import { fmtDate, fmtDateTime } from '@/composables/useResource'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -88,9 +89,18 @@ onMounted(async () => {
           </span>
         </p>
       </div>
-      <RouterLink to="/attendance/change-requests/approvals" class="btn-secondary">
-        Kelola Pengajuan Perubahan
-      </RouterLink>
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- Sprint 3 — bulk import attendance backfill dari xlsx -->
+        <ExcelImporter
+          v-if="auth.can('attendances.bulk_import')"
+          resource="attendances"
+          button-label="Import Absensi"
+          @committed="fetchData()"
+        />
+        <RouterLink to="/attendance/change-requests/approvals" class="btn-secondary">
+          Kelola Pengajuan Perubahan
+        </RouterLink>
+      </div>
     </div>
 
     <div class="card">

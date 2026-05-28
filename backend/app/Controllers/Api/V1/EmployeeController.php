@@ -31,14 +31,16 @@ class EmployeeController extends ApiController
             ->select('e.id, e.employee_number, e.full_name, e.email, e.phone, e.gender,
                 e.employment_status, e.employment_type, e.is_active,
                 e.join_date, e.resign_date, e.basic_salary, e.avatar_path,
-                e.department_id, e.position_id, e.branch_id, e.job_grade_id,
+                e.department_id, e.position_id, e.branch_id, e.job_grade_id, e.job_title_id,
                 d.name AS department_name, p.name AS position_name, p.tier AS position_tier,
                 b.name AS branch_name, jg.name AS job_grade_name, jg.code AS job_grade_code,
-                jg.level AS job_grade_level')
+                jg.level AS job_grade_level,
+                jt.name AS job_title_name, jt.family AS job_title_family, jt.level AS job_title_level')
             ->join('departments d', 'd.id = e.department_id', 'left')
             ->join('positions p', 'p.id = e.position_id', 'left')
             ->join('branches b', 'b.id = e.branch_id', 'left')
             ->join('job_grades jg', 'jg.id = e.job_grade_id', 'left')
+            ->join('job_titles jt', 'jt.id = e.job_title_id', 'left')
             ->where('e.deleted_at IS NULL');
 
         $this->tenant()->applyScope($builder, 'e.company_id');
@@ -53,7 +55,9 @@ class EmployeeController extends ApiController
         if ($deptId)     $builder->where('e.department_id', $deptId);
         if ($branchId)   $builder->where('e.branch_id', $branchId);
         if ($positionId) $builder->where('e.position_id', $positionId);
+        $jobTitleId = (int) ($this->request->getGet('job_title_id') ?? 0);
         if ($jobGradeId) $builder->where('e.job_grade_id', $jobGradeId);
+        if ($jobTitleId) $builder->where('e.job_title_id', $jobTitleId);
         // Filter by minimum job grade level — dipakai mis. picker manager
         // (yang harus level Manager keatas, bukan Staff). Default seeder
         // memakai level: 7 = Manager, 8 = VP, 10 = Direktur, 11 = Komisaris.
@@ -167,12 +171,29 @@ class EmployeeController extends ApiController
         $enc = \Config\Services::encryption();
         $now = date('Y-m-d H:i:s');
 
+        // Resolve job_title_id otomatis dari position kalau tidak di-set
+        // di payload. Pola umum: HR memilih position, sistem inherit
+        // job_title-nya. HR boleh override eksplisit lewat payload.
+        $jobTitleId = isset($data['job_title_id']) && $data['job_title_id'] !== ''
+            ? (int) $data['job_title_id']
+            : null;
+        if ($jobTitleId === null && ! empty($data['position_id'])) {
+            $posRow = $db->table('positions')
+                ->select('job_title_id')
+                ->where('id', (int) $data['position_id'])
+                ->get()->getRowArray();
+            if ($posRow && ! empty($posRow['job_title_id'])) {
+                $jobTitleId = (int) $posRow['job_title_id'];
+            }
+        }
+
         $insert = [
             'company_id'        => $companyId,
             'branch_id'         => $data['branch_id'] ?? null,
             'department_id'     => $data['department_id'] ?? null,
             'position_id'       => $data['position_id'] ?? null,
             'job_grade_id'      => $data['job_grade_id'] ?? null,
+            'job_title_id'      => $jobTitleId,
             'manager_id'        => $data['manager_id'] ?? null,
             'supervisor_id'     => $data['supervisor_id'] ?? null,
             'work_location_id'  => $data['work_location_id'] ?? null,
@@ -382,7 +403,7 @@ class EmployeeController extends ApiController
         $data = $this->getJsonInput();
         $enc = \Config\Services::encryption();
 
-        $updatable = ['branch_id','department_id','position_id','job_grade_id','manager_id',
+        $updatable = ['branch_id','department_id','position_id','job_grade_id','job_title_id','manager_id',
             'supervisor_id','work_location_id',
             'first_name','last_name','gender','religion','marital_status','place_of_birth','date_of_birth',
             'blood_type','bpjs_kesehatan_no','bpjs_tk_no','bank_name','bank_account_holder',
