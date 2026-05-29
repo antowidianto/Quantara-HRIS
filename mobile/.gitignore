@@ -1,0 +1,49 @@
+# OSX
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Xcode / iOS
+ios/Pods/
+ios/build/
+ios/.xcode.env.local
+*.xcworkspace
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Android
+android/build/
+android/app/build/
+android/.gradle/
+android/captures/
+android/local.properties
+*.iml
+
+# Bundle
+*.jsbundle
+.metro-health-check*
+
+# Expo (kalau migrasi suatu hari)
+.expo/
+
+# Tests
+coverage/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# RN
+*.hprof
+metro-cache/

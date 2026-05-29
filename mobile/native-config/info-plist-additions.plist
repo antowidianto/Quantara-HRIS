@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  iOS Info.plist additions — HRIS Mobile.
+
+  Setelah `bash scripts/init-native.sh` jalan, merge konten di bawah ke
+  `mobile/ios/HrisMobile/Info.plist`. Apple App Store reject submission
+  tanpa usage description string yang jelas dan ramah-user.
+
+  Kunci wajib untuk Tier 1 + Tier 2:
+    - NSCameraUsageDescription       : selfie clock-in + foto struk
+    - NSLocationWhenInUseUsageDescription : GPS validasi clock-in
+    - NSPhotoLibraryUsageDescription : galeri untuk pilih struk reimburse
+    - NSFaceIDUsageDescription       : login cepat dengan Face ID
+  
+  Push notification + ATS (App Transport Security) tambahan di bawah.
+-->
+
+<!-- Paste di antara <dict> root Info.plist -->
+
+<key>NSCameraUsageDescription</key>
+<string>HRIS perlu kamera untuk foto selfie saat clock-in/out dan foto struk reimbursement.</string>
+
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>HRIS perlu lokasi GPS untuk validasi presensi di area kerja yang ditentukan perusahaan.</string>
+
+<key>NSPhotoLibraryUsageDescription</key>
+<string>HRIS akses galeri foto untuk memilih struk reimbursement yang sudah disimpan.</string>
+
+<key>NSFaceIDUsageDescription</key>
+<string>HRIS pakai Face ID / Touch ID untuk login cepat tanpa input password setiap kali.</string>
+
+<!-- Push notification (kalau Firebase Messaging integrated) -->
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>remote-notification</string>
+    <string>fetch</string>
+</array>
+
+<key>FirebaseAppDelegateProxyEnabled</key>
+<false/>
+
+<!--
+  ATS (App Transport Security):
+  Production wajib HTTPS. Untuk dev di simulator iOS yang akses
+  http://localhost atau IP LAN, tambahkan exception domain. JANGAN
+  set NSAllowsArbitraryLoads=YES di production build.
+-->
+
+<!--
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSExceptionDomains</key>
+    <dict>
+        <key>localhost</key>
+        <dict>
+            <key>NSExceptionAllowsInsecureHTTPLoads</key>
+            <true/>
+        </dict>
+    </dict>
+</dict>
+-->
+
+<!-- App display name + bundle id biasanya sudah di-generate; pastikan match dengan Firebase config kalau di-pakai. -->

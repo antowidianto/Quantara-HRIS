@@ -1,0 +1,97 @@
+<!--
+  Android native config additions — HRIS Mobile.
+  
+  Setelah `bash scripts/init-native.sh` selesai jalan, merge konten di bawah
+  ke `mobile/android/app/src/main/AndroidManifest.xml`. Letakkan
+  <uses-permission> di TOP level (langsung di bawah <manifest>) dan
+  <queries> sebagai sibling.
+  
+  Konten ini mencakup permission yang dibutuhkan oleh Tier 1 + Tier 2:
+    - INTERNET (api call)
+    - ACCESS_FINE_LOCATION (clock-in geofence)
+    - CAMERA (selfie + receipt scan)
+    - USE_BIOMETRIC (Face ID / fingerprint quick login)
+    - POST_NOTIFICATIONS (push notif Android 13+)
+    - VIBRATE (push notif feedback)
+  
+  Catatan: ACCESS_BACKGROUND_LOCATION sengaja TIDAK dipakai. Clock-in
+  selalu user-initiated; tidak butuh tracking background → lebih aman
+  untuk Play Store review (sensitive permission scrutiny).
+-->
+
+<!-- Permissions ROOT-LEVEL — paste di antara <manifest> dan <application> -->
+
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+<!-- GPS untuk clock-in -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+<!-- Kamera untuk selfie + struk -->
+<uses-permission android:name="android.permission.CAMERA" />
+
+<!-- Biometric (Android 9+) -->
+<uses-permission android:name="android.permission.USE_BIOMETRIC" />
+<uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+<!-- Push notification (Android 13+) -->
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<uses-permission android:name="android.permission.VIBRATE" />
+
+<!-- Optional: untuk image picker baca galeri -->
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="32" />
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+<!--
+  ACTIVITY config — pasang di dalam <activity android:name=".MainActivity">.
+  
+  android:exported="true" wajib untuk Android 12+.
+  android:windowSoftInputMode="adjustResize" supaya keyboard tidak nutupin form.
+-->
+
+<!--
+<activity
+    android:name=".MainActivity"
+    android:label="@string/app_name"
+    android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+    android:launchMode="singleTask"
+    android:windowSoftInputMode="adjustResize"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</activity>
+-->
+
+<!--
+  FILE PROVIDER untuk camera capture — wajib supaya intent kamera bisa
+  return URI ke aplikasi (react-native-image-picker pakai ini).
+  
+  Tambahkan di dalam <application>:
+-->
+
+<!--
+<provider
+    android:name="androidx.core.content.FileProvider"
+    android:authorities="${applicationId}.provider"
+    android:exported="false"
+    android:grantUriPermissions="true">
+    <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/file_paths" />
+</provider>
+-->
+
+<!--
+  Buat file `mobile/android/app/src/main/res/xml/file_paths.xml`:
+  
+  <?xml version="1.0" encoding="utf-8"?>
+  <paths>
+      <cache-path name="cache" path="." />
+      <files-path name="files" path="." />
+      <external-path name="external" path="." />
+  </paths>
+-->
