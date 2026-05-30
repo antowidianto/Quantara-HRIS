@@ -48,6 +48,19 @@ class AuditLogger
     private static ?array $schemaCols = null;
 
     /**
+     * Field yang termasuk dalam canonical payload untuk hash chain.
+     * Urutan ini permanen — verifier juga akan baca dengan urutan sama.
+     * Jangan tambah/hapus tanpa migration data + dokumentasi.
+     */
+    private const HASH_FIELDS = [
+        'company_id', 'user_id', 'action', 'severity', 'module',
+        'entity', 'entity_id',
+        'before_data', 'after_data', 'changes',
+        'success', 'error_code',
+        'created_at',
+    ];
+
+    /**
      * Deteksi kolom yang ada di tabel audit_logs sehingga bisa
      * gracefully bekerja dengan schema lama (sebelum migrasi #007).
      */
@@ -256,12 +269,20 @@ class AuditLogger
                 'after_data'  => $after  ? json_encode($this->sanitize($after),  JSON_UNESCAPED_UNICODE) : null,
                 'changes'     => $changes ? json_encode($this->sanitize($changes, true), JSON_UNESCAPED_UNICODE) : null,
                 'metadata'    => $metadata ? json_encode($metadata, JSON_UNESCAPED_UNICODE) : null,
-                'ip_address'  => $request ? $request->getIPAddress() : null,
-                'user_agent'  => $request ? $this->trim((string) $request->getUserAgent(), 255) : null,
+                // CLI request (mis. spark migrate, scheduled command) tidak
+                // punya method getUserAgent()/getUri() — guard pakai
+                // method_exists supaya audit dari CLI tetap tercatat tanpa
+                // memicu warning. Lihat docs/AUDIT.md.
+                'ip_address'  => ($request && method_exists($request, 'getIPAddress'))
+                    ? $request->getIPAddress() : null,
+                'user_agent'  => ($request && method_exists($request, 'getUserAgent'))
+                    ? $this->trim((string) $request->getUserAgent(), 255) : null,
                 'source'      => $source ?? $this->detectSource($request),
                 'request_id'  => $this->getRequestId(),
-                'http_method' => $request ? strtoupper((string) $request->getMethod()) : null,
-                'http_path'   => $request ? $this->trim($request->getUri()->getPath(), 255) : null,
+                'http_method' => ($request && method_exists($request, 'getMethod'))
+                    ? strtoupper((string) $request->getMethod()) : null,
+                'http_path'   => ($request && method_exists($request, 'getUri'))
+                    ? $this->trim($request->getUri()->getPath(), 255) : null,
                 'success'     => $success ? 1 : 0,
                 'error_code'  => $errorCode,
                 'duration_ms' => $duration,
@@ -272,6 +293,19 @@ class AuditLogger
             $cols = $this->availableColumns();
             if (! empty($cols)) {
                 $row = array_intersect_key($row, array_flip($cols));
+            }
+
+            // ─── Hash chain (Sprint A / B6) ─────────────────────────
+            // Kalau kolom hash chain ada (migration #072 sudah jalan),
+            // hitung previous_hash + entry_hash supaya audit log immutable.
+            // Skip di SQLite test env (belum tentu ada index, tapi kolomnya
+            // tidak masalah — tetap hitung kalau kolomnya ada).
+            if (in_array('entry_hash', $cols, true)) {
+                $chainId = $this->resolveChainId($row);
+                $prevHash = $this->fetchLatestHash($db, $chainId);
+                $row['chain_id']      = $chainId;
+                $row['previous_hash'] = $prevHash;
+                $row['entry_hash']    = $this->computeEntryHash($row, $prevHash);
             }
 
             $db->table('audit_logs')->insert($row);
@@ -395,5 +429,76 @@ class AuditLogger
         $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
         $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+    }
+
+    // ─── Hash chain helpers (Sprint A / B6) ──────────────────────────
+
+    /**
+     * Resolve chain_id untuk row ini. Strategi: per (company_id, year-month)
+     * supaya chain tidak monolitik (verifier cukup load 1 segmen, dan
+     * arsip lama bisa di-archive per segmen tanpa break verifikasi).
+     *
+     * Format: "c{companyId}-{YYYYMM}". Untuk row tanpa company (mis.
+     * super admin global action) pakai "global-{YYYYMM}".
+     */
+    private function resolveChainId(array $row): string
+    {
+        $cid    = (int) ($row['company_id'] ?? 0);
+        $period = substr((string) ($row['created_at'] ?? date('Y-m-d')), 0, 7); // YYYY-MM
+        $period = str_replace('-', '', $period);
+        $prefix = $cid > 0 ? ('c' . $cid) : 'global';
+        return $prefix . '-' . $period;
+    }
+
+    /**
+     * Hitung entry_hash kanonik. Pakai SHA256 dari concat:
+     *   <previous_hash> || "\x1F" || <field1>=<v1> || "\x1F" || <field2>=<v2> ...
+     * Separator 0x1F (Unit Separator) supaya tidak collide dengan content.
+     * Field di-serialize jadi string deterministik (null → "", bool/int → as-is).
+     */
+    private function computeEntryHash(array $row, ?string $previousHash): string
+    {
+        $parts = [(string) ($previousHash ?? '')];
+        foreach (self::HASH_FIELDS as $f) {
+            $v = $row[$f] ?? null;
+            if (is_array($v)) {
+                $v = json_encode($v, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+            } elseif (is_bool($v)) {
+                $v = $v ? '1' : '0';
+            } else {
+                $v = $v === null ? '' : (string) $v;
+            }
+            $parts[] = $f . '=' . $v;
+        }
+        return hash('sha256', implode("\x1F", $parts));
+    }
+
+    /**
+     * Ambil hash terakhir dari chain. NULL kalau chain kosong (genesis row).
+     */
+    private function fetchLatestHash($db, string $chainId): ?string
+    {
+        try {
+            $row = $db->table('audit_logs')
+                ->select('entry_hash')
+                ->where('chain_id', $chainId)
+                ->orderBy('id', 'DESC')
+                ->limit(1)
+                ->get()
+                ->getRowArray();
+            return $row['entry_hash'] ?? null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Verifier helper — recompute hash row tertentu.
+     * Dipakai oleh `php spark audit:verify-chain`.
+     */
+    public static function recomputeHash(array $row, ?string $previousHash): string
+    {
+        $logger = new self();
+        return $logger->computeEntryHash($row, $previousHash);
     }
 }

@@ -40,6 +40,10 @@ class Filters extends BaseConfig
         'audit'         => \App\Filters\AuditFilter::class,
         'apicors'       => \App\Filters\ApiCorsFilter::class,
         'apiheaders'    => \App\Filters\ApiSecurityHeadersFilter::class,
+        // Sprint A / B3 — Origin/Referer guard untuk endpoint multipart upload
+        'sameorigin'    => \App\Filters\SameOriginFilter::class,
+        // Mobile Prep / MOB-3 — Idempotency-Key anti-duplikat untuk POST critical
+        'idempotency'   => \App\Filters\IdempotencyFilter::class,
     ];
 
     /**
@@ -82,5 +86,37 @@ class Filters extends BaseConfig
      */
     public array $filters = [
         'throttle:api' => ['before' => ['api/v1/*']],
+        // Mobile Prep / MOB-3 — Idempotency-Key untuk POST critical.
+        // Filter optional: hanya aktif kalau client kirim header
+        // `Idempotency-Key`. Dipasang di pattern POST yang sering jadi
+        // sumber duplikat (clock-in/out, leaves create, reimbursement,
+        // approval decisions). after-pass diperlukan untuk tulis
+        // response cache.
+        'idempotency' => [
+            'before' => [
+                'api/v1/attendance/clock-in',
+                'api/v1/attendance/clock-out',
+                'api/v1/leaves',
+                'api/v1/overtimes',
+                'api/v1/reimbursements',
+                'api/v1/business-trips',
+                'api/v1/approval-requests/*/approve',
+                'api/v1/approval-requests/*/reject',
+                'api/v1/approval-requests/bulk-approve',
+                'api/v1/approval-requests/bulk-reject',
+            ],
+            'after' => [
+                'api/v1/attendance/clock-in',
+                'api/v1/attendance/clock-out',
+                'api/v1/leaves',
+                'api/v1/overtimes',
+                'api/v1/reimbursements',
+                'api/v1/business-trips',
+                'api/v1/approval-requests/*/approve',
+                'api/v1/approval-requests/*/reject',
+                'api/v1/approval-requests/bulk-approve',
+                'api/v1/approval-requests/bulk-reject',
+            ],
+        ],
     ];
 }

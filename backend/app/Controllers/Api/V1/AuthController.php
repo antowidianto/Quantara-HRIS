@@ -266,7 +266,11 @@ class AuthController extends ApiController
 
     public function logout()
     {
-        $jti = $this->request->jwt['jti'] ?? null;
+        // JWT payload sekarang disimpan di TenantContext (lihat
+        // JwtAuthFilter). Sebelumnya pakai $this->request->jwt yang
+        // memicu PHP 8.2 dynamic property deprecation.
+        $payload = $this->tenant()->getJwtPayload();
+        $jti = $payload['jti'] ?? null;
         if ($jti) {
             // We can only revoke refresh tokens by user; revoke all is safest
             Services::jwt()->revokeAllForUser($this->userId());
@@ -280,6 +284,82 @@ class AuthController extends ApiController
                 description: 'Logout & seluruh refresh token dicabut'
             );
         return $this->ok(null, 'Logged out');
+    }
+
+    /**
+     * GET /api/v1/auth/sessions — Sprint A / B5
+     *
+     * Daftar refresh token aktif untuk user (= "Active Sessions" / device list).
+     * UI di Profile.vue boleh display ini supaya user bisa lihat dirinya
+     * login di mana saja & revoke per device atau "log out other devices".
+     */
+    public function listSessions()
+    {
+        $sessions = Services::jwt()->listActiveSessions($this->userId());
+        return $this->ok(['sessions' => $sessions]);
+    }
+
+    /**
+     * DELETE /api/v1/auth/sessions/{jti} — Sprint A / B5
+     *
+     * Revoke refresh token tertentu. Hanya boleh revoke milik user sendiri
+     * (server cek user_id match). Setelah revoke, device tersebut harus
+     * login ulang saat access tokennya kedaluwarsa.
+     */
+    public function revokeSession($jti = null)
+    {
+        $jti = (string) $jti;
+        if ($jti === '' || strlen($jti) > 64) {
+            return $this->fail('JTI tidak valid', 400);
+        }
+        $ok = Services::jwt()->revokeByUserAndJti($this->userId(), $jti);
+        if (! $ok) {
+            return $this->fail('Sesi tidak ditemukan atau bukan milik Anda', 404);
+        }
+        Services::audit()->forModule('AUTH')->log(
+            action: 'auth.session.revoke',
+            entity: 'user',
+            entityId: $this->userId(),
+            description: "Mencabut sesi (jti={$jti})",
+            severity: 'NOTICE',
+            metadata: ['jti' => $jti],
+        );
+        return $this->ok(null, 'Sesi dicabut');
+    }
+
+    /**
+     * POST /api/v1/auth/sessions/revoke-others — Sprint A / B5
+     *
+     * Revoke semua refresh token milik user kecuali sesi yang aktif sekarang.
+     * Berguna ketika user lupa logout di device publik.
+     */
+    public function revokeOtherSessions()
+    {
+        // jti dari refresh token tidak ada di access payload, jadi kita pakai
+        // last-used heuristic: cari refresh token milik user yang last_used_at
+        // paling baru — itulah sesi current device. Fallback: revoke semua.
+        $userId = $this->userId();
+        $db = \Config\Database::connect();
+        $current = $db->table('refresh_tokens')
+            ->select('jti')
+            ->where('user_id', $userId)
+            ->where('revoked', 0)
+            ->orderBy('last_used_at IS NULL', 'ASC')
+            ->orderBy('last_used_at', 'DESC')
+            ->limit(1)
+            ->get()->getRowArray();
+        $exceptJti = (string) ($current['jti'] ?? '');
+        $count = Services::jwt()->revokeAllExcept($userId, $exceptJti);
+
+        Services::audit()->forModule('AUTH')->log(
+            action: 'auth.session.revoke_others',
+            entity: 'user',
+            entityId: $userId,
+            description: "Mencabut {$count} sesi lain (kecuali sesi current)",
+            severity: 'NOTICE',
+            metadata: ['revoked_count' => $count, 'kept_jti' => $exceptJti],
+        );
+        return $this->ok(['revoked_count' => $count], 'Sesi lain dicabut');
     }
 
     public function me()

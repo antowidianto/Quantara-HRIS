@@ -259,17 +259,31 @@ class TurnoverAnalyticsService
             }
         }
 
-        // Last performance rating (final_score dari performance_reviews)
+        // Last performance rating dari performance_reviews. Kolom yang
+        // benar adalah `overall_score` (lihat migration #024); versi lama
+        // pakai `final_score` yang tidak pernah ada → "Unknown column
+        // 'final_score' in field list" di production. Tetap defensive
+        // dengan whitelist supaya kalau ke depan kolomnya pernah berubah
+        // lagi tidak fatal-error tapi cuma hilang feature rating.
         $ratingMap = [];
         if ($db->tableExists('performance_reviews')) {
-            $rows = $db->table('performance_reviews')
-                ->select('employee_id, MAX(final_score) AS rating')
-                ->whereIn('employee_id', $empIds)
-                ->where('final_score IS NOT NULL', null, false)
-                ->groupBy('employee_id')
-                ->get()->getResultArray();
-            foreach ($rows as $r) {
-                $ratingMap[(int) $r['employee_id']] = (float) $r['rating'];
+            $cols = $db->getFieldNames('performance_reviews');
+            // Prefer overall_score (current schema). Fallback ke
+            // final_score kalau ada (legacy DB), atau skip kalau tidak
+            // ada keduanya.
+            $scoreCol = in_array('overall_score', $cols, true)
+                ? 'overall_score'
+                : (in_array('final_score', $cols, true) ? 'final_score' : null);
+            if ($scoreCol !== null) {
+                $rows = $db->table('performance_reviews')
+                    ->select("employee_id, MAX({$scoreCol}) AS rating")
+                    ->whereIn('employee_id', $empIds)
+                    ->where("{$scoreCol} IS NOT NULL", null, false)
+                    ->groupBy('employee_id')
+                    ->get()->getResultArray();
+                foreach ($rows as $r) {
+                    $ratingMap[(int) $r['employee_id']] = (float) $r['rating'];
+                }
             }
         }
 

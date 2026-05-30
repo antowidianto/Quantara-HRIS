@@ -94,6 +94,11 @@ class ReferralProgramService
     /**
      * Tag candidate ke referral_link saat apply via Career Portal.
      * Increment apply_count.
+     *
+     * Schema (migration #061): kolom yang ada di `candidates` cuma
+     * `referral_link_id`. Referrer di-resolve via JOIN ke
+     * `referral_links.employee_id`. Versi lama menulis ke kolom
+     * `referrer_employee_id` yang tidak pernah ada di skema.
      */
     public function tagCandidate(int $candidateId, int $referralLinkId): void
     {
@@ -101,11 +106,18 @@ class ReferralProgramService
         $link = $db->table('referral_links')->where('id', $referralLinkId)->get()->getRowArray();
         if (! $link) return;
 
-        $db->table('candidates')->where('id', $candidateId)->update([
-            'referral_link_id'     => $referralLinkId,
-            'referrer_employee_id' => (int) $link['employee_id'],
-            'updated_at'           => date('Y-m-d H:i:s'),
-        ]);
+        $update = [
+            'referral_link_id' => $referralLinkId,
+            'updated_at'       => date('Y-m-d H:i:s'),
+        ];
+        // Defensive: kalau di kemudian hari kolom referrer_employee_id
+        // ditambahkan (mis. untuk denormalisasi performance), tetap
+        // boleh diisi. Sekarang skema-nya tidak ada — di-skip.
+        $candCols = $db->getFieldNames('candidates');
+        if (in_array('referrer_employee_id', $candCols, true)) {
+            $update['referrer_employee_id'] = (int) $link['employee_id'];
+        }
+        $db->table('candidates')->where('id', $candidateId)->update($update);
         $db->table('referral_links')->where('id', $referralLinkId)->update([
             'apply_count' => (int) $link['apply_count'] + 1,
             'updated_at'  => date('Y-m-d H:i:s'),
@@ -119,23 +131,31 @@ class ReferralProgramService
      *
      * @return array{should_pay: bool, referrer_employee_id: int|null, bonus_amount: float, rule_id: int|null}
      */
+    /**
+     * Evaluate bonus saat employee lulus probasi.
+     * Cari candidate yang ter-convert ke employee ini lewat
+     * `referral_link_id`, resolve referrer via referral_links.employee_id.
+     */
     public function evaluateBonusForHiredEmployee(int $employeeId): array
     {
         $db = $this->db();
-        // Cari candidate yang ter-convert ke employee ini
-        $cand = $db->table('candidates')
-            ->where('converted_employee_id', $employeeId)
-            ->where('referrer_employee_id IS NOT NULL')
-            ->where('referral_bonus_paid_at IS NULL')
+        // Cari candidate yang ter-convert ke employee ini DAN punya referral.
+        $cand = $db->table('candidates c')
+            ->select('c.id, c.referral_link_id, rl.employee_id AS referrer_employee_id')
+            ->join('referral_links rl', 'rl.id = c.referral_link_id')
+            ->where('c.converted_employee_id', $employeeId)
+            ->where('c.referral_link_id IS NOT NULL')
+            ->where('c.referral_bonus_paid_at IS NULL')
             ->get()->getRowArray();
         if (! $cand) {
             return ['should_pay' => false, 'referrer_employee_id' => null,
                 'bonus_amount' => 0.0, 'rule_id' => null];
         }
 
+        $referrerId = (int) $cand['referrer_employee_id'];
         $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
         if (! $emp) {
-            return ['should_pay' => false, 'referrer_employee_id' => (int) $cand['referrer_employee_id'],
+            return ['should_pay' => false, 'referrer_employee_id' => $referrerId,
                 'bonus_amount' => 0.0, 'rule_id' => null];
         }
 
@@ -146,13 +166,13 @@ class ReferralProgramService
         );
         if (! $rule || (float) $rule['bonus_amount'] <= 0) {
             return ['should_pay' => false,
-                'referrer_employee_id' => (int) $cand['referrer_employee_id'],
+                'referrer_employee_id' => $referrerId,
                 'bonus_amount' => 0.0, 'rule_id' => null];
         }
 
         return [
             'should_pay' => true,
-            'referrer_employee_id' => (int) $cand['referrer_employee_id'],
+            'referrer_employee_id' => $referrerId,
             'bonus_amount' => (float) $rule['bonus_amount'],
             'rule_id' => (int) $rule['id'],
             'candidate_id' => (int) $cand['id'],
@@ -213,21 +233,28 @@ class ReferralProgramService
     /**
      * Top referrers untuk dashboard analytics.
      *
+     * Schema: kandidat tidak punya kolom langsung `referrer_employee_id`.
+     * Relasinya via `candidates.referral_link_id → referral_links.id →
+     * referral_links.employee_id` (referrer). Versi sebelumnya melempar
+     * "Unknown column 'c.referrer_employee_id'" karena memakai kolom yang
+     * tidak pernah ada (lihat migration #061).
+     *
      * @return array<int, array<string,mixed>>
      */
     public function topReferrers(int $companyId, int $limit = 10, ?string $since = null): array
     {
         $since = $since ?: date('Y-m-d', strtotime('-365 days'));
         return $this->db()->table('candidates c')
-            ->select('c.referrer_employee_id, e.full_name AS referrer_name,'
+            ->select('rl.employee_id AS referrer_employee_id, e.full_name AS referrer_name,'
                 . ' COUNT(*) AS total_referred,'
                 . ' SUM(CASE WHEN c.current_stage = "HIRED" THEN 1 ELSE 0 END) AS total_hired,'
                 . ' SUM(CASE WHEN c.referral_bonus_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS bonus_paid_count')
-            ->join('employees e', 'e.id = c.referrer_employee_id')
+            ->join('referral_links rl', 'rl.id = c.referral_link_id')
+            ->join('employees e', 'e.id = rl.employee_id')
             ->where('c.company_id', $companyId)
-            ->where('c.referrer_employee_id IS NOT NULL')
+            ->where('c.referral_link_id IS NOT NULL')
             ->where('c.created_at >=', $since)
-            ->groupBy('c.referrer_employee_id, e.full_name')
+            ->groupBy('rl.employee_id, e.full_name')
             ->orderBy('total_hired', 'DESC')
             ->orderBy('total_referred', 'DESC')
             ->limit($limit)->get()->getResultArray();
