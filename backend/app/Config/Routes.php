@@ -34,6 +34,17 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     // Health check
     $routes->get('health', 'HealthController::index');
 
+    // ─── Mobile Prep / MOB-5 — OpenAPI spec (public) ────────────────
+    // Spec sendiri tidak rahasia; endpoint actual tetap auth-protected.
+    // Pakai dengan openapi-generator-cli untuk codegen client mobile.
+    $routes->get('openapi.json', 'OpenApiController::spec');
+
+    // ─── Mobile / M4 — version gate (public) ────────────────────────
+    // Mobile app fetch saat boot. Returns min_supported, latest, dan
+    // store URL per platform. Lihat docs/MOBILE_APP_PLAN.md & mobile
+    // src/lib/versionCheck.ts untuk detail kontrak.
+    $routes->get('mobile/version', 'MobileVersionController::index');
+
     // CSP violation report (browser POST sebagai application/csp-report) — public,
     // browser tidak forward auth header. Throttle:api di global filter sudah cover.
     $routes->post('csp-report', 'CspReportController::report');
@@ -120,8 +131,21 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('auth/change-password', 'AuthController::changePassword');
         $routes->post('auth/2fa/enable', 'AuthController::enableTwoFactor');
         $routes->post('auth/2fa/disable', 'AuthController::disableTwoFactor');
+        // Sprint A / B5 — Active Sessions (device list + revoke per device)
+        $routes->get('auth/sessions',                       'AuthController::listSessions');
+        $routes->post('auth/sessions/revoke-others',        'AuthController::revokeOtherSessions');
+        $routes->delete('auth/sessions/(:segment)',         'AuthController::revokeSession/$1');
+
+        // ─── Mobile Prep / MOB-1 — Device push token registry ──────
+        // Mobile app pair FCM/APNs token ke user untuk push notif fanout.
+        // Lihat docs/MOBILE_APP_PLAN.md.
+        $routes->post('devices/register',          'DeviceController::register');
+        $routes->post('devices/unregister',        'DeviceController::unregisterByToken');
+        $routes->get('devices',                    'DeviceController::index');
+        $routes->delete('devices/(:num)',          'DeviceController::unregister/$1');
         // Foto profil — self-service upload/hapus, JPEG/PNG/WebP ≤ 2 MB.
-        $routes->post('auth/me/avatar',   'AuthController::uploadAvatar');
+        // Sprint A / B3 — Origin guard untuk multipart upload.
+        $routes->post('auth/me/avatar',   'AuthController::uploadAvatar', ['filter' => 'sameorigin']);
         $routes->delete('auth/me/avatar', 'AuthController::deleteAvatar');
 
         // ─── UU PDP (Sprint 4) — Data Subject Rights ───────────────
@@ -182,8 +206,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
 
         // Attendance
         $routes->get('attendance', 'AttendanceController::index');
-        $routes->post('attendance/clock-in', 'AttendanceController::clockIn');
-        $routes->post('attendance/clock-out', 'AttendanceController::clockOut');
+        // Sprint A / B3 — Origin guard untuk multipart selfie clock.
+        $routes->post('attendance/clock-in', 'AttendanceController::clockIn',
+            ['filter' => 'sameorigin']);
+        $routes->post('attendance/clock-out', 'AttendanceController::clockOut',
+            ['filter' => 'sameorigin']);
         $routes->get('attendance/my', 'AttendanceController::my');
         $routes->get('attendance/calendar/(:num)', 'AttendanceController::calendar/$1');
 
@@ -331,7 +358,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('inbound-webhooks/(:num)/events',       'InboundWebhookController::events/$1');
 
         // Notification preferences (per user, multi-channel)
-        // Lihat docs/AUDIT.md item K
+        // Lihat docs/AUDIT.md item K. Quiet-hours endpoint ditambah di
+        // sprint mobile M7 (DND window; lihat docs/SPRINT_MOBILE_M7_*).
+        // Endpoint /quiet-hours didefinisikan duluan supaya tidak
+        // ke-trap sebagai sub-resource dari index/update.
+        $routes->get('notification-preferences/quiet-hours', 'NotificationPreferenceController::getQuietHours');
+        $routes->put('notification-preferences/quiet-hours', 'NotificationPreferenceController::updateQuietHours');
         $routes->get('notification-preferences',  'NotificationPreferenceController::index');
         $routes->put('notification-preferences',  'NotificationPreferenceController::update');
 
@@ -339,6 +371,21 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->resource('roles', ['controller' => 'RoleController']);
         $routes->resource('permissions', ['controller' => 'PermissionController']);
         $routes->resource('users', ['controller' => 'UserController']);
+
+        // ─── Menu (sidebar dinamis, Migration #076) ────────────────
+        // GET /menus/me dipanggil setiap layout AppLayout mount untuk
+        // dapatkan tree menu yang sudah difilter sesuai permission user.
+        // Endpoint admin (CRUD + reorder) butuh permission `menu.manage`
+        // yang di-cek di MenuController via tenant role check.
+        // Definisikan endpoint khusus SEBELUM /menus/(:num) supaya path
+        // /me dan /reorder tidak nyangkut sebagai numeric id.
+        $routes->get('menus/me',           'MenuController::me');
+        $routes->post('menus/reorder',     'MenuController::reorder');
+        $routes->get('menus',              'MenuController::index');
+        $routes->post('menus',             'MenuController::create');
+        $routes->get('menus/(:num)',       'MenuController::show/$1');
+        $routes->put('menus/(:num)',       'MenuController::update/$1');
+        $routes->delete('menus/(:num)',    'MenuController::delete/$1');
 
         // Reports
         $routes->get('reports/headcount', 'ReportController::headcount');
@@ -796,14 +843,17 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // ─── Generic File Upload (Sprint 3 item I) ─────────────────
         // POST /upload?context=ticket|candidate_doc|employee_doc|training_cert&entity_id=N
         // Validasi MIME + size + multi-tenant ownership di controller.
-        $routes->post('upload', 'FileUploadController::upload');
+        // Sprint A / B3 — Origin guard untuk multipart upload.
+        $routes->post('upload', 'FileUploadController::upload', ['filter' => 'sameorigin']);
 
         // ─── Pre-create attachment upload ──────────────────────────
         // POST /upload/attachment?context=leave|overtime|reimbursement|...
         // Untuk lampiran/bukti yang ditempel ke field `attachment_path`
         // di payload create form. Boleh dipanggil sebelum parent record
         // dibuat. Lihat FileUploadController::ATTACHMENT_CONTEXTS.
-        $routes->post('upload/attachment', 'FileUploadController::uploadAttachment');
+        // Sprint A / B3 — Origin guard untuk multipart upload.
+        $routes->post('upload/attachment', 'FileUploadController::uploadAttachment',
+            ['filter' => 'sameorigin']);
 
         // ─── Resignation Requests (self-service) ───────────────────
         // Karyawan ajukan surat resign → atasan approve → HR approve →

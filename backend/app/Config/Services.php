@@ -711,6 +711,25 @@ class Services extends BaseService
     }
 
     /**
+     * LookupCache — Sprint D+1 / D4. High-level read-through cache untuk
+     * data quasi-static (UMP/UMK, holidays, role permissions, BPJS rates,
+     * payroll settings, TER rates). Bungkus CacheService dengan loader
+     * callback dan TTL convention per resource.
+     *
+     * Caller di controller payroll, leave, attendance bisa
+     *   `Services::lookup()->getHolidays($companyId, $year)`
+     * supaya tidak query DB tiap request.
+     */
+    public static function lookup(bool $getShared = true): \App\Libraries\LookupCache
+    {
+        if ($getShared) {
+            return static::getSharedInstance('lookup');
+        }
+
+        return new \App\Libraries\LookupCache();
+    }
+
+    /**
      * WebhookDispatcher — orchestrate webhook outbound delivery dengan
      * retry exponential backoff + HMAC-SHA256 signing. Sprint 11+.
      * Lihat docs/WEBHOOKS.md.
@@ -824,5 +843,62 @@ class Services extends BaseService
         }
 
         return new \App\Libraries\ComplianceReportService();
+    }
+
+    /**
+     * CircuitBreaker factory — Sprint D / D6.
+     *
+     * Registry per-service circuit breaker dengan threshold & cooldown
+     * dari env (default fallback aman). Shared instance per service name
+     * supaya state konsisten di lifecycle request.
+     *
+     * Env keys (optional, fallback ke default):
+     *   - circuitBreaker.{service}.threshold (default 5)
+     *   - circuitBreaker.{service}.cooldown  (default 60 detik)
+     *
+     * Usage:
+     *   $cb = Services::circuitBreaker('whatsapp');
+     *   $cb->call(fn() => $client->send($payload));
+     *
+     * Kalau service tidak terdaftar, factory tetap return CircuitBreaker
+     * dengan default config — fail-safe. Untuk dapat snapshot semua
+     * breaker untuk dashboard ops, panggil
+     * `CircuitBreaker::snapshot()` per service yang dipakai.
+     */
+    public static function circuitBreaker(string $service, bool $getShared = true): \App\Libraries\CircuitBreaker
+    {
+        $key = 'circuitBreaker.' . $service;
+        if ($getShared) {
+            $existing = static::getSharedInstance($key);
+            if ($existing instanceof \App\Libraries\CircuitBreaker) {
+                return $existing;
+            }
+        }
+
+        $threshold = (int) (env('circuitBreaker.' . $service . '.threshold') ?: 5);
+        $cooldown  = (int) (env('circuitBreaker.' . $service . '.cooldown') ?: 60);
+
+        $cb = new \App\Libraries\CircuitBreaker($service, $threshold, $cooldown);
+        if ($getShared) {
+            static::injectMock($key, $cb);
+        }
+        return $cb;
+    }
+
+    /**
+     * PushNotifier — Mobile Prep / MOB-2. FCM HTTP v1 adapter untuk
+     * push notification ke Android/iOS. Lihat docs/MOBILE_APP_PLAN.md
+     * section 6.2.
+     *
+     * Env keys:
+     *   - fcm.projectId           : Firebase project ID
+     *   - fcm.serviceAccountPath  : Absolute path ke service account JSON
+     */
+    public static function pushNotifier(bool $getShared = true): \App\Libraries\PushNotifier
+    {
+        if ($getShared) {
+            return static::getSharedInstance('pushNotifier');
+        }
+        return new \App\Libraries\PushNotifier();
     }
 }

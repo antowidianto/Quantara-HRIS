@@ -32,10 +32,16 @@ class ThrottleFilter implements FilterInterface
 
         try {
             $cache = Services::cache();
+            // CodeIgniter cache validator menolak karakter reserved
+            // (`{}()/\@:`). Pakai underscore sebagai separator + sanitasi
+            // IP supaya IPv6 (yang punya `:`) tidak memicu warning
+            // "Cache key contains reserved characters". Lihat
+            // CodeIgniter\Cache\Handlers\BaseHandler::validateKey.
+            $ip = preg_replace('/[^A-Za-z0-9._-]/', '_', (string) $request->getIPAddress());
             $key = sprintf(
-                'throttle:%s:%s:%s',
-                $bucket,
-                $request->getIPAddress(),
+                'throttle_%s_%s_%s',
+                preg_replace('/[^A-Za-z0-9_-]/', '_', $bucket),
+                $ip,
                 md5($request->getUri()->getPath()),
             );
 

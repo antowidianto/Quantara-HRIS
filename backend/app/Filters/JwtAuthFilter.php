@@ -37,19 +37,55 @@ class JwtAuthFilter implements FilterInterface
             return $this->unauthorized('User no longer active');
         }
 
-        // Stash user + tenant context onto the request for downstream use
-        $request->user = $user;
-        $request->jwt  = $payload;
+        // Simpan user + JWT payload di TenantContext (anti dynamic
+        // property deprecation di PHP 8.2+). Controllers seperti
+        // AuthController::logout() ambil via $this->tenant()->getJwtPayload().
+        // Lama: $request->user/$request->jwt yang memicu warning
+        // "Creation of dynamic property" pada IncomingRequest.
+        Services::tenant()->setAuthUser($user);
+        Services::tenant()->setJwtPayload($payload);
 
         // Set tenant context so models/queries can scope by company_id.
         // Untuk super admin (company_id NULL di DB), izinkan override via
         // header X-Company-Id supaya seluruh controller transparan terhadap
         // pilihan "active company" yang dikirim frontend setelah login.
-        $companyId = (int) ($payload['company_id'] ?? $user['company_id'] ?? 0);
+        $tokenCompanyId = (int) ($payload['company_id'] ?? $user['company_id'] ?? 0);
+        $companyId = $tokenCompanyId;
         $hdrCid = (int) $request->getHeaderLine('X-Company-Id');
-        if ($hdrCid > 0 && ($companyId === 0 || ((int) $user['role_id']) === 1)) {
+        $isSuperAdmin = ((int) $user['role_id']) === 1;
+        if ($hdrCid > 0 && ($companyId === 0 || $isSuperAdmin)) {
             // Super admin atau user lintas-tenant menggunakan header.
             $companyId = $hdrCid;
+
+            // Sprint A / B4 — audit setiap kali super_admin switch tenant
+            // di luar token claim. NOTICE severity supaya HR / security
+            // bisa pantau aktivitas lintas-tenant tanpa request_id berubah.
+            // Throttle audit per-IP+user via cache (1 entry per 5 menit per
+            // (user, target_company)) supaya log tidak meledak saat user
+            // refresh halaman atau polling.
+            if ($isSuperAdmin && $tokenCompanyId !== $hdrCid) {
+                static $auditedSwitches = [];
+                $key = $user['id'] . ':' . $hdrCid;
+                if (! isset($auditedSwitches[$key])) {
+                    $auditedSwitches[$key] = true;
+                    try {
+                        Services::audit()->forModule('AUTH')->log(
+                            action: 'auth.tenant.switch',
+                            entity: 'company',
+                            entityId: $hdrCid,
+                            description: "Super admin switch context ke company={$hdrCid} (token claim={$tokenCompanyId})",
+                            severity: 'NOTICE',
+                            metadata: [
+                                'user_id'           => (int) $user['id'],
+                                'token_company_id'  => $tokenCompanyId,
+                                'target_company_id' => $hdrCid,
+                            ],
+                        );
+                    } catch (\Throwable $e) {
+                        // Audit log gagal tidak boleh block request
+                    }
+                }
+            }
         }
         Services::tenant()->setCompanyId($companyId);
         Services::tenant()->setUserId((int) $user['id']);

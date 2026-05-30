@@ -354,14 +354,30 @@ class TalentPoolService
 
     /**
      * Build 9-box grid untuk seluruh karyawan aktif di company.
-     * Performance: avg final_score / 100 × 5 (rescale ke 1-5).
+     * Performance: avg overall_score / 20 (0-100 → 0-5).
      * Potential: heuristic dari assessment level + last review acknowledged.
+     *
+     * NOTE: Kolom yang benar di `performance_reviews` adalah `overall_score`
+     * (lihat migration #024), bukan `final_score`. Versi sebelumnya melempar
+     * "Unknown column 'final_score' in field list" di production.
      */
     public function nineBoxGrid(int $companyId): array
     {
         $db = $this->db();
         $boxCounts = array_fill(1, 9, 0);
         $byBox = array_fill(1, 9, []);
+
+        // Resolve nama kolom skor sekali di awal supaya defensive di DB
+        // schema bervariasi (legacy mungkin pakai final_score, current
+        // pakai overall_score). Kalau tidak ada, performance dianggap 0
+        // dan grid jatuh ke baris bawah.
+        $scoreCol = null;
+        if ($db->tableExists('performance_reviews')) {
+            $cols = $db->getFieldNames('performance_reviews');
+            $scoreCol = in_array('overall_score', $cols, true)
+                ? 'overall_score'
+                : (in_array('final_score', $cols, true) ? 'final_score' : null);
+        }
 
         $emps = $db->table('employees')
             ->select('id, full_name, employee_number, position_id, department_id')
@@ -372,13 +388,16 @@ class TalentPoolService
 
         foreach ($emps as $e) {
             $eid = (int) $e['id'];
-            // Performance: avg final_score / 20 (0-100 → 0-5)
-            $perfRow = $db->table('performance_reviews')
-                ->selectAvg('final_score', 'avg_score')
-                ->where('employee_id', $eid)
-                ->where('final_score IS NOT NULL', null, false)
-                ->get()->getRowArray();
-            $perf = ! empty($perfRow['avg_score']) ? min(5, ((float) $perfRow['avg_score']) / 20) : 0.0;
+            // Performance: avg score / 20 (0-100 → 0-5)
+            $perf = 0.0;
+            if ($scoreCol !== null) {
+                $perfRow = $db->table('performance_reviews')
+                    ->selectAvg($scoreCol, 'avg_score')
+                    ->where('employee_id', $eid)
+                    ->where("{$scoreCol} IS NOT NULL", null, false)
+                    ->get()->getRowArray();
+                $perf = ! empty($perfRow['avg_score']) ? min(5, ((float) $perfRow['avg_score']) / 20) : 0.0;
+            }
 
             // Potential: avg current_level dari assessments
             $potential = 0.0;

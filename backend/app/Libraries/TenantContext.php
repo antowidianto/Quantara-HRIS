@@ -32,6 +32,25 @@ class TenantContext
     /** @var string[] permission slugs for the current user (cached on first call) */
     private ?array $permissions = null;
 
+    /**
+     * User row (dari tabel `users`) hasil resolve di JwtAuthFilter.
+     * Disimpan di sini supaya tidak perlu set dynamic property
+     * `$request->user` (memicu PHP 8.2 deprecation warning) dan controller
+     * lain bisa akses lewat `Services::tenant()->getAuthUser()` tanpa
+     * query DB ulang.
+     *
+     * @var array<string,mixed>|null
+     */
+    private ?array $authUser = null;
+
+    /**
+     * JWT payload (claims yang sudah di-validate oleh JwtService).
+     * Pengganti `$request->jwt` lama.
+     *
+     * @var array<string,mixed>|null
+     */
+    private ?array $jwtPayload = null;
+
     public function setCompanyId(int $id): void
     {
         $this->companyId = $id;
@@ -89,6 +108,26 @@ class TenantContext
     public function isSuperAdmin(): bool
     {
         return $this->isSuperAdmin;
+    }
+
+    public function setAuthUser(?array $user): void
+    {
+        $this->authUser = $user;
+    }
+
+    public function getAuthUser(): ?array
+    {
+        return $this->authUser;
+    }
+
+    public function setJwtPayload(?array $payload): void
+    {
+        $this->jwtPayload = $payload;
+    }
+
+    public function getJwtPayload(): ?array
+    {
+        return $this->jwtPayload;
     }
 
     /**

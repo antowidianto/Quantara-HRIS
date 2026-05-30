@@ -233,13 +233,27 @@ class PerformanceCascadingService
         $cycle = $this->db()->table('performance_cycles')->where('id', $cycleId)->get()->getRowArray();
         $minReviewers = (int) ($cycle['peer_min_reviewers'] ?? 3);
 
-        $rows = $this->db()->table('peer_review_nominations n')
-            ->select('pr.final_score AS score')
+        // Kolom yang benar di `performance_reviews` adalah `overall_score`
+        // (lihat migration #024). Versi lama pakai `final_score` (yang
+        // hanya ada di tabel `goals`) dan crash dengan "Unknown column
+        // 'final_score' in field list" saat aggregate peer rating.
+        // Defensive whitelist supaya kalau di-rename lagi tidak fatal.
+        $db = $this->db();
+        $reviewCols = $db->getFieldNames('performance_reviews');
+        $scoreCol = in_array('overall_score', $reviewCols, true)
+            ? 'overall_score'
+            : (in_array('final_score', $reviewCols, true) ? 'final_score' : null);
+        if ($scoreCol === null) {
+            return ['rating' => null, 'count' => 0, 'anonymous' => false,
+                'min_required' => $minReviewers];
+        }
+        $rows = $db->table('peer_review_nominations n')
+            ->select("pr.{$scoreCol} AS score")
             ->join('performance_reviews pr', 'pr.id = n.review_id', 'inner')
             ->where('n.cycle_id', $cycleId)
             ->where('n.reviewee_id', $revieweeId)
             ->where('n.status', 'COMPLETED')
-            ->where('pr.final_score IS NOT NULL')
+            ->where("pr.{$scoreCol} IS NOT NULL", null, false)
             ->get()->getResultArray();
 
         $count = count($rows);

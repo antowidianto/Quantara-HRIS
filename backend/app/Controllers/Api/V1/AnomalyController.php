@@ -42,13 +42,16 @@ class AnomalyController extends ApiController
         $from    = (string) $this->request->getGet('from_date');
         $to      = (string) $this->request->getGet('to_date');
 
+        // NOTE: Tabel `attendances` (lihat migration #003) TIDAK punya
+        // `deleted_at` dan kolom tanggalnya bernama `work_date`, bukan
+        // `attendance_date`. Versi sebelumnya melempar
+        // "Unknown column 'a.deleted_at'" / "a.attendance_date" di production.
         $b = $this->db()->table('attendances a')
             ->select('a.*, e.full_name AS employee_name, e.employee_number, '
                 . 'b.name AS branch_name, d.name AS department_name')
             ->join('employees e', 'e.id = a.employee_id')
             ->join('branches b', 'b.id = e.branch_id', 'left')
             ->join('departments d', 'd.id = e.department_id', 'left')
-            ->where('a.deleted_at IS NULL')
             ->where('a.anomaly_score >=', $minScore);
         $this->tenant()->applyScope($b, 'e.company_id');
 
@@ -56,12 +59,12 @@ class AnomalyController extends ApiController
             if ((int) $reviewed === 1) $b->where('a.anomaly_reviewed_at IS NOT NULL');
             else                       $b->where('a.anomaly_reviewed_at IS NULL');
         }
-        if ($from) $b->where('a.attendance_date >=', $from);
-        if ($to)   $b->where('a.attendance_date <=', $to);
+        if ($from) $b->where('a.work_date >=', $from);
+        if ($to)   $b->where('a.work_date <=', $to);
 
         $total = $b->countAllResults(false);
         $rows = $b->orderBy('a.anomaly_score', 'DESC')
-            ->orderBy('a.attendance_date', 'DESC')
+            ->orderBy('a.work_date', 'DESC')
             ->limit($perPage, ($page - 1) * $perPage)
             ->get()->getResultArray();
 
