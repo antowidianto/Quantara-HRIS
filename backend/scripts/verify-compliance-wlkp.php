@@ -41,7 +41,7 @@ if (! in_array('nationality', $cols, true)) {
 echo "[OK] employees.nationality ditemukan\n";
 
 // Panggil ComplianceReportService::generateReport untuk WLKP_ANNUAL
-$svc = new \App\Libraries\ComplianceReportService();
+$svc = new \App\Libraries\Lifecycle\ComplianceReportService();
 
 try {
     $reflect = new ReflectionClass($svc);

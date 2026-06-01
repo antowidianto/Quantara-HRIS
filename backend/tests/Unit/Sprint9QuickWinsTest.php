@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\ApprovalConditionEvaluator;
+use App\Libraries\Approval\ApprovalConditionEvaluator;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -143,7 +143,7 @@ class Sprint9QuickWinsTest extends TestCase
     public function testThrTenureMonths(): void
     {
         // Pakai static method existing di PayrollController
-        $months = \App\Controllers\Api\V1\PayrollController::computeTenureMonths(
+        $months = \App\Controllers\Api\V1\Payroll\PayrollController::computeTenureMonths(
             joinDate: '2025-01-15',
             resignDate: null,
             payDate: '2026-04-01',
@@ -155,7 +155,7 @@ class Sprint9QuickWinsTest extends TestCase
 
     public function testThrAmountFullForOneYearTenure(): void
     {
-        $amount = \App\Controllers\Api\V1\PayrollController::computeThrAmount(
+        $amount = \App\Controllers\Api\V1\Payroll\PayrollController::computeThrAmount(
             monthlySalary: 10000000,
             tenureMonths: 12
         );
@@ -164,7 +164,7 @@ class Sprint9QuickWinsTest extends TestCase
 
     public function testThrAmountProportionalForLessThanYear(): void
     {
-        $amount = \App\Controllers\Api\V1\PayrollController::computeThrAmount(
+        $amount = \App\Controllers\Api\V1\Payroll\PayrollController::computeThrAmount(
             monthlySalary: 10000000,
             tenureMonths: 6
         );
@@ -173,7 +173,7 @@ class Sprint9QuickWinsTest extends TestCase
 
     public function testThrAmountZeroForLessThanMonth(): void
     {
-        $amount = \App\Controllers\Api\V1\PayrollController::computeThrAmount(
+        $amount = \App\Controllers\Api\V1\Payroll\PayrollController::computeThrAmount(
             monthlySalary: 10000000,
             tenureMonths: 0
         );
@@ -184,7 +184,7 @@ class Sprint9QuickWinsTest extends TestCase
 
     public function testWhatsAppNormalizePhoneIndonesia(): void
     {
-        $svc = new \App\Libraries\WhatsAppService();
+        $svc = new \App\Libraries\Notification\WhatsAppService();
         $this->assertSame('6281234567890', $svc->normalizePhone('081234567890'));
         $this->assertSame('6281234567890', $svc->normalizePhone('081234567890'));
         $this->assertSame('6281234567890', $svc->normalizePhone('+62 812-3456-7890'));
@@ -193,7 +193,7 @@ class Sprint9QuickWinsTest extends TestCase
 
     public function testWhatsAppNormalizePhoneRejectsInvalid(): void
     {
-        $svc = new \App\Libraries\WhatsAppService();
+        $svc = new \App\Libraries\Notification\WhatsAppService();
         $this->assertNull($svc->normalizePhone(''));
         $this->assertNull($svc->normalizePhone('not-a-phone'));
         $this->assertNull($svc->normalizePhone('123')); // terlalu pendek
@@ -204,7 +204,7 @@ class Sprint9QuickWinsTest extends TestCase
     {
         // Kalau threshold berubah di production, test ini harus di-update
         // bersamaan supaya konsisten dengan dokumentasi.
-        $this->assertSame(3, \App\Libraries\WhatsAppService::RATE_LIMIT_PER_DAY);
+        $this->assertSame(3, \App\Libraries\Notification\WhatsAppService::RATE_LIMIT_PER_DAY);
     }
 
     public function testWhatsAppMessageTruncation(): void

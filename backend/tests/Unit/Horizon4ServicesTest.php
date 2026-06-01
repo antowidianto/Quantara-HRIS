@@ -2,10 +2,10 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\AiAssistantService;
-use App\Libraries\WorkforceSimulationService;
-use App\Libraries\PulseSurveyService;
-use App\Libraries\CompensationIntelligenceService;
+use App\Libraries\Analytics\AiAssistantService;
+use App\Libraries\Manpower\WorkforceSimulationService;
+use App\Libraries\Performance\PulseSurveyService;
+use App\Libraries\Analytics\CompensationIntelligenceService;
 use PHPUnit\Framework\TestCase;
 
 /**

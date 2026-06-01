@@ -31,7 +31,7 @@ use CodeIgniter\Database\Migration;
  *
  * Handler dispatch:
  *   Saat event diterima dan signature valid, controller cari handler di
- *   `App\Libraries\InboundWebhookHandler::resolve($eventType)` registry.
+ *   `App\Libraries\Webhook\InboundWebhookHandler::resolve($eventType)` registry.
  *   Handler mengembalikan ack response (200) atau error (4xx/5xx).
  *
  * Multi-tenant: setiap inbound webhook scoped ke company. Source URL

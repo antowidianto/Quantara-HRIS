@@ -156,12 +156,12 @@ class OfferValidationTest extends TestCase
     {
         // OfferService::DEFAULT_RESPONSE_WINDOW_DAYS = 7
         // Konstanta dipakai untuk default deadline kalau HR tidak set manual
-        $this->assertSame(7, \App\Libraries\OfferService::DEFAULT_RESPONSE_WINDOW_DAYS);
+        $this->assertSame(7, \App\Libraries\Recruitment\OfferService::DEFAULT_RESPONSE_WINDOW_DAYS);
     }
 
     public function testStatusesConstantContainsAll(): void
     {
-        $statuses = \App\Libraries\OfferService::STATUSES;
+        $statuses = \App\Libraries\Recruitment\OfferService::STATUSES;
         $this->assertContains('DRAFT',     $statuses);
         $this->assertContains('SENT',      $statuses);
         $this->assertContains('ACCEPTED',  $statuses);

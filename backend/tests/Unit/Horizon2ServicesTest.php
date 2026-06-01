@@ -2,11 +2,11 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\CandidateScoringService;
-use App\Libraries\PerformanceCascadingService;
-use App\Libraries\ReferralProgramService;
-use App\Libraries\TurnoverAnalyticsService;
-use App\Libraries\OcrService;
+use App\Libraries\Recruitment\CandidateScoringService;
+use App\Libraries\Performance\PerformanceCascadingService;
+use App\Libraries\Recruitment\ReferralProgramService;
+use App\Libraries\Compliance\TurnoverAnalyticsService;
+use App\Libraries\System\OcrService;
 use PHPUnit\Framework\TestCase;
 
 /**

@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\TwoFactorBackupCodes;
+use App\Libraries\Auth\TwoFactorBackupCodes;
 use PHPUnit\Framework\TestCase;
 
 /**

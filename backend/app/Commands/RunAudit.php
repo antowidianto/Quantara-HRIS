@@ -432,7 +432,7 @@ class RunAudit extends BaseCommand
             $belowCount = 0;
             foreach ($rows as $r) {
                 if (empty($r['province'])) continue;
-                $ump = \App\Libraries\IndonesianValidator::findMinimumWage(
+                $ump = \App\Libraries\System\IndonesianValidator::findMinimumWage(
                     $r['province'], $r['city'] ?? null,
                     (int) date('Y', strtotime($r['join_date']))
                 );

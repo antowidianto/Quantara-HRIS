@@ -111,7 +111,7 @@ class Exceptions extends BaseConfig
         // request bot/scanner ke path yang tidak ada.
         if (! in_array($statusCode, $this->ignoreCodes, true)) {
             try {
-                \App\Libraries\ExceptionLogger::capture($exception, [
+                \App\Libraries\System\ExceptionLogger::capture($exception, [
                     'status_code' => $statusCode,
                     'http_method' => $_SERVER['REQUEST_METHOD'] ?? 'CLI',
                     'http_path'   => $_SERVER['REQUEST_URI'] ?? null,

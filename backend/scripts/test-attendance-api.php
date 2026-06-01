@@ -66,7 +66,7 @@ $tenant->setEmployeeId((int) $emp['id']);
 $tenant->setBranchId((int) ($emp['branch_id'] ?? 0));
 
 // 1. Panggil AttendanceController::my()
-$controller = new \App\Controllers\Api\V1\AttendanceController();
+$controller = new \App\Controllers\Api\V1\Attendance\AttendanceController();
 $request  = \Config\Services::request();
 $response = \Config\Services::response();
 $logger   = \Config\Services::logger();
@@ -110,7 +110,7 @@ echo "\n" . str_repeat('-', 60) . "\n";
 echo " Integration test: change request create + duplicate prevention\n";
 echo str_repeat('-', 60) . "\n";
 
-$crController = new \App\Controllers\Api\V1\AttendanceChangeRequestController();
+$crController = new \App\Controllers\Api\V1\Attendance\AttendanceChangeRequestController();
 $crController->initController($request, $response, $logger);
 
 $workDate = date('Y-m-d', strtotime('-3 days'));

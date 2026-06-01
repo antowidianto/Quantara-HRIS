@@ -2,7 +2,7 @@
 
 namespace App\Commands;
 
-use App\Models\IdempotencyKeyModel;
+use App\Models\System\IdempotencyKeyModel;
 use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
 

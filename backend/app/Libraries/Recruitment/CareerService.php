@@ -1,0 +1,1061 @@
+<?php
+
+namespace App\Libraries\Recruitment;
+
+use Config\Services;
+
+/**
+ * CareerService
+ *
+ * Logika domain Career Portal — public-facing job board yang terhubung
+ * ke pipeline `RecruitmentService` & `OnboardingService` existing.
+ *
+ * Tanggung jawab:
+ *  1. Generate / validate company `career_slug` & job `public_slug`.
+ *  2. Generate `application_track_tokens` untuk pelamar self-service
+ *     (cek status, tanpa register).
+ *  3. Resolve career page + published jobs untuk public renderer.
+ *  4. Submit application: create candidate + initial stage NEW + token,
+ *     audit + notify HR.
+ *  5. Helper: validasi NIK/NPWP/KK (delegasi ke IndonesianValidator),
+ *     anti-spam (rate limit per IP via cache).
+ */
+class CareerService
+{
+    public const TOKEN_TTL_DAYS = 90;
+    public const RATE_LIMIT_PER_IP_PER_HOUR = 5;
+
+    public const EDUCATION_LEVELS = [
+        'SMA','SMK','D1','D2','D3','D4','S1','S2','S3',
+    ];
+    public const RELIGIONS = [
+        'ISLAM','KRISTEN','KATOLIK','HINDU','BUDHA','KONGHUCU','LAINNYA',
+    ];
+    public const MARITAL_STATUSES = [
+        'BELUM_KAWIN','KAWIN','CERAI_HIDUP','CERAI_MATI',
+    ];
+
+    /**
+     * Generate slug dari nama company (lowercase, dash-separated).
+     * Memastikan unik dengan menambah suffix angka.
+     */
+    public function slugifyCompany(string $name, ?int $excludeCompanyId = null): string
+    {
+        $base = $this->slugify($name);
+        if ($base === '') $base = 'company';
+        $candidate = $base;
+        $i = 2;
+        $db = \Config\Database::connect();
+        while (true) {
+            $builder = $db->table('companies')->where('career_slug', $candidate);
+            if ($excludeCompanyId) $builder->where('id !=', $excludeCompanyId);
+            $exists = $builder->countAllResults();
+            if ($exists === 0) return $candidate;
+            $candidate = $base . '-' . $i;
+            $i++;
+            if ($i > 100) {
+                // Fallback random
+                return $base . '-' . substr(bin2hex(random_bytes(3)), 0, 6);
+            }
+        }
+    }
+
+    /**
+     * Generate slug dari title job + reference number.
+     * Unik per company.
+     */
+    public function slugifyJob(string $title, string $referenceNumber, int $companyId, ?int $excludeJobId = null): string
+    {
+        $base = $this->slugify($title);
+        if ($base === '') $base = 'lowongan';
+        // Append reference suffix supaya 2 lowongan dengan title sama tetap distinct
+        $refSuffix = strtolower(preg_replace('/[^a-z0-9]+/i', '', $referenceNumber));
+        $candidate = $base . '-' . $refSuffix;
+        $i = 2;
+        $db = \Config\Database::connect();
+        while (true) {
+            $builder = $db->table('job_postings')
+                ->where('company_id', $companyId)
+                ->where('public_slug', $candidate);
+            if ($excludeJobId) $builder->where('id !=', $excludeJobId);
+            $exists = $builder->countAllResults();
+            if ($exists === 0) return $candidate;
+            $candidate = $base . '-' . $refSuffix . '-' . $i;
+            $i++;
+            if ($i > 50) {
+                return $base . '-' . $refSuffix . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
+            }
+        }
+    }
+
+    private function slugify(string $value): string
+    {
+        $v = strtolower(trim($value));
+        $v = preg_replace('/[^a-z0-9]+/', '-', $v);
+        $v = trim((string) $v, '-');
+        // Limit length
+        if (mb_strlen($v) > 80) $v = mb_substr($v, 0, 80);
+        return $v ?: '';
+    }
+
+    /**
+     * Buat token track untuk kandidat (random 32-byte hex).
+     * @return string token (panjang 64 hex char)
+     */
+    public function createTrackToken(int $candidateId, int $companyId): string
+    {
+        $db = \Config\Database::connect();
+        $now = date('Y-m-d H:i:s');
+        $expiry = date('Y-m-d H:i:s', strtotime('+' . self::TOKEN_TTL_DAYS . ' days'));
+        // Loop sampai dapat token yang unik (sangat kecil collision di hex 64)
+        $tries = 0;
+        while ($tries < 5) {
+            $token = bin2hex(random_bytes(32));
+            $exists = $db->table('application_track_tokens')->where('token', $token)->countAllResults();
+            if ($exists === 0) {
+                $db->table('application_track_tokens')->insert([
+                    'company_id'   => $companyId,
+                    'candidate_id' => $candidateId,
+                    'token'        => $token,
+                    'expires_at'   => $expiry,
+                    'created_at'   => $now,
+                ]);
+                return $token;
+            }
+            $tries++;
+        }
+        throw new \RuntimeException('Tidak bisa generate token unik (collision)');
+    }
+
+    /**
+     * Resolve token → candidate + job. Hanya yang belum expired.
+     */
+    public function resolveTrackToken(string $token): ?array
+    {
+        $db = \Config\Database::connect();
+        $row = $db->table('application_track_tokens')
+            ->where('token', $token)
+            ->get()->getRowArray();
+        if (! $row) return null;
+        if (! empty($row['expires_at']) && strtotime($row['expires_at']) < time()) {
+            return null; // expired
+        }
+        // Update last_used_at (best-effort)
+        $db->table('application_track_tokens')
+            ->where('id', (int) $row['id'])
+            ->update(['last_used_at' => date('Y-m-d H:i:s')]);
+
+        $cand = $db->table('candidates')->where('id', (int) $row['candidate_id'])->get()->getRowArray();
+        if (! $cand) return null;
+        $job = $db->table('job_postings')->where('id', (int) $cand['job_posting_id'])->get()->getRowArray();
+        $stages = $db->table('candidate_stages')
+            ->where('candidate_id', (int) $cand['id'])
+            ->orderBy('id', 'ASC')
+            ->get()->getResultArray();
+        return [
+            'candidate' => $cand,
+            'job'       => $job,
+            'stages'    => $stages,
+        ];
+    }
+
+    /**
+     * Get atau auto-create career_pages row untuk company.
+     * Disebut juga pada read public sehingga selalu ada baseline.
+     */
+    public function getOrCreateCareerPage(int $companyId): array
+    {
+        $db = \Config\Database::connect();
+        $row = $db->table('career_pages')->where('company_id', $companyId)->get()->getRowArray();
+        if ($row) return $row;
+        $now = date('Y-m-d H:i:s');
+        $insert = [
+            'company_id'  => $companyId,
+            'is_active'   => 1,
+            'brand_color' => '#0F62FE',
+            'created_at'  => $now,
+            'updated_at'  => $now,
+        ];
+        $db->table('career_pages')->insert($insert);
+        $insert['id'] = (int) $db->insertID();
+        return $insert;
+    }
+
+    /**
+     * Resolve public landing data berdasar company slug.
+     * Return null kalau company tidak ada / inactive / portal off.
+     */
+    public function getPublicLanding(string $companySlug): ?array
+    {
+        $db = \Config\Database::connect();
+        $company = $db->table('companies')
+            ->where('career_slug', $companySlug)
+            ->where('is_active', 1)
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $company) return null;
+
+        $page = $this->getOrCreateCareerPage((int) $company['id']);
+        if ((int) $page['is_active'] !== 1) return null;
+
+        $jobs = $this->getPublishedJobs((int) $company['id']);
+        $stats = [
+            'open_jobs'   => count($jobs),
+            'departments' => count(array_unique(array_filter(array_column($jobs, 'department_name')))),
+            'cities'      => count(array_unique(array_filter(array_column($jobs, 'city')))),
+        ];
+
+        return [
+            'company' => $this->publicCompanyView($company),
+            'page'    => $this->publicPageView($page),
+            'jobs'    => $jobs,
+            'stats'   => $stats,
+        ];
+    }
+
+    /**
+     * Get published jobs (public). Filter optional q (search), city,
+     * employment_type, work_arrangement.
+     */
+    public function getPublishedJobs(int $companyId, array $filters = []): array
+    {
+        $db = \Config\Database::connect();
+        $b = $db->table('job_postings jp')
+            ->select('jp.id, jp.reference_number, jp.title, jp.public_slug, jp.employment_type,'
+                . ' jp.city, jp.work_arrangement, jp.min_education, jp.min_experience_years,'
+                . ' jp.salary_min, jp.salary_max, jp.salary_visible, jp.headcount,'
+                . ' jp.opened_at, jp.closed_at, jp.career_published_at, jp.tags,'
+                . ' d.name AS department_name, p.name AS position_name, b.name AS branch_name')
+            ->join('departments d', 'd.id = jp.department_id', 'left')
+            ->join('positions p', 'p.id = jp.position_id', 'left')
+            ->join('branches b', 'b.id = jp.branch_id', 'left')
+            ->where('jp.company_id', $companyId)
+            ->where('jp.is_published_to_career', 1)
+            ->where('jp.status', 'OPEN')
+            ->where('jp.deleted_at IS NULL');
+
+        if (! empty($filters['q'])) {
+            $q = trim((string) $filters['q']);
+            $b->groupStart()
+                ->like('jp.title', $q)
+                ->orLike('jp.description', $q)
+                ->orLike('jp.tags', $q)
+                ->groupEnd();
+        }
+        if (! empty($filters['city'])) {
+            $b->where('jp.city', $filters['city']);
+        }
+        if (! empty($filters['employment_type'])) {
+            $b->where('jp.employment_type', strtoupper((string) $filters['employment_type']));
+        }
+        if (! empty($filters['work_arrangement'])) {
+            $b->where('jp.work_arrangement', strtoupper((string) $filters['work_arrangement']));
+        }
+
+        $rows = $b->orderBy('jp.career_published_at', 'DESC')->get()->getResultArray();
+        // Decode tags JSON
+        foreach ($rows as &$r) {
+            if (! empty($r['tags']) && is_string($r['tags'])) {
+                $decoded = json_decode($r['tags'], true);
+                $r['tags'] = is_array($decoded) ? $decoded : [];
+            } else {
+                $r['tags'] = [];
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * Get detail published job (untuk public detail page).
+     * Return null kalau tidak ditemukan atau tidak published.
+     */
+    public function getPublicJobDetail(int $companyId, string $jobSlug): ?array
+    {
+        $db = \Config\Database::connect();
+        $job = $db->table('job_postings jp')
+            ->select('jp.*,'
+                . ' d.name AS department_name, p.name AS position_name, b.name AS branch_name')
+            ->join('departments d', 'd.id = jp.department_id', 'left')
+            ->join('positions p', 'p.id = jp.position_id', 'left')
+            ->join('branches b', 'b.id = jp.branch_id', 'left')
+            ->where('jp.company_id', $companyId)
+            ->where('jp.public_slug', $jobSlug)
+            ->where('jp.is_published_to_career', 1)
+            ->where('jp.status', 'OPEN')
+            ->where('jp.deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $job) return null;
+
+        // Decode JSON fields
+        foreach (['tags','apply_form_schema'] as $jsonCol) {
+            if (! empty($job[$jsonCol]) && is_string($job[$jsonCol])) {
+                $job[$jsonCol] = json_decode($job[$jsonCol], true) ?: null;
+            }
+        }
+        // Sembunyikan field internal yang tidak perlu untuk public
+        unset(
+            $job['hiring_manager_id'],
+            $job['notes'],
+            $job['created_by'],
+            $job['updated_by'],
+            $job['deleted_at'],
+        );
+        return $job;
+    }
+
+    /**
+     * Submit lamaran via career portal.
+     * Return [candidate_id, token] yang dikirim ke email pelamar.
+     *
+     * @throws \RuntimeException kalau rate-limit / job sudah closed / data invalid
+     */
+    public function submitApplication(int $companyId, int $jobId, array $data, ?string $applicantIp = null, ?int $candidateAccountId = null): array
+    {
+        $db = \Config\Database::connect();
+        $job = $db->table('job_postings')
+            ->where('id', $jobId)
+            ->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $job) {
+            throw new \RuntimeException('Lowongan tidak ditemukan');
+        }
+        if ((int) $job['is_published_to_career'] !== 1 || $job['status'] !== 'OPEN') {
+            throw new \RuntimeException('Lowongan ini sudah tidak menerima lamaran baru');
+        }
+
+        // Sprint 21+ — kalau ada candidate_account_id, cegah dobel-apply
+        // ke posting yang sama dari akun yang sama (independent dari email).
+        if ($candidateAccountId !== null && $candidateAccountId > 0) {
+            $dup = $db->table('candidates')
+                ->where('company_id', $companyId)
+                ->where('job_posting_id', $jobId)
+                ->where('candidate_account_id', $candidateAccountId)
+                ->where('deleted_at IS NULL')
+                ->countAllResults();
+            if ($dup > 0) {
+                throw new \RuntimeException(
+                    'Anda sudah pernah melamar untuk posisi ini. Cek status di dashboard.'
+                );
+            }
+        }
+
+        // Rate-limit per IP per hour (best-effort, in-memory cache)
+        if ($applicantIp) {
+            $this->enforceRateLimit($applicantIp);
+        }
+
+        // De-duplikasi: kalau email sudah pernah apply ke job yang sama dan
+        // belum di-reject, tolak dengan pesan jelas (HR umumnya tidak suka
+        // duplikasi pelamar di pipeline).
+        if (! empty($data['email'])) {
+            $existing = $db->table('candidates')
+                ->where('company_id', $companyId)
+                ->where('job_posting_id', $jobId)
+                ->where('email', $data['email'])
+                ->where('deleted_at IS NULL')
+                ->get()->getRowArray();
+            if ($existing) {
+                throw new \RuntimeException(
+                    'Email ini sudah melamar untuk posisi yang sama. Cek status di halaman Lacak Lamaran.'
+                );
+            }
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $insert = [
+            'company_id'      => $companyId,
+            'job_posting_id'  => $jobId,
+            'full_name'       => trim((string) ($data['full_name'] ?? '')),
+            'email'           => $this->normalizeEmail($data['email'] ?? null),
+            'phone'           => $this->normalizePhone($data['phone'] ?? null),
+            'birth_place'     => $data['birth_place'] ?? null,
+            'birth_date'      => $data['birth_date'] ?? null,
+            'gender'          => $this->normalizeEnum($data['gender'] ?? null, ['M','F','O']),
+            'nik'             => $this->normalizeDigits($data['nik'] ?? null, 16),
+            'npwp'            => $this->normalizeDigits($data['npwp'] ?? null),
+            'kk_number'       => $this->normalizeDigits($data['kk_number'] ?? null, 16),
+            'bpjs_kesehatan_no' => $this->normalizeDigits($data['bpjs_kesehatan_no'] ?? null),
+            'bpjs_tk_no'      => $this->normalizeDigits($data['bpjs_tk_no'] ?? null),
+            'religion'        => $this->normalizeEnum($data['religion'] ?? null, self::RELIGIONS),
+            'marital_status'  => $this->normalizeEnum($data['marital_status'] ?? null, self::MARITAL_STATUSES),
+            'nationality'     => ! empty($data['nationality']) ? strtoupper((string) $data['nationality']) : 'WNI',
+            'address'         => $data['address'] ?? null,
+            'city'            => $data['city'] ?? null,
+            'province'        => $data['province'] ?? null,
+            'current_position'=> $data['current_position'] ?? null,
+            'current_company' => $data['current_company'] ?? null,
+            'years_experience'=> isset($data['years_experience']) ? max(0, (int) $data['years_experience']) : null,
+            'expected_salary' => isset($data['expected_salary']) ? max(0, (float) $data['expected_salary']) : null,
+            'available_from'  => $data['available_from'] ?? null,
+            'last_education_level'       => $this->normalizeEnum($data['last_education_level'] ?? null, self::EDUCATION_LEVELS),
+            'last_education_institution' => $data['last_education_institution'] ?? null,
+            'last_education_major'       => $data['last_education_major'] ?? null,
+            'last_education_year'        => isset($data['last_education_year']) && $data['last_education_year']
+                ? (int) $data['last_education_year'] : null,
+            'gpa'             => isset($data['gpa']) && $data['gpa'] !== '' && $data['gpa'] !== null
+                ? round((float) $data['gpa'], 2) : null,
+            'linkedin_url'    => $this->cleanUrl($data['linkedin_url'] ?? null),
+            'portfolio_url'   => $this->cleanUrl($data['portfolio_url'] ?? null),
+            'cover_letter'    => $data['cover_letter'] ?? null,
+            'cv_path'         => $data['cv_path'] ?? null,
+            'photo_path'      => $data['photo_path'] ?? null,
+            'ktp_path'        => $data['ktp_path'] ?? null,
+            'ijazah_path'     => $data['ijazah_path'] ?? null,
+            'extra_answers'   => isset($data['extra_answers']) && is_array($data['extra_answers'])
+                ? json_encode($data['extra_answers'], JSON_UNESCAPED_UNICODE) : null,
+            'source'          => 'WEBSITE',
+            'current_stage'   => 'NEW',
+            'applied_via_career' => 1,
+            'applied_at'      => $now,
+            'applicant_ip'    => $applicantIp,
+            'candidate_account_id' => $candidateAccountId,
+            'created_at'      => $now,
+            'updated_at'      => $now,
+        ];
+
+        // Sprint 23+ — payroll & identity supporting fields. Disimpan
+        // optional supaya kandidat yang belum punya (mis. fresh-grad
+        // tanpa rekening) tetap bisa apply, tapi kalau diisi → langsung
+        // ter-carry-over ke employees row saat hire (lihat
+        // RecruitmentService::convertToEmployee). Hanya assign field
+        // yang kolomnya ada di DB (defensive untuk env yang belum
+        // jalankan migration 000049/000050).
+        $cols = $db->getFieldNames('candidates');
+
+        // Reference contacts datang dari form sebagai array of objects;
+        // store as JSON. Filter empty entries supaya tidak save row kosong.
+        $refContacts = null;
+        if (isset($data['reference_contacts']) && is_array($data['reference_contacts'])) {
+            $clean = [];
+            foreach ($data['reference_contacts'] as $r) {
+                if (! is_array($r)) continue;
+                $name  = trim((string) ($r['name']  ?? ''));
+                $phone = trim((string) ($r['phone'] ?? ''));
+                if ($name === '' && $phone === '') continue;
+                $clean[] = [
+                    'name'     => $name,
+                    'position' => trim((string) ($r['position'] ?? '')),
+                    'company'  => trim((string) ($r['company']  ?? '')),
+                    'phone'    => $this->normalizePhone($phone),
+                    'relation' => trim((string) ($r['relation'] ?? '')),
+                ];
+            }
+            $refContacts = ! empty($clean) ? json_encode($clean, JSON_UNESCAPED_UNICODE) : null;
+        }
+
+        $extras = [
+            // ── 000049 — payroll dasar
+            'postal_code'                => $data['postal_code'] ?? null,
+            'bank_name'                  => isset($data['bank_name'])
+                ? strtoupper(trim((string) $data['bank_name'])) : null,
+            'bank_account_number'        => $this->normalizeDigits($data['bank_account_number'] ?? null),
+            'bank_account_holder'        => $data['bank_account_holder'] ?? null,
+            'ptkp_status'                => $this->normalizeEnum(
+                $data['ptkp_status'] ?? null,
+                ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3'],
+            ),
+            'dependents_count'           => isset($data['dependents_count'])
+                ? max(0, min(3, (int) $data['dependents_count']))
+                : null,
+            'emergency_contact_name'     => $data['emergency_contact_name'] ?? null,
+            'emergency_contact_phone'    => $this->normalizePhone($data['emergency_contact_phone'] ?? null),
+            'emergency_contact_relation' => $this->normalizeEnum(
+                $data['emergency_contact_relation'] ?? null,
+                ['ORANG_TUA','PASANGAN','SAUDARA','ANAK','LAINNYA'],
+            ),
+
+            // ── 000050 — extended profile
+            'blood_type'                 => $this->normalizeEnum(
+                $data['blood_type'] ?? null,
+                ['A','A+','A-','B','B+','B-','AB','AB+','AB-','O','O+','O-'],
+            ),
+            'driving_license'            => isset($data['driving_license'])
+                ? $this->normalizeMultiEnum($data['driving_license'], ['A','B1','B2','C','D'])
+                : null,
+            'vehicle_owned'              => isset($data['vehicle_owned'])
+                ? $this->normalizeMultiEnum($data['vehicle_owned'], ['MOTOR','MOBIL','SEPEDA'])
+                : null,
+            'passport_number'            => isset($data['passport_number'])
+                ? strtoupper(trim((string) $data['passport_number'])) : null,
+            'disability_status'          => $this->normalizeEnum(
+                $data['disability_status'] ?? null,
+                ['NONE','PHYSICAL','SENSORY','INTELLECTUAL','MENTAL','MULTIPLE'],
+            ),
+            'disability_notes'           => $data['disability_notes'] ?? null,
+            'spouse_name'                => $data['spouse_name'] ?? null,
+            'spouse_occupation'          => $data['spouse_occupation'] ?? null,
+            'spouse_workplace'           => $data['spouse_workplace'] ?? null,
+            'children_count'             => isset($data['children_count'])
+                ? max(0, min(20, (int) $data['children_count']))
+                : null,
+            'health_conditions'          => $data['health_conditions'] ?? null,
+            'languages'                  => $data['languages'] ?? null,
+            'professional_skills'        => $data['professional_skills'] ?? null,
+            'certifications'             => $data['certifications'] ?? null,
+            'reference_contacts'         => $refContacts,
+            'referral_source_detail'     => $data['referral_source_detail'] ?? null,
+            'github_url'                 => $this->cleanUrl($data['github_url'] ?? null),
+        ];
+        foreach ($extras as $col => $val) {
+            if (in_array($col, $cols, true)) {
+                $insert[$col] = $val;
+            }
+        }
+
+        // Validasi minimal
+        if ($insert['full_name'] === '') {
+            throw new \RuntimeException('Nama lengkap wajib diisi');
+        }
+        if (empty($insert['email'])) {
+            throw new \RuntimeException('Email wajib diisi');
+        }
+        if (! filter_var($insert['email'], FILTER_VALIDATE_EMAIL)) {
+            throw new \RuntimeException('Format email tidak valid');
+        }
+        if (empty($insert['phone'])) {
+            throw new \RuntimeException('Nomor HP/WhatsApp wajib diisi');
+        }
+        // CV mandatory
+        if (empty($insert['cv_path'])) {
+            throw new \RuntimeException('CV wajib diunggah');
+        }
+        // NIK kalau diisi harus 16 digit
+        if (! empty($insert['nik']) && strlen($insert['nik']) !== 16) {
+            throw new \RuntimeException('NIK harus 16 digit');
+        }
+        if (! empty($insert['kk_number']) && strlen($insert['kk_number']) !== 16) {
+            throw new \RuntimeException('Nomor KK harus 16 digit');
+        }
+        // Min education check
+        if (! empty($job['min_education']) && ! empty($insert['last_education_level'])) {
+            if (! $this->educationMeetsMinimum($insert['last_education_level'], $job['min_education'])) {
+                throw new \RuntimeException(
+                    'Pendidikan minimum untuk posisi ini: ' . $job['min_education']
+                );
+            }
+        }
+
+        $db->transStart();
+        $db->table('candidates')->insert($insert);
+        $candidateId = (int) $db->insertID();
+
+        // Initial stage NEW
+        $db->table('candidate_stages')->insert([
+            'company_id'   => $companyId,
+            'candidate_id' => $candidateId,
+            'stage'        => 'NEW',
+            'result'       => 'PENDING',
+            'feedback'     => 'Lamaran masuk via Career Portal',
+            'created_at'   => $now,
+            'updated_at'   => $now,
+        ]);
+
+        // Insert ke candidate_documents kalau ada path
+        $docMap = [
+            'CV'      => $insert['cv_path'],
+            'KTP'     => $insert['ktp_path'],
+            'IJAZAH'  => $insert['ijazah_path'],
+            'OTHER'   => $insert['photo_path'], // pas foto
+        ];
+        foreach ($docMap as $type => $path) {
+            if (empty($path)) continue;
+            $title = $type === 'OTHER' ? 'Pas Foto' : $type;
+            $db->table('candidate_documents')->insert([
+                'company_id'   => $companyId,
+                'candidate_id' => $candidateId,
+                'document_type'=> $type,
+                'file_name'    => $title . ' - ' . $insert['full_name'],
+                'file_path'    => $path,
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ]);
+        }
+
+        $token = $this->createTrackToken($candidateId, $companyId);
+        $db->transComplete();
+        if ($db->transStatus() === false) {
+            throw new \RuntimeException('Gagal menyimpan lamaran, silakan coba lagi');
+        }
+
+        // Audit log (NOTICE) — pakai company context manual karena public tanpa user
+        try {
+            Services::audit()->forModule('CAREER')->log(
+                action: 'application.submit',
+                entity: 'candidate',
+                entityId: $candidateId,
+                description: "Lamaran baru via career portal: {$insert['full_name']} → job #{$jobId} ({$job['title']})",
+                severity: 'NOTICE',
+            );
+        } catch (\Throwable $e) {
+            // ignore audit failure
+        }
+
+        // Notifikasi ke hiring manager / HR
+        $this->notifyHrNewApplicant($companyId, (int) $jobId, $candidateId, $insert['full_name'], (string) $job['title']);
+
+        return [
+            'candidate_id' => $candidateId,
+            'token'        => $token,
+            'job'          => [
+                'id' => (int) $job['id'],
+                'title' => $job['title'],
+                'reference_number' => $job['reference_number'],
+            ],
+        ];
+    }
+
+    /**
+     * Update lamaran oleh kandidat sendiri (dari "Profil Saya" portal karir).
+     *
+     * Sprint 23+ — kandidat boleh edit data lamaran selama belum di stage
+     * final. Dipanggil dari CandidateAuthController::updateApplication
+     * yang sudah ownership-check & stage-lock.
+     *
+     * Field yang TIDAK boleh diubah lewat endpoint ini:
+     *   - id, company_id, job_posting_id, candidate_account_id
+     *   - current_stage, rating, rejection_reason
+     *   - converted_employee_id, converted_at, applied_at, applicant_ip
+     *   - audit fields (created_*, updated_*)
+     *
+     * Validasi dasar (NIK 16 digit, KK 16 digit) tetap dipakai supaya
+     * data tetap konsisten. Kalau pelamar reset NIK ke kosong, kita
+     * izinkan (mungkin salah entry awal).
+     *
+     * @throws \RuntimeException kalau ada validasi gagal
+     */
+    public function updateApplicationByCandidate(
+        int $candidateId,
+        int $candidateAccountId,
+        array $data,
+    ): void {
+        $db = \Config\Database::connect();
+        $existing = $db->table('candidates')
+            ->where('id', $candidateId)
+            ->where('candidate_account_id', $candidateAccountId)
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
+        if (! $existing) {
+            throw new \RuntimeException('Lamaran tidak ditemukan atau bukan milik Anda');
+        }
+        if (in_array($existing['current_stage'], ['HIRED', 'REJECTED', 'WITHDRAWN'], true)) {
+            throw new \RuntimeException(
+                'Lamaran sudah pada tahap final (' . $existing['current_stage'] . '), tidak bisa diedit'
+            );
+        }
+
+        $cols = $db->getFieldNames('candidates');
+        $update = [];
+
+        // ── Profil dasar ──────────────────────────────────────────
+        $simpleString = [
+            'full_name', 'birth_place', 'address', 'city', 'province',
+            'current_position', 'current_company', 'cover_letter',
+            // Sprint 23+ extended profile (varchar/text)
+            'spouse_name', 'spouse_occupation', 'spouse_workplace',
+            'health_conditions', 'languages', 'professional_skills',
+            'certifications', 'referral_source_detail',
+            'bank_account_holder',
+        ];
+        foreach ($simpleString as $f) {
+            if (array_key_exists($f, $data) && in_array($f, $cols, true)) {
+                $val = is_string($data[$f]) ? trim($data[$f]) : null;
+                $update[$f] = $val !== '' ? $val : null;
+            }
+        }
+
+        if (array_key_exists('email', $data)) {
+            $email = $this->normalizeEmail($data['email']);
+            if ($email && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                throw new \RuntimeException('Format email tidak valid');
+            }
+            // Cek dup email per (company, job, exclude self)
+            if ($email && $email !== $existing['email']) {
+                $dup = $db->table('candidates')
+                    ->where('company_id', (int) $existing['company_id'])
+                    ->where('job_posting_id', (int) $existing['job_posting_id'])
+                    ->where('email', $email)
+                    ->where('id !=', $candidateId)
+                    ->where('deleted_at IS NULL')
+                    ->countAllResults();
+                if ($dup > 0) {
+                    throw new \RuntimeException(
+                        'Email sudah dipakai untuk lamaran lain di posisi yang sama'
+                    );
+                }
+            }
+            $update['email'] = $email;
+        }
+
+        if (array_key_exists('phone', $data)) {
+            $update['phone'] = $this->normalizePhone($data['phone']);
+        }
+
+        if (array_key_exists('birth_date', $data)) {
+            $update['birth_date'] = $data['birth_date'] ?: null;
+        }
+
+        if (array_key_exists('gender', $data)) {
+            $update['gender'] = $this->normalizeEnum($data['gender'], ['M','F','O']);
+        }
+        if (array_key_exists('religion', $data)) {
+            $update['religion'] = $this->normalizeEnum($data['religion'], self::RELIGIONS);
+        }
+        if (array_key_exists('marital_status', $data)) {
+            $update['marital_status'] = $this->normalizeEnum($data['marital_status'], self::MARITAL_STATUSES);
+        }
+        if (array_key_exists('nationality', $data)) {
+            $update['nationality'] = ! empty($data['nationality'])
+                ? strtoupper((string) $data['nationality'])
+                : 'WNI';
+        }
+
+        // ── Identitas (NIK/KK harus 16 digit kalau diisi) ────────
+        if (array_key_exists('nik', $data)) {
+            $nik = $this->normalizeDigits($data['nik']);
+            if ($nik !== null && strlen($nik) !== 16) {
+                throw new \RuntimeException('NIK harus 16 digit');
+            }
+            $update['nik'] = $nik;
+        }
+        if (array_key_exists('npwp', $data)) {
+            $update['npwp'] = $this->normalizeDigits($data['npwp']);
+        }
+        if (array_key_exists('kk_number', $data)) {
+            $kk = $this->normalizeDigits($data['kk_number']);
+            if ($kk !== null && strlen($kk) !== 16) {
+                throw new \RuntimeException('Nomor KK harus 16 digit');
+            }
+            $update['kk_number'] = $kk;
+        }
+        foreach (['bpjs_kesehatan_no', 'bpjs_tk_no', 'passport_number'] as $f) {
+            if (array_key_exists($f, $data) && in_array($f, $cols, true)) {
+                $val = $f === 'passport_number'
+                    ? (! empty($data[$f]) ? strtoupper(trim((string) $data[$f])) : null)
+                    : $this->normalizeDigits($data[$f]);
+                $update[$f] = $val;
+            }
+        }
+
+        // ── Pendidikan & pengalaman ─────────────────────────────
+        if (array_key_exists('last_education_level', $data)) {
+            $update['last_education_level'] = $this->normalizeEnum(
+                $data['last_education_level'], self::EDUCATION_LEVELS,
+            );
+        }
+        foreach (['last_education_institution', 'last_education_major'] as $f) {
+            if (array_key_exists($f, $data)) {
+                $update[$f] = is_string($data[$f]) ? (trim($data[$f]) ?: null) : null;
+            }
+        }
+        if (array_key_exists('last_education_year', $data)) {
+            $update['last_education_year'] = ! empty($data['last_education_year'])
+                ? (int) $data['last_education_year'] : null;
+        }
+        if (array_key_exists('gpa', $data)) {
+            $update['gpa'] = $data['gpa'] !== '' && $data['gpa'] !== null
+                ? round((float) $data['gpa'], 2) : null;
+        }
+        if (array_key_exists('years_experience', $data)) {
+            $update['years_experience'] = isset($data['years_experience'])
+                ? max(0, (int) $data['years_experience']) : null;
+        }
+        if (array_key_exists('expected_salary', $data)) {
+            $update['expected_salary'] = isset($data['expected_salary'])
+                ? max(0, (float) $data['expected_salary']) : null;
+        }
+        if (array_key_exists('available_from', $data)) {
+            $update['available_from'] = $data['available_from'] ?: null;
+        }
+        foreach (['linkedin_url', 'portfolio_url', 'github_url'] as $f) {
+            if (array_key_exists($f, $data) && in_array($f, $cols, true)) {
+                $update[$f] = $this->cleanUrl($data[$f]);
+            }
+        }
+
+        // ── Step 3 (payroll & supporting) ──────────────────────
+        if (array_key_exists('postal_code', $data) && in_array('postal_code', $cols, true)) {
+            $update['postal_code'] = $data['postal_code'] ?: null;
+        }
+        if (array_key_exists('bank_name', $data) && in_array('bank_name', $cols, true)) {
+            $update['bank_name'] = ! empty($data['bank_name'])
+                ? strtoupper(trim((string) $data['bank_name'])) : null;
+        }
+        if (array_key_exists('bank_account_number', $data) && in_array('bank_account_number', $cols, true)) {
+            $update['bank_account_number'] = $this->normalizeDigits($data['bank_account_number']);
+        }
+        if (array_key_exists('ptkp_status', $data) && in_array('ptkp_status', $cols, true)) {
+            $update['ptkp_status'] = $this->normalizeEnum(
+                $data['ptkp_status'],
+                ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3'],
+            );
+        }
+        if (array_key_exists('dependents_count', $data) && in_array('dependents_count', $cols, true)) {
+            $update['dependents_count'] = max(0, min(3, (int) ($data['dependents_count'] ?? 0)));
+        }
+        if (array_key_exists('children_count', $data) && in_array('children_count', $cols, true)) {
+            $update['children_count'] = max(0, min(20, (int) ($data['children_count'] ?? 0)));
+        }
+        if (array_key_exists('emergency_contact_name', $data)) {
+            $update['emergency_contact_name'] = is_string($data['emergency_contact_name'])
+                ? (trim($data['emergency_contact_name']) ?: null) : null;
+        }
+        if (array_key_exists('emergency_contact_phone', $data)) {
+            $update['emergency_contact_phone'] = $this->normalizePhone($data['emergency_contact_phone']);
+        }
+        if (array_key_exists('emergency_contact_relation', $data) && in_array('emergency_contact_relation', $cols, true)) {
+            $update['emergency_contact_relation'] = $this->normalizeEnum(
+                $data['emergency_contact_relation'],
+                ['ORANG_TUA','PASANGAN','SAUDARA','ANAK','LAINNYA'],
+            );
+        }
+
+        // ── Disabilitas ──────────────────────────────────────
+        if (array_key_exists('disability_status', $data) && in_array('disability_status', $cols, true)) {
+            $update['disability_status'] = $this->normalizeEnum(
+                $data['disability_status'],
+                ['NONE','PHYSICAL','SENSORY','INTELLECTUAL','MENTAL','MULTIPLE'],
+            );
+        }
+        if (array_key_exists('disability_notes', $data) && in_array('disability_notes', $cols, true)) {
+            $update['disability_notes'] = is_string($data['disability_notes'])
+                ? (trim($data['disability_notes']) ?: null) : null;
+        }
+        if (array_key_exists('blood_type', $data) && in_array('blood_type', $cols, true)) {
+            $update['blood_type'] = $this->normalizeEnum(
+                $data['blood_type'],
+                ['A','A+','A-','B','B+','B-','AB','AB+','AB-','O','O+','O-'],
+            );
+        }
+
+        // ── Mobilitas (multi-checkbox) ───────────────────────
+        if (array_key_exists('driving_license', $data) && in_array('driving_license', $cols, true)) {
+            $update['driving_license'] = $this->normalizeMultiEnum(
+                $data['driving_license'], ['A','B1','B2','C','D'],
+            );
+        }
+        if (array_key_exists('vehicle_owned', $data) && in_array('vehicle_owned', $cols, true)) {
+            $update['vehicle_owned'] = $this->normalizeMultiEnum(
+                $data['vehicle_owned'], ['MOTOR','MOBIL','SEPEDA'],
+            );
+        }
+
+        // ── Reference contacts (JSON) ────────────────────────
+        if (array_key_exists('reference_contacts', $data) && in_array('reference_contacts', $cols, true)) {
+            if (is_array($data['reference_contacts'])) {
+                $clean = [];
+                foreach ($data['reference_contacts'] as $r) {
+                    if (! is_array($r)) continue;
+                    $name  = trim((string) ($r['name']  ?? ''));
+                    $phone = trim((string) ($r['phone'] ?? ''));
+                    if ($name === '' && $phone === '') continue;
+                    $clean[] = [
+                        'name'     => $name,
+                        'position' => trim((string) ($r['position'] ?? '')),
+                        'company'  => trim((string) ($r['company']  ?? '')),
+                        'phone'    => $this->normalizePhone($phone),
+                        'relation' => trim((string) ($r['relation'] ?? '')),
+                    ];
+                }
+                $update['reference_contacts'] = ! empty($clean)
+                    ? json_encode($clean, JSON_UNESCAPED_UNICODE)
+                    : null;
+            } elseif ($data['reference_contacts'] === null || $data['reference_contacts'] === '') {
+                $update['reference_contacts'] = null;
+            }
+        }
+
+        if (empty($update)) {
+            return; // nothing to update
+        }
+
+        $update['updated_at'] = date('Y-m-d H:i:s');
+
+        // Clean: drop key yang kolomnya tidak ada (defensive untuk env
+        // belum migrate 000049/000050)
+        $update = array_intersect_key($update, array_flip($cols));
+
+        $db->table('candidates')->where('id', $candidateId)->update($update);
+
+        // Audit log
+        try {
+            Services::audit()->forModule('CAREER')->log(
+                action: 'application.update_by_candidate',
+                entity: 'candidate',
+                entityId: $candidateId,
+                description: 'Kandidat update profil lamaran via Career Portal '
+                    . '(' . count($update) . ' field termasuk timestamp)',
+                severity: 'NOTICE',
+            );
+        } catch (\Throwable $e) {
+            // ignore audit failure
+        }
+    }
+
+    /**
+     * Compare 2 education level. Return true jika $applicant >= $required.
+     */
+    public function educationMeetsMinimum(string $applicant, string $required): bool
+    {
+        $rank = array_flip(self::EDUCATION_LEVELS);
+        if (! isset($rank[$applicant]) || ! isset($rank[$required])) return true;
+        return $rank[$applicant] >= $rank[$required];
+    }
+
+    private function publicCompanyView(array $company): array
+    {
+        return [
+            'id'           => (int) $company['id'],
+            'name'         => $company['name'],
+            'legal_name'   => $company['legal_name'] ?? $company['name'],
+            'career_slug'  => $company['career_slug'] ?? null,
+            'logo_path'    => $company['logo_path'] ?? null,
+            'city'         => $company['city'] ?? null,
+            'province'     => $company['province'] ?? null,
+            'website'      => null,
+        ];
+    }
+
+    private function publicPageView(array $page): array
+    {
+        $extra = $page['extra_questions'] ?? null;
+        if (is_string($extra)) $extra = json_decode($extra, true) ?: null;
+        return [
+            'is_active'        => (int) $page['is_active'],
+            'headline'         => $page['headline'] ?? null,
+            'about_html'       => $page['about_html'] ?? null,
+            'benefits_html'    => $page['benefits_html'] ?? null,
+            'hero_image_path'  => $page['hero_image_path'] ?? null,
+            'logo_path'        => $page['logo_path'] ?? null,
+            'brand_color'      => $page['brand_color'] ?? '#0F62FE',
+            'contact_email'    => $page['contact_email'] ?? null,
+            'contact_phone'    => $page['contact_phone'] ?? null,
+            'instagram_url'    => $page['instagram_url'] ?? null,
+            'linkedin_url'     => $page['linkedin_url'] ?? null,
+            'website_url'      => $page['website_url'] ?? null,
+            'tiktok_url'       => $page['tiktok_url'] ?? null,
+            'announcement'     => $page['announcement'] ?? null,
+            'extra_questions'  => $extra,
+        ];
+    }
+
+    private function normalizeEmail($email): ?string
+    {
+        if (empty($email)) return null;
+        return strtolower(trim((string) $email));
+    }
+
+    private function normalizePhone($phone): ?string
+    {
+        if (empty($phone)) return null;
+        $digits = preg_replace('/[^0-9+]/', '', (string) $phone);
+        return $digits ?: null;
+    }
+
+    /**
+     * Buang non-digit, optional check exact-length.
+     */
+    private function normalizeDigits($value, ?int $exactLength = null): ?string
+    {
+        if (empty($value)) return null;
+        $digits = preg_replace('/\D+/', '', (string) $value);
+        if ($digits === '') return null;
+        if ($exactLength !== null && strlen($digits) !== $exactLength) {
+            return $digits; // kembalikan as-is untuk caller validate
+        }
+        return $digits;
+    }
+
+    private function normalizeEnum($value, array $allowed): ?string
+    {
+        if (empty($value)) return null;
+        $u = strtoupper((string) $value);
+        return in_array($u, $allowed, true) ? $u : null;
+    }
+
+    /**
+     * Normalize multi-value enum (comma-separated input) — keep only
+     * values yang ada di whitelist, return comma-separated string atau
+     * null kalau semua invalid.
+     */
+    private function normalizeMultiEnum($value, array $allowed): ?string
+    {
+        if (empty($value)) return null;
+        $items = is_array($value)
+            ? $value
+            : preg_split('/[,;]+/', (string) $value);
+        $clean = [];
+        foreach ($items as $v) {
+            $u = strtoupper(trim((string) $v));
+            if ($u !== '' && in_array($u, $allowed, true) && ! in_array($u, $clean, true)) {
+                $clean[] = $u;
+            }
+        }
+        return ! empty($clean) ? implode(',', $clean) : null;
+    }
+
+    private function cleanUrl($url): ?string
+    {
+        if (empty($url)) return null;
+        $u = trim((string) $url);
+        if (! preg_match('#^https?://#i', $u)) {
+            $u = 'https://' . $u;
+        }
+        return filter_var($u, FILTER_VALIDATE_URL) ? $u : null;
+    }
+
+    /**
+     * Rate-limit per IP per hour. Pakai cache file (default driver di CI4).
+     * @throws \RuntimeException kalau melewati limit
+     */
+    private function enforceRateLimit(string $ip): void
+    {
+        $cache = \Config\Services::cache();
+        $key = 'career_apply_' . md5($ip);
+        $count = (int) ($cache->get($key) ?? 0);
+        if ($count >= self::RATE_LIMIT_PER_IP_PER_HOUR) {
+            throw new \RuntimeException(
+                'Terlalu banyak lamaran dari IP yang sama. Silakan tunggu 1 jam dan coba lagi.'
+            );
+        }
+        $cache->save($key, $count + 1, 3600);
+    }
+
+    private function notifyHrNewApplicant(int $companyId, int $jobId, int $candidateId, string $fullName, string $jobTitle): void
+    {
+        $db = \Config\Database::connect();
+        // Cari hiring_manager_id; fallback ke user HR (role 2) di company tsb
+        $job = $db->table('job_postings')->where('id', $jobId)->get()->getRowArray();
+        $targetUserIds = [];
+        if (! empty($job['hiring_manager_id'])) {
+            $targetUserIds[] = (int) $job['hiring_manager_id'];
+        }
+        // Tambah HR utama
+        $hr = $db->table('users')
+            ->where('company_id', $companyId)
+            ->where('role_id', 2)
+            ->where('is_active', 1)
+            ->orderBy('id', 'ASC')
+            ->limit(3)
+            ->get()->getResultArray();
+        foreach ($hr as $u) $targetUserIds[] = (int) $u['id'];
+        $targetUserIds = array_unique(array_filter($targetUserIds));
+
+        foreach ($targetUserIds as $uid) {
+            try {
+                Services::notification()->send(
+                    $uid,
+                    $companyId,
+                    'recruitment.new_applicant',
+                    'Pelamar baru via Career Portal',
+                    "{$fullName} melamar untuk {$jobTitle}",
+                    ['candidate_id' => $candidateId, 'job_id' => $jobId],
+                    null,
+                    true,
+                );
+            } catch (\Throwable $e) {
+                // ignore
+            }
+        }
+    }
+}

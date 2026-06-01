@@ -2,7 +2,7 @@
 
 namespace App\Commands;
 
-use App\Libraries\CacheService;
+use App\Libraries\System\CacheService;
 use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
 use Config\Database;

@@ -2,7 +2,7 @@
 
 namespace App\Filters;
 
-use App\Models\IdempotencyKeyModel;
+use App\Models\System\IdempotencyKeyModel;
 use CodeIgniter\Filters\FilterInterface;
 use CodeIgniter\HTTP\RequestInterface;
 use CodeIgniter\HTTP\ResponseInterface;

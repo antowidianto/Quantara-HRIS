@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\OnlineTestService;
+use App\Libraries\Recruitment\OnlineTestService;
 use PHPUnit\Framework\TestCase;
 
 /**

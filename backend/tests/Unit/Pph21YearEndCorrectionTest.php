@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\Pph21YearEndCorrection;
+use App\Libraries\Payroll\Pph21YearEndCorrection;
 use PHPUnit\Framework\TestCase;
 
 /**

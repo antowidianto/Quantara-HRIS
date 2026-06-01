@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Models\EmployeeModel;
+use App\Models\Employee\EmployeeModel;
 use PHPUnit\Framework\TestCase;
 
 /**

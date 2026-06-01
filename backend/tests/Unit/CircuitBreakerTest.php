@@ -2,8 +2,8 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\CircuitBreaker;
-use App\Libraries\CircuitOpenException;
+use App\Libraries\System\CircuitBreaker;
+use App\Libraries\System\CircuitOpenException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 

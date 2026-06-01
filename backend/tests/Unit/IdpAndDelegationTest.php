@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\IdpService;
+use App\Libraries\Performance\IdpService;
 use PHPUnit\Framework\TestCase;
 
 /**

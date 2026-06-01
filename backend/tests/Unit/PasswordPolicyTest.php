@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\PasswordPolicy;
+use App\Libraries\Auth\PasswordPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

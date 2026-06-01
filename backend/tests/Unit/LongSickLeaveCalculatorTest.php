@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\LongSickLeaveCalculator;
+use App\Libraries\Leave\LongSickLeaveCalculator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

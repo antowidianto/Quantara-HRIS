@@ -73,7 +73,7 @@ echo "\n";
 
 // ─── 2. classify() ───────────────────────────────────────────────
 echo "2. classify() — klasifikasi otomatis\n";
-$svc = new \App\Libraries\JicService();
+$svc = new \App\Libraries\Employee\JicService();
 
 $r = $svc->classify(
     ['old_position_tier' => 'STAFF',      'old_basic_salary' => 5_000_000],

@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\BpjsCalculator;
+use App\Libraries\Payroll\BpjsCalculator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

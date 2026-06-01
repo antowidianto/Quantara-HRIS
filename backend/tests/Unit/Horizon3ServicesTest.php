@@ -2,9 +2,9 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\CompetencyService;
-use App\Libraries\SuccessionService;
-use App\Libraries\TalentPoolService;
+use App\Libraries\Performance\CompetencyService;
+use App\Libraries\Performance\SuccessionService;
+use App\Libraries\Recruitment\TalentPoolService;
 use PHPUnit\Framework\TestCase;
 
 /**

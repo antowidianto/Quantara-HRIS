@@ -2,7 +2,7 @@
 
 namespace App\Validation;
 
-use App\Libraries\IndonesianValidator;
+use App\Libraries\System\IndonesianValidator;
 
 /**
  * Custom validation rules untuk format khas Indonesia.

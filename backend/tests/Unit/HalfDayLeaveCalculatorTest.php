@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\HalfDayLeaveCalculator;
+use App\Libraries\Leave\HalfDayLeaveCalculator;
 use PHPUnit\Framework\TestCase;
 
 /**

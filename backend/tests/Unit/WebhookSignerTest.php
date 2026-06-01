@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\WebhookSigner;
+use App\Libraries\Webhook\WebhookSigner;
 use PHPUnit\Framework\TestCase;
 
 /**

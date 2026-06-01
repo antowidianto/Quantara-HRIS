@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\ShiftTimeHelper;
+use App\Libraries\Attendance\ShiftTimeHelper;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

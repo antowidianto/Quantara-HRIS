@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\TenureLeaveQuotaCalculator;
+use App\Libraries\Leave\TenureLeaveQuotaCalculator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

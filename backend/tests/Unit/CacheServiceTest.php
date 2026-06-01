@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\CacheService;
+use App\Libraries\System\CacheService;
 use PHPUnit\Framework\TestCase;
 
 /**

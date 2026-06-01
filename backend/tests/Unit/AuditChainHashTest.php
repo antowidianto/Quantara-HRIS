@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\AuditLogger;
+use App\Libraries\Compliance\AuditLogger;
 use PHPUnit\Framework\TestCase;
 
 /**

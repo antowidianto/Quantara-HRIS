@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\LeaveBalanceService;
+use App\Libraries\Leave\LeaveBalanceService;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\QuietHours;
+use App\Libraries\Notification\QuietHours;
 use PHPUnit\Framework\TestCase;
 
 /**

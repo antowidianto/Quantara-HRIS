@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\BonusCalculator;
+use App\Libraries\Payroll\BonusCalculator;
 use PHPUnit\Framework\TestCase;
 
 /**
