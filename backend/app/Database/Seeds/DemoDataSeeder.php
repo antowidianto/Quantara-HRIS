@@ -547,7 +547,7 @@ class DemoDataSeeder extends Seeder
 
             $emp = $this->db->table('employees')->where('id', $this->employees[$s['emp']])->get()->getRowArray();
             $base = (float) $emp['basic_salary'];
-            $calc = new \App\Libraries\OvertimeCalculator();
+            $calc = new \App\Libraries\Attendance\OvertimeCalculator();
             $amount = $s['status'] === 'APPROVED' ? $calc->calculate($base, $s['hours'], $s['day_type']) : 0;
 
             $this->db->table('overtimes')->insert([

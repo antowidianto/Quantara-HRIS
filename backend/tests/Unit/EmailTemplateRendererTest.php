@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\EmailTemplateRenderer;
+use App\Libraries\System\EmailTemplateRenderer;
 use PHPUnit\Framework\TestCase;
 
 /**

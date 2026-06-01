@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\ThrMultiContractCalculator;
+use App\Libraries\Payroll\ThrMultiContractCalculator;
 use PHPUnit\Framework\TestCase;
 
 /**

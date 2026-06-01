@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\JkpPayslipIntegration;
+use App\Libraries\Payroll\JkpPayslipIntegration;
 use PHPUnit\Framework\TestCase;
 
 /**

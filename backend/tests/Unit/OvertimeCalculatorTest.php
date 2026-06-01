@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\OvertimeCalculator;
+use App\Libraries\Attendance\OvertimeCalculator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

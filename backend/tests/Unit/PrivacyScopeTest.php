@@ -2,8 +2,8 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\PrivacyScope;
-use App\Libraries\TenantContext;
+use App\Libraries\Compliance\PrivacyScope;
+use App\Libraries\System\TenantContext;
 use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\Test;
 

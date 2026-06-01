@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\FileSignatureValidator;
+use App\Libraries\System\FileSignatureValidator;
 use PHPUnit\Framework\TestCase;
 
 /**

@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Controllers\Api\V1\MobileVersionController;
+use App\Controllers\Api\V1\System\MobileVersionController;
 use PHPUnit\Framework\TestCase;
 
 /**

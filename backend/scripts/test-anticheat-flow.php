@@ -61,7 +61,7 @@ check("5 settings anticheat per company (got {$settingCnt})", $settingCnt === 5)
 
 // 2. Fingerprint
 echo "\n2. Server fingerprint\n";
-$svc = new \App\Libraries\AntiCheatService();
+$svc = new \App\Libraries\Attendance\AntiCheatService();
 $fp1 = $svc->generateServerFingerprint('Mozilla/5.0', 'id-ID,id', 'extra1');
 $fp2 = $svc->generateServerFingerprint('Mozilla/5.0', 'id-ID,id', 'extra1');
 $fp3 = $svc->generateServerFingerprint('Chrome/100', 'en-US', 'different');
@@ -206,8 +206,8 @@ echo "  ✓ Cleanup test data\n";
 
 // 7. Class structure
 echo "\n7. Class structure\n";
-check('Class AntiCheatService loaded', class_exists('\\App\\Libraries\\AntiCheatService'));
-check('Class AnomalyController loaded', class_exists('\\App\\Controllers\\Api\\V1\\AnomalyController'));
+check('Class AntiCheatService loaded', class_exists('\\App\Libraries\Attendance\AntiCheatService'));
+check('Class AnomalyController loaded', class_exists('\\App\Controllers\Api\V1\Attendance\AnomalyController'));
 check('Service registered', method_exists(\Config\Services::class, 'antiCheat'));
 
 echo "\n=== Hasil: {$pass} OK, {$fail} FAIL ===\n";

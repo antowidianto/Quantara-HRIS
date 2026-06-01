@@ -2,8 +2,8 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\CacheService;
-use App\Libraries\LookupCache;
+use App\Libraries\System\CacheService;
+use App\Libraries\System\LookupCache;
 use PHPUnit\Framework\TestCase;
 
 /**

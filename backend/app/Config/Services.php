@@ -17,161 +17,161 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
-    public static function jwt(bool $getShared = true): \App\Libraries\JwtService
+    public static function jwt(bool $getShared = true): \App\Libraries\Auth\JwtService
     {
         if ($getShared) {
             return static::getSharedInstance('jwt');
         }
 
-        return new \App\Libraries\JwtService();
+        return new \App\Libraries\Auth\JwtService();
     }
 
-    public static function notification(bool $getShared = true): \App\Libraries\NotificationService
+    public static function notification(bool $getShared = true): \App\Libraries\Notification\NotificationService
     {
         if ($getShared) {
             return static::getSharedInstance('notification');
         }
 
-        return new \App\Libraries\NotificationService();
+        return new \App\Libraries\Notification\NotificationService();
     }
 
-    public static function payroll(bool $getShared = true): \App\Libraries\PayrollService
+    public static function payroll(bool $getShared = true): \App\Libraries\Payroll\PayrollService
     {
         if ($getShared) {
             return static::getSharedInstance('payroll');
         }
 
-        return new \App\Libraries\PayrollService();
+        return new \App\Libraries\Payroll\PayrollService();
     }
 
-    public static function pph21(bool $getShared = true): \App\Libraries\Pph21TerCalculator
+    public static function pph21(bool $getShared = true): \App\Libraries\Payroll\Pph21TerCalculator
     {
         if ($getShared) {
             return static::getSharedInstance('pph21');
         }
 
-        return new \App\Libraries\Pph21TerCalculator();
+        return new \App\Libraries\Payroll\Pph21TerCalculator();
     }
 
-    public static function bpjs(bool $getShared = true): \App\Libraries\BpjsCalculator
+    public static function bpjs(bool $getShared = true): \App\Libraries\Payroll\BpjsCalculator
     {
         if ($getShared) {
             return static::getSharedInstance('bpjs');
         }
 
-        return new \App\Libraries\BpjsCalculator();
+        return new \App\Libraries\Payroll\BpjsCalculator();
     }
 
-    public static function audit(bool $getShared = true): \App\Libraries\AuditLogger
+    public static function audit(bool $getShared = true): \App\Libraries\Compliance\AuditLogger
     {
         if ($getShared) {
             return static::getSharedInstance('audit');
         }
 
-        return new \App\Libraries\AuditLogger();
+        return new \App\Libraries\Compliance\AuditLogger();
     }
 
-    public static function tenant(bool $getShared = true): \App\Libraries\TenantContext
+    public static function tenant(bool $getShared = true): \App\Libraries\System\TenantContext
     {
         if ($getShared) {
             return static::getSharedInstance('tenant');
         }
 
-        return new \App\Libraries\TenantContext();
+        return new \App\Libraries\System\TenantContext();
     }
 
     /**
      * PrivacyScope — enforce employee-level data isolation + filter whitelist
      * permission-aware. Lihat docs/DATA_PRIVACY.md.
      */
-    public static function privacy(bool $getShared = true): \App\Libraries\PrivacyScope
+    public static function privacy(bool $getShared = true): \App\Libraries\Compliance\PrivacyScope
     {
         if ($getShared) {
             return static::getSharedInstance('privacy');
         }
 
-        return new \App\Libraries\PrivacyScope(static::tenant());
+        return new \App\Libraries\Compliance\PrivacyScope(static::tenant());
     }
 
-    public static function allowance(bool $getShared = true): \App\Libraries\AllowanceService
+    public static function allowance(bool $getShared = true): \App\Libraries\Payroll\AllowanceService
     {
         if ($getShared) {
             return static::getSharedInstance('allowance');
         }
 
-        return new \App\Libraries\AllowanceService();
+        return new \App\Libraries\Payroll\AllowanceService();
     }
 
-    public static function approval(bool $getShared = true): \App\Libraries\ApprovalEngine
+    public static function approval(bool $getShared = true): \App\Libraries\Approval\ApprovalEngine
     {
         if ($getShared) {
             return static::getSharedInstance('approval');
         }
 
-        return new \App\Libraries\ApprovalEngine();
+        return new \App\Libraries\Approval\ApprovalEngine();
     }
 
-    public static function contractRenderer(bool $getShared = true): \App\Libraries\ContractRenderer
+    public static function contractRenderer(bool $getShared = true): \App\Libraries\Lifecycle\ContractRenderer
     {
         if ($getShared) {
             return static::getSharedInstance('contractRenderer');
         }
 
-        return new \App\Libraries\ContractRenderer();
+        return new \App\Libraries\Lifecycle\ContractRenderer();
     }
 
-    public static function shiftResolver(bool $getShared = true): \App\Libraries\ShiftResolver
+    public static function shiftResolver(bool $getShared = true): \App\Libraries\Attendance\ShiftResolver
     {
         if ($getShared) {
             return static::getSharedInstance('shiftResolver');
         }
 
-        return new \App\Libraries\ShiftResolver();
+        return new \App\Libraries\Attendance\ShiftResolver();
     }
 
-    public static function leaveBalance(bool $getShared = true): \App\Libraries\LeaveBalanceService
+    public static function leaveBalance(bool $getShared = true): \App\Libraries\Leave\LeaveBalanceService
     {
         if ($getShared) {
             return static::getSharedInstance('leaveBalance');
         }
 
-        return new \App\Libraries\LeaveBalanceService();
+        return new \App\Libraries\Leave\LeaveBalanceService();
     }
 
-    public static function payrollExporter(bool $getShared = true): \App\Libraries\PayrollExporter
+    public static function payrollExporter(bool $getShared = true): \App\Libraries\Payroll\PayrollExporter
     {
         if ($getShared) {
             return static::getSharedInstance('payrollExporter');
         }
 
-        return new \App\Libraries\PayrollExporter();
+        return new \App\Libraries\Payroll\PayrollExporter();
     }
 
-    public static function disciplinary(bool $getShared = true): \App\Libraries\DisciplinaryService
+    public static function disciplinary(bool $getShared = true): \App\Libraries\Lifecycle\DisciplinaryService
     {
         if ($getShared) {
             return static::getSharedInstance('disciplinary');
         }
 
-        return new \App\Libraries\DisciplinaryService();
+        return new \App\Libraries\Lifecycle\DisciplinaryService();
     }
 
-    public static function severance(bool $getShared = true): \App\Libraries\SeveranceCalculator
+    public static function severance(bool $getShared = true): \App\Libraries\Lifecycle\SeveranceCalculator
     {
         if ($getShared) {
             return static::getSharedInstance('severance');
         }
 
-        return new \App\Libraries\SeveranceCalculator();
+        return new \App\Libraries\Lifecycle\SeveranceCalculator();
     }
 
-    public static function onboarding(bool $getShared = true): \App\Libraries\OnboardingService
+    public static function onboarding(bool $getShared = true): \App\Libraries\Recruitment\OnboardingService
     {
         if ($getShared) {
             return static::getSharedInstance('onboarding');
         }
 
-        return new \App\Libraries\OnboardingService();
+        return new \App\Libraries\Recruitment\OnboardingService();
     }
 
     /**
@@ -181,13 +181,13 @@ class Services extends BaseService
      * pre-allocation). Dipanggil dari ManpowerService, RecruitmentService,
      * dan endpoint baru di MppController + OnboardingController.
      */
-    public static function onboardingPlan(bool $getShared = true): \App\Libraries\OnboardingPlanService
+    public static function onboardingPlan(bool $getShared = true): \App\Libraries\Recruitment\OnboardingPlanService
     {
         if ($getShared) {
             return static::getSharedInstance('onboardingPlan');
         }
 
-        return new \App\Libraries\OnboardingPlanService();
+        return new \App\Libraries\Recruitment\OnboardingPlanService();
     }
 
     /**
@@ -211,13 +211,13 @@ class Services extends BaseService
      * Dipakai oleh payroll, reimbursement, loan, business trip, bonus,
      * severance, asset, MPP, employee profile.
      */
-    public static function costCenter(bool $getShared = true): \App\Libraries\CostCenterService
+    public static function costCenter(bool $getShared = true): \App\Libraries\Master\CostCenterService
     {
         if ($getShared) {
             return static::getSharedInstance('costCenter');
         }
 
-        return new \App\Libraries\CostCenterService();
+        return new \App\Libraries\Master\CostCenterService();
     }
 
     /**
@@ -225,12 +225,12 @@ class Services extends BaseService
      * weighted dari online test, salary fit, experience, availability,
      * education, interview rating. Output explainable breakdown untuk UI.
      */
-    public static function candidateScoring(bool $getShared = true): \App\Libraries\CandidateScoringService
+    public static function candidateScoring(bool $getShared = true): \App\Libraries\Recruitment\CandidateScoringService
     {
         if ($getShared) {
             return static::getSharedInstance('candidateScoring');
         }
-        return new \App\Libraries\CandidateScoringService();
+        return new \App\Libraries\Recruitment\CandidateScoringService();
     }
 
     /**
@@ -238,48 +238,48 @@ class Services extends BaseService
      * cascading (parent/child + weighted progress rollup) + 360° peer
      * feedback (nominate, aggregate, anonymize).
      */
-    public static function performanceCascading(bool $getShared = true): \App\Libraries\PerformanceCascadingService
+    public static function performanceCascading(bool $getShared = true): \App\Libraries\Performance\PerformanceCascadingService
     {
         if ($getShared) {
             return static::getSharedInstance('performanceCascading');
         }
-        return new \App\Libraries\PerformanceCascadingService();
+        return new \App\Libraries\Performance\PerformanceCascadingService();
     }
 
     /**
      * ReferralProgramService — Sprint 12 / H2.5. Generator referral link
      * + bonus auto-trigger setelah kandidat HIRED + lulus probasi.
      */
-    public static function referralProgram(bool $getShared = true): \App\Libraries\ReferralProgramService
+    public static function referralProgram(bool $getShared = true): \App\Libraries\Recruitment\ReferralProgramService
     {
         if ($getShared) {
             return static::getSharedInstance('referralProgram');
         }
-        return new \App\Libraries\ReferralProgramService();
+        return new \App\Libraries\Recruitment\ReferralProgramService();
     }
 
     /**
      * TurnoverAnalyticsService — Sprint 12 / H2.6. Compute turnover &
      * retention metric per period + snapshot trend untuk dashboard.
      */
-    public static function turnoverAnalytics(bool $getShared = true): \App\Libraries\TurnoverAnalyticsService
+    public static function turnoverAnalytics(bool $getShared = true): \App\Libraries\Compliance\TurnoverAnalyticsService
     {
         if ($getShared) {
             return static::getSharedInstance('turnoverAnalytics');
         }
-        return new \App\Libraries\TurnoverAnalyticsService();
+        return new \App\Libraries\Compliance\TurnoverAnalyticsService();
     }
 
     /**
      * PayrollSimulationService — Sprint 13 / H2.7. What-if calculator
      * gross → BPJS → PPh21 → THP. Re-use BpjsCalculator + Pph21TerCalculator.
      */
-    public static function payrollSimulation(bool $getShared = true): \App\Libraries\PayrollSimulationService
+    public static function payrollSimulation(bool $getShared = true): \App\Libraries\Payroll\PayrollSimulationService
     {
         if ($getShared) {
             return static::getSharedInstance('payrollSimulation');
         }
-        return new \App\Libraries\PayrollSimulationService();
+        return new \App\Libraries\Payroll\PayrollSimulationService();
     }
 
     /**
@@ -287,88 +287,88 @@ class Services extends BaseService
      * reimbursement (vendor, total, date) dengan driver pluggable
      * (mock|tesseract|gcloud_vision|aws_textract via env OCR_DRIVER).
      */
-    public static function ocr(bool $getShared = true): \App\Libraries\OcrService
+    public static function ocr(bool $getShared = true): \App\Libraries\System\OcrService
     {
         if ($getShared) {
             return static::getSharedInstance('ocr');
         }
-        return new \App\Libraries\OcrService();
+        return new \App\Libraries\System\OcrService();
     }
 
     /**
      * CompetencyService — Sprint 14 / H3.1. Library kompetensi +
      * gap analysis terhadap profile posisi + rekomendasi training.
      */
-    public static function competency(bool $getShared = true): \App\Libraries\CompetencyService
+    public static function competency(bool $getShared = true): \App\Libraries\Performance\CompetencyService
     {
         if ($getShared) {
             return static::getSharedInstance('competency');
         }
-        return new \App\Libraries\CompetencyService();
+        return new \App\Libraries\Performance\CompetencyService();
     }
 
     /**
      * SuccessionService — Sprint 14 / H3.2. Critical positions +
      * succession candidates + coverage ratio dashboard.
      */
-    public static function succession(bool $getShared = true): \App\Libraries\SuccessionService
+    public static function succession(bool $getShared = true): \App\Libraries\Performance\SuccessionService
     {
         if ($getShared) {
             return static::getSharedInstance('succession');
         }
-        return new \App\Libraries\SuccessionService();
+        return new \App\Libraries\Performance\SuccessionService();
     }
 
     /**
      * TalentPoolService — Sprint 17 / H3.6. Skill matrix + internal
      * job marketplace + 9-box grid.
      */
-    public static function talentPool(bool $getShared = true): \App\Libraries\TalentPoolService
+    public static function talentPool(bool $getShared = true): \App\Libraries\Recruitment\TalentPoolService
     {
         if ($getShared) {
             return static::getSharedInstance('talentPool');
         }
-        return new \App\Libraries\TalentPoolService();
+        return new \App\Libraries\Recruitment\TalentPoolService();
     }
 
     /**
      * AiAssistantService — Sprint 19+ / H4.1. AI HR Copilot dengan
      * driver pluggable (mock|openai|anthropic|local) + PII redactor.
      */
-    public static function aiAssistant(bool $getShared = true): \App\Libraries\AiAssistantService
+    public static function aiAssistant(bool $getShared = true): \App\Libraries\Analytics\AiAssistantService
     {
         if ($getShared) return static::getSharedInstance('aiAssistant');
-        return new \App\Libraries\AiAssistantService();
+        return new \App\Libraries\Analytics\AiAssistantService();
     }
 
     /**
      * WorkforceSimulationService — Sprint 19+ / H4.3. Monte Carlo
      * scenario modeling untuk forecasting headcount + cost.
      */
-    public static function workforceSim(bool $getShared = true): \App\Libraries\WorkforceSimulationService
+    public static function workforceSim(bool $getShared = true): \App\Libraries\Manpower\WorkforceSimulationService
     {
         if ($getShared) return static::getSharedInstance('workforceSim');
-        return new \App\Libraries\WorkforceSimulationService();
+        return new \App\Libraries\Manpower\WorkforceSimulationService();
     }
 
     /**
      * PulseSurveyService — Sprint 19+ / H4.4. Anonymous pulse survey
      * dengan eNPS + burnout score + privacy gate.
      */
-    public static function pulseSurvey(bool $getShared = true): \App\Libraries\PulseSurveyService
+    public static function pulseSurvey(bool $getShared = true): \App\Libraries\Performance\PulseSurveyService
     {
         if ($getShared) return static::getSharedInstance('pulseSurvey');
-        return new \App\Libraries\PulseSurveyService();
+        return new \App\Libraries\Performance\PulseSurveyService();
     }
 
     /**
      * CompensationIntelligenceService — Sprint 19+ / H4.5. Compa-ratio,
      * pay equity (gender), salary band recommendation.
      */
-    public static function compensationIntelligence(bool $getShared = true): \App\Libraries\CompensationIntelligenceService
+    public static function compensationIntelligence(bool $getShared = true): \App\Libraries\Analytics\CompensationIntelligenceService
     {
         if ($getShared) return static::getSharedInstance('compensationIntelligence');
-        return new \App\Libraries\CompensationIntelligenceService();
+        return new \App\Libraries\Analytics\CompensationIntelligenceService();
     }
 
     /**
@@ -377,13 +377,13 @@ class Services extends BaseService
      * jadi syarat aplikasi kerja di perusahaan baru. Lihat docs/RESIGNATION.md
      * dan docs/LIFECYCLE_AUDIT_2026.md (item OFF-2).
      */
-    public static function paklaring(bool $getShared = true): \App\Libraries\PaklaringService
+    public static function paklaring(bool $getShared = true): \App\Libraries\Lifecycle\PaklaringService
     {
         if ($getShared) {
             return static::getSharedInstance('paklaring');
         }
 
-        return new \App\Libraries\PaklaringService();
+        return new \App\Libraries\Lifecycle\PaklaringService();
     }
 
     /**
@@ -391,13 +391,13 @@ class Services extends BaseService
      * orchestrator final settlement → payroll. Lihat docs/RESIGNATION.md
      * dan docs/LIFECYCLE_AUDIT_2026.md (item OFF-3, OFF-4, OFF-6).
      */
-    public static function offboarding(bool $getShared = true): \App\Libraries\OffboardingService
+    public static function offboarding(bool $getShared = true): \App\Libraries\Lifecycle\OffboardingService
     {
         if ($getShared) {
             return static::getSharedInstance('offboarding');
         }
 
-        return new \App\Libraries\OffboardingService();
+        return new \App\Libraries\Lifecycle\OffboardingService();
     }
 
     /**
@@ -405,13 +405,13 @@ class Services extends BaseService
      * Workflow DRAFT → SENT → ACCEPTED/REJECTED/EXPIRED/WITHDRAWN.
      * Lihat docs/LIFECYCLE_AUDIT_2026.md item REC-1.
      */
-    public static function offer(bool $getShared = true): \App\Libraries\OfferService
+    public static function offer(bool $getShared = true): \App\Libraries\Recruitment\OfferService
     {
         if ($getShared) {
             return static::getSharedInstance('offer');
         }
 
-        return new \App\Libraries\OfferService();
+        return new \App\Libraries\Recruitment\OfferService();
     }
 
     /**
@@ -419,13 +419,13 @@ class Services extends BaseService
      * Auto-fill probation_end_date saat hire, decision PASS/FAIL/EXTEND,
      * scanner expired+reminder. Lihat UU 13/2003 Pasal 60.
      */
-    public static function probation(bool $getShared = true): \App\Libraries\ProbationService
+    public static function probation(bool $getShared = true): \App\Libraries\Employee\ProbationService
     {
         if ($getShared) {
             return static::getSharedInstance('probation');
         }
 
-        return new \App\Libraries\ProbationService();
+        return new \App\Libraries\Employee\ProbationService();
     }
 
     /**
@@ -433,13 +433,13 @@ class Services extends BaseService
      * Auto-bootstrap IDP dari performance review.improvements field saat
      * review difinalize. Lihat docs/LIFECYCLE_AUDIT_2026.md item OD-2.
      */
-    public static function idp(bool $getShared = true): \App\Libraries\IdpService
+    public static function idp(bool $getShared = true): \App\Libraries\Performance\IdpService
     {
         if ($getShared) {
             return static::getSharedInstance('idp');
         }
 
-        return new \App\Libraries\IdpService();
+        return new \App\Libraries\Performance\IdpService();
     }
 
     /**
@@ -447,40 +447,40 @@ class Services extends BaseService
      * pakai ApprovalEngine (MPP, Resignation, Transfer, JIC). Cek delegasi
      * aktif berdasarkan tabel `approval_delegations`. Sprint 3 / CC-3.
      */
-    public static function approvalDelegationResolver(bool $getShared = true): \App\Libraries\ApprovalDelegationResolver
+    public static function approvalDelegationResolver(bool $getShared = true): \App\Libraries\Approval\ApprovalDelegationResolver
     {
         if ($getShared) {
             return static::getSharedInstance('approvalDelegationResolver');
         }
 
-        return new \App\Libraries\ApprovalDelegationResolver();
+        return new \App\Libraries\Approval\ApprovalDelegationResolver();
     }
 
-    public static function asset(bool $getShared = true): \App\Libraries\AssetService
+    public static function asset(bool $getShared = true): \App\Libraries\Asset\AssetService
     {
         if ($getShared) {
             return static::getSharedInstance('asset');
         }
 
-        return new \App\Libraries\AssetService();
+        return new \App\Libraries\Asset\AssetService();
     }
 
-    public static function businessTrip(bool $getShared = true): \App\Libraries\BusinessTripService
+    public static function businessTrip(bool $getShared = true): \App\Libraries\Attendance\BusinessTripService
     {
         if ($getShared) {
             return static::getSharedInstance('businessTrip');
         }
 
-        return new \App\Libraries\BusinessTripService();
+        return new \App\Libraries\Attendance\BusinessTripService();
     }
 
-    public static function recruitment(bool $getShared = true): \App\Libraries\RecruitmentService
+    public static function recruitment(bool $getShared = true): \App\Libraries\Recruitment\RecruitmentService
     {
         if ($getShared) {
             return static::getSharedInstance('recruitment');
         }
 
-        return new \App\Libraries\RecruitmentService();
+        return new \App\Libraries\Recruitment\RecruitmentService();
     }
 
     /**
@@ -489,13 +489,13 @@ class Services extends BaseService
      * → Talent Acquisition buatkan job_postings → tracking sampai
      * candidate HIRED + onboarding. Lihat docs/MPP.md.
      */
-    public static function manpower(bool $getShared = true): \App\Libraries\ManpowerService
+    public static function manpower(bool $getShared = true): \App\Libraries\Manpower\ManpowerService
     {
         if ($getShared) {
             return static::getSharedInstance('manpower');
         }
 
-        return new \App\Libraries\ManpowerService();
+        return new \App\Libraries\Manpower\ManpowerService();
     }
 
     /**
@@ -505,53 +505,53 @@ class Services extends BaseService
      * approval & frontend untuk dropdown picker.
      * Lihat docs/ORG_STRUCTURE.md.
      */
-    public static function orgStructure(bool $getShared = true): \App\Libraries\OrganizationStructureService
+    public static function orgStructure(bool $getShared = true): \App\Libraries\Master\OrganizationStructureService
     {
         if ($getShared) {
             return static::getSharedInstance('orgStructure');
         }
 
-        return new \App\Libraries\OrganizationStructureService();
+        return new \App\Libraries\Master\OrganizationStructureService();
     }
 
     /**
      * CareerService — public-facing job board yang terhubung ke
      * RecruitmentService & OnboardingService. Lihat docs/CAREER_PORTAL.md.
      */
-    public static function career(bool $getShared = true): \App\Libraries\CareerService
+    public static function career(bool $getShared = true): \App\Libraries\Recruitment\CareerService
     {
         if ($getShared) {
             return static::getSharedInstance('career');
         }
 
-        return new \App\Libraries\CareerService();
+        return new \App\Libraries\Recruitment\CareerService();
     }
 
-    public static function antiCheat(bool $getShared = true): \App\Libraries\AntiCheatService
+    public static function antiCheat(bool $getShared = true): \App\Libraries\Attendance\AntiCheatService
     {
         if ($getShared) {
             return static::getSharedInstance('antiCheat');
         }
 
-        return new \App\Libraries\AntiCheatService();
+        return new \App\Libraries\Attendance\AntiCheatService();
     }
 
-    public static function training(bool $getShared = true): \App\Libraries\TrainingService
+    public static function training(bool $getShared = true): \App\Libraries\Training\TrainingService
     {
         if ($getShared) {
             return static::getSharedInstance('training');
         }
 
-        return new \App\Libraries\TrainingService();
+        return new \App\Libraries\Training\TrainingService();
     }
 
-    public static function performance(bool $getShared = true): \App\Libraries\PerformanceService
+    public static function performance(bool $getShared = true): \App\Libraries\Performance\PerformanceService
     {
         if ($getShared) {
             return static::getSharedInstance('performance');
         }
 
-        return new \App\Libraries\PerformanceService();
+        return new \App\Libraries\Performance\PerformanceService();
     }
 
     /**
@@ -576,13 +576,13 @@ class Services extends BaseService
      * Encryption — AES-256-GCM dengan multi-key versioning.
      * Lihat docs/AUDIT.md item B.
      */
-    public static function encryption(bool $getShared = true): \App\Libraries\Encryption
+    public static function encryption(bool $getShared = true): \App\Libraries\System\Encryption
     {
         if ($getShared) {
             return static::getSharedInstance('encryption');
         }
 
-        return new \App\Libraries\Encryption();
+        return new \App\Libraries\System\Encryption();
     }
 
     /**
@@ -591,13 +591,13 @@ class Services extends BaseService
      * → Employee Consent (kondisional) → APPROVED → IMPLEMENTED.
      * Lihat docs/JIC.md.
      */
-    public static function jic(bool $getShared = true): \App\Libraries\JicService
+    public static function jic(bool $getShared = true): \App\Libraries\Employee\JicService
     {
         if ($getShared) {
             return static::getSharedInstance('jic');
         }
 
-        return new \App\Libraries\JicService();
+        return new \App\Libraries\Employee\JicService();
     }
 
     /**
@@ -606,13 +606,13 @@ class Services extends BaseService
      * Beda dengan JIC: tidak menyentuh grade/gaji, fokus ke perpindahan
      * lokasi/dept lateral. Lihat docs/EMPLOYEE_TRANSFER.md.
      */
-    public static function employeeTransfer(bool $getShared = true): \App\Libraries\EmployeeTransferService
+    public static function employeeTransfer(bool $getShared = true): \App\Libraries\Employee\EmployeeTransferService
     {
         if ($getShared) {
             return static::getSharedInstance('employeeTransfer');
         }
 
-        return new \App\Libraries\EmployeeTransferService();
+        return new \App\Libraries\Employee\EmployeeTransferService();
     }
 
     /**
@@ -620,39 +620,39 @@ class Services extends BaseService
      * Aturan R1-R6 (panjang, kompleksitas, common, history, rotation,
      * user-specific). Lihat docs/IMPROVEMENT_CHECKLIST.md Sprint 3.
      */
-    public static function passwordPolicy(bool $getShared = true): \App\Libraries\PasswordPolicy
+    public static function passwordPolicy(bool $getShared = true): \App\Libraries\Auth\PasswordPolicy
     {
         if ($getShared) {
             return static::getSharedInstance('passwordPolicy');
         }
 
-        return new \App\Libraries\PasswordPolicy();
+        return new \App\Libraries\Auth\PasswordPolicy();
     }
 
     /**
      * TwoFactorBackupCodes — generate/verify 8 single-use recovery codes
      * untuk user 2FA (Sprint 3). Codes di-hash Argon2id sama seperti password.
      */
-    public static function twoFactorBackupCodes(bool $getShared = true): \App\Libraries\TwoFactorBackupCodes
+    public static function twoFactorBackupCodes(bool $getShared = true): \App\Libraries\Auth\TwoFactorBackupCodes
     {
         if ($getShared) {
             return static::getSharedInstance('twoFactorBackupCodes');
         }
 
-        return new \App\Libraries\TwoFactorBackupCodes();
+        return new \App\Libraries\Auth\TwoFactorBackupCodes();
     }
 
     /**
      * DataPrivacyService — UU PDP (UU 27/2022) compliance (Sprint 4):
      * consent record, data export, deletion request workflow, anonimisasi PII.
      */
-    public static function dataPrivacy(bool $getShared = true): \App\Libraries\DataPrivacyService
+    public static function dataPrivacy(bool $getShared = true): \App\Libraries\Compliance\DataPrivacyService
     {
         if ($getShared) {
             return static::getSharedInstance('dataPrivacy');
         }
 
-        return new \App\Libraries\DataPrivacyService();
+        return new \App\Libraries\Compliance\DataPrivacyService();
     }
 
     /**
@@ -660,13 +660,13 @@ class Services extends BaseService
      * working_days_per_month, overtime_hours_per_month, overtime→leave
      * conversion ratio, absent_deduction_enabled. Override via tabel `settings`.
      */
-    public static function payrollSettings(bool $getShared = true): \App\Libraries\PayrollSettings
+    public static function payrollSettings(bool $getShared = true): \App\Libraries\Payroll\PayrollSettings
     {
         if ($getShared) {
             return static::getSharedInstance('payrollSettings');
         }
 
-        return new \App\Libraries\PayrollSettings();
+        return new \App\Libraries\Payroll\PayrollSettings();
     }
 
     /**
@@ -674,26 +674,26 @@ class Services extends BaseService
      * (Sprint 5-6 fix). Pakai untuk hitung effectiveShiftStart/End,
      * lateMinutes, earlyLeaveMinutes saat shift overnight 22:00→06:00.
      */
-    public static function shiftTime(bool $getShared = true): \App\Libraries\ShiftTimeHelper
+    public static function shiftTime(bool $getShared = true): \App\Libraries\Attendance\ShiftTimeHelper
     {
         if ($getShared) {
             return static::getSharedInstance('shiftTime');
         }
 
-        return new \App\Libraries\ShiftTimeHelper();
+        return new \App\Libraries\Attendance\ShiftTimeHelper();
     }
 
     /**
      * EmailTemplateRenderer — render template per company × event_type
      * dengan variable substitution {{var}} (Sprint 7).
      */
-    public static function emailTemplate(bool $getShared = true): \App\Libraries\EmailTemplateRenderer
+    public static function emailTemplate(bool $getShared = true): \App\Libraries\System\EmailTemplateRenderer
     {
         if ($getShared) {
             return static::getSharedInstance('emailTemplate');
         }
 
-        return new \App\Libraries\EmailTemplateRenderer();
+        return new \App\Libraries\System\EmailTemplateRenderer();
     }
 
     /**
@@ -701,13 +701,13 @@ class Services extends BaseService
      * dipakai (UMP/UMK, holidays, role permissions, BPJS rates) dengan
      * TTL convention terpusat. Sprint 10+.
      */
-    public static function cacheService(bool $getShared = true): \App\Libraries\CacheService
+    public static function cacheService(bool $getShared = true): \App\Libraries\System\CacheService
     {
         if ($getShared) {
             return static::getSharedInstance('cacheService');
         }
 
-        return new \App\Libraries\CacheService();
+        return new \App\Libraries\System\CacheService();
     }
 
     /**
@@ -720,13 +720,13 @@ class Services extends BaseService
      *   `Services::lookup()->getHolidays($companyId, $year)`
      * supaya tidak query DB tiap request.
      */
-    public static function lookup(bool $getShared = true): \App\Libraries\LookupCache
+    public static function lookup(bool $getShared = true): \App\Libraries\System\LookupCache
     {
         if ($getShared) {
             return static::getSharedInstance('lookup');
         }
 
-        return new \App\Libraries\LookupCache();
+        return new \App\Libraries\System\LookupCache();
     }
 
     /**
@@ -734,13 +734,13 @@ class Services extends BaseService
      * retry exponential backoff + HMAC-SHA256 signing. Sprint 11+.
      * Lihat docs/WEBHOOKS.md.
      */
-    public static function webhook(bool $getShared = true): \App\Libraries\WebhookDispatcher
+    public static function webhook(bool $getShared = true): \App\Libraries\Webhook\WebhookDispatcher
     {
         if ($getShared) {
             return static::getSharedInstance('webhook');
         }
 
-        return new \App\Libraries\WebhookDispatcher();
+        return new \App\Libraries\Webhook\WebhookDispatcher();
     }
 
     /**
@@ -750,13 +750,13 @@ class Services extends BaseService
      * handler terdaftar (RecruitmentService, AccountingSync, dll).
      * Lihat docs/WEBHOOKS.md section "Inbound".
      */
-    public static function inbound(bool $getShared = true): \App\Libraries\InboundWebhookHandler
+    public static function inbound(bool $getShared = true): \App\Libraries\Webhook\InboundWebhookHandler
     {
         if ($getShared) {
             return static::getSharedInstance('inbound');
         }
 
-        return new \App\Libraries\InboundWebhookHandler();
+        return new \App\Libraries\Webhook\InboundWebhookHandler();
     }
 
     /**
@@ -764,13 +764,13 @@ class Services extends BaseService
      * JWT terpisah dari user internal (claim aud=candidate). Lihat
      * docs/CAREER_PORTAL.md section "Candidate Auth".
      */
-    public static function candidateAuth(bool $getShared = true): \App\Libraries\CandidateAuthService
+    public static function candidateAuth(bool $getShared = true): \App\Libraries\Auth\CandidateAuthService
     {
         if ($getShared) {
             return static::getSharedInstance('candidateAuth');
         }
 
-        return new \App\Libraries\CandidateAuthService();
+        return new \App\Libraries\Auth\CandidateAuthService();
     }
 
     /**
@@ -778,13 +778,13 @@ class Services extends BaseService
      * DISC, technical). Auto-grade MCQ/TF/Numeric/Likert, manual grade
      * essay. Lihat docs/ONLINE_TEST.md.
      */
-    public static function onlineTest(bool $getShared = true): \App\Libraries\OnlineTestService
+    public static function onlineTest(bool $getShared = true): \App\Libraries\Recruitment\OnlineTestService
     {
         if ($getShared) {
             return static::getSharedInstance('onlineTest');
         }
 
-        return new \App\Libraries\OnlineTestService();
+        return new \App\Libraries\Recruitment\OnlineTestService();
     }
 
     /**
@@ -792,13 +792,13 @@ class Services extends BaseService
      * Multi-step approval: HR Director → BOD (kondisional). Auto-create
      * severance + PHK letter saat execute. Lihat docs/SPRINT_4_TERMINATION_POLISH.md.
      */
-    public static function termination(bool $getShared = true): \App\Libraries\TerminationService
+    public static function termination(bool $getShared = true): \App\Libraries\Lifecycle\TerminationService
     {
         if ($getShared) {
             return static::getSharedInstance('termination');
         }
 
-        return new \App\Libraries\TerminationService();
+        return new \App\Libraries\Lifecycle\TerminationService();
     }
 
     /**
@@ -806,13 +806,13 @@ class Services extends BaseService
      * (Sprint 4 / OFF-1). Analytics: would_rehire, primary_reason breakdown,
      * eNPS, satisfaction. Lihat docs/SPRINT_4_TERMINATION_POLISH.md.
      */
-    public static function exitInterview(bool $getShared = true): \App\Libraries\ExitInterviewService
+    public static function exitInterview(bool $getShared = true): \App\Libraries\Lifecycle\ExitInterviewService
     {
         if ($getShared) {
             return static::getSharedInstance('exitInterview');
         }
 
-        return new \App\Libraries\ExitInterviewService();
+        return new \App\Libraries\Lifecycle\ExitInterviewService();
     }
 
     /**
@@ -821,13 +821,13 @@ class Services extends BaseService
      * profile, employment, compensation, leave, attendance, payroll YTD,
      * performance, training, assets, disciplinary, documents, lifecycle.
      */
-    public static function employee360(bool $getShared = true): \App\Libraries\Employee360Service
+    public static function employee360(bool $getShared = true): \App\Libraries\Employee\Employee360Service
     {
         if ($getShared) {
             return static::getSharedInstance('employee360');
         }
 
-        return new \App\Libraries\Employee360Service();
+        return new \App\Libraries\Employee\Employee360Service();
     }
 
     /**
@@ -836,13 +836,13 @@ class Services extends BaseService
      * PHK list, audit summary, probation/BPJS overdue, turnover summary.
      * Hasil di-cache di compliance_report_runs (TTL 24 jam).
      */
-    public static function complianceReport(bool $getShared = true): \App\Libraries\ComplianceReportService
+    public static function complianceReport(bool $getShared = true): \App\Libraries\Lifecycle\ComplianceReportService
     {
         if ($getShared) {
             return static::getSharedInstance('complianceReport');
         }
 
-        return new \App\Libraries\ComplianceReportService();
+        return new \App\Libraries\Lifecycle\ComplianceReportService();
     }
 
     /**
@@ -865,12 +865,12 @@ class Services extends BaseService
      * breaker untuk dashboard ops, panggil
      * `CircuitBreaker::snapshot()` per service yang dipakai.
      */
-    public static function circuitBreaker(string $service, bool $getShared = true): \App\Libraries\CircuitBreaker
+    public static function circuitBreaker(string $service, bool $getShared = true): \App\Libraries\System\CircuitBreaker
     {
         $key = 'circuitBreaker.' . $service;
         if ($getShared) {
             $existing = static::getSharedInstance($key);
-            if ($existing instanceof \App\Libraries\CircuitBreaker) {
+            if ($existing instanceof \App\Libraries\System\CircuitBreaker) {
                 return $existing;
             }
         }
@@ -878,7 +878,7 @@ class Services extends BaseService
         $threshold = (int) (env('circuitBreaker.' . $service . '.threshold') ?: 5);
         $cooldown  = (int) (env('circuitBreaker.' . $service . '.cooldown') ?: 60);
 
-        $cb = new \App\Libraries\CircuitBreaker($service, $threshold, $cooldown);
+        $cb = new \App\Libraries\System\CircuitBreaker($service, $threshold, $cooldown);
         if ($getShared) {
             static::injectMock($key, $cb);
         }
@@ -894,11 +894,11 @@ class Services extends BaseService
      *   - fcm.projectId           : Firebase project ID
      *   - fcm.serviceAccountPath  : Absolute path ke service account JSON
      */
-    public static function pushNotifier(bool $getShared = true): \App\Libraries\PushNotifier
+    public static function pushNotifier(bool $getShared = true): \App\Libraries\Notification\PushNotifier
     {
         if ($getShared) {
             return static::getSharedInstance('pushNotifier');
         }
-        return new \App\Libraries\PushNotifier();
+        return new \App\Libraries\Notification\PushNotifier();
     }
 }

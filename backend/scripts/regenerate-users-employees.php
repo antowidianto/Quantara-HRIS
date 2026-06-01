@@ -32,7 +32,7 @@ $today  = date('Y-m-d');
 $year   = (int) date('Y');
 
 // ──────────────────────────────────────────────────────────────────────────
-// Encryption helpers — mirror App\Libraries\Encryption (v1, no version prefix)
+// Encryption helpers — mirror App\Libraries\System\Encryption (v1, no version prefix)
 // ──────────────────────────────────────────────────────────────────────────
 function loadEncryptionKey(string $envPath): string
 {

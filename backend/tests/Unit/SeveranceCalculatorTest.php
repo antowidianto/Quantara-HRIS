@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\SeveranceCalculator;
+use App\Libraries\Lifecycle\SeveranceCalculator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

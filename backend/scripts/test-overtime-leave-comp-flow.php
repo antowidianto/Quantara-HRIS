@@ -149,7 +149,7 @@ function approveOvertime($id, $userId, $db) {
         $update['computed_amount'] = 0;
     } else {
         $base = (float) ($emp['basic_salary'] ?? 0);
-        $calc = new \App\Libraries\OvertimeCalculator();
+        $calc = new \App\Libraries\Attendance\OvertimeCalculator();
         $amount = $calc->calculate($base, (float) $ot['hours'], $ot['day_type']);
         $update['computed_amount'] = $amount;
         $db->table('overtimes')->where('id', $id)->update($update);

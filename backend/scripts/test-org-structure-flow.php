@@ -103,7 +103,7 @@ check('HRD_MANAGER muncul di filter mpp.budget', count($found) === 1);
 
 // 7. Submit MPP → expected_approver_user_id ter-isi
 echo "\n7. Submit MPP — verifikasi expected_approver di-resolve\n";
-$mppSvc = new \App\Libraries\ManpowerService();
+$mppSvc = new \App\Libraries\Manpower\ManpowerService();
 $now = date('Y-m-d H:i:s');
 $ref = $mppSvc->nextReferenceNumber($companyId);
 $db->table('manpower_requests')->insert([

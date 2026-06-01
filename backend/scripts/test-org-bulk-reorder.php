@@ -81,7 +81,7 @@ function callBulkReorder(array $moves, int $companyId = 1): array {
     $req->setBody($payload);
     $req->setHeader('Content-Type', 'application/json');
 
-    $ctrl = new \App\Controllers\Api\V1\OrgStructureController();
+    $ctrl = new \App\Controllers\Api\V1\Master\OrgStructureController();
     $resp = Services::response(null, false);
     $resp->setStatusCode(200);
     $ctrl->initController($req, $resp, Services::logger());

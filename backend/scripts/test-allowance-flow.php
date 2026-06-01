@@ -49,7 +49,7 @@ check('employees.home_lat ada', true, $db->fieldExists('home_lat', 'employees'))
 check('employees.home_lng ada', true, $db->fieldExists('home_lng', 'employees'));
 
 // 3) AllowanceService::haversineKm
-$d = \App\Libraries\AllowanceService::haversineKm(-6.2088, 106.8456, -6.9175, 107.6191);
+$d = \App\Libraries\Payroll\AllowanceService::haversineKm(-6.2088, 106.8456, -6.9175, 107.6191);
 // Jakarta → Bandung ≈ 122 km
 check('Haversine Jakarta→Bandung dalam range 110–135 km', true, $d > 110 && $d < 135);
 

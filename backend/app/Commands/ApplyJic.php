@@ -38,7 +38,7 @@ class ApplyJic extends BaseCommand
         $companyId = CLI::getOption('company') !== null ? (int) CLI::getOption('company') : null;
         $forceId   = CLI::getOption('id') !== null ? (int) CLI::getOption('id') : null;
 
-        $svc = new \App\Libraries\JicService();
+        $svc = new \App\Libraries\Employee\JicService();
         $db  = \Config\Database::connect();
 
         if ($forceId) {

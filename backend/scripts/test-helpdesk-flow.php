@@ -212,10 +212,10 @@ check('REOPENED = 1 (test ticket)', ($statsMap['REOPENED'] ?? 0) >= 1);
 
 // 12. Class structure
 echo "\n12. Class structure\n";
-$ctrlExists = class_exists('\\App\\Controllers\\Api\\V1\\HelpdeskController');
+$ctrlExists = class_exists('\\App\Controllers\Api\V1\Helpdesk\HelpdeskController');
 check('HelpdeskController class registered', $ctrlExists);
 if ($ctrlExists) {
-    $r = new \ReflectionClass(\App\Controllers\Api\V1\HelpdeskController::class);
+    $r = new \ReflectionClass(\App\Controllers\Api\V1\Helpdesk\HelpdeskController::class);
     foreach (['index','create','show','update','delete','assign','changeStatus','close','reopen','addComment','stats'] as $m) {
         check("Method {$m}() ada", $r->hasMethod($m));
     }

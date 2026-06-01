@@ -2,10 +2,10 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\Employee360Service;
-use App\Libraries\ExitInterviewService;
-use App\Libraries\SeveranceCalculator;
-use App\Libraries\TerminationService;
+use App\Libraries\Employee\Employee360Service;
+use App\Libraries\Lifecycle\ExitInterviewService;
+use App\Libraries\Lifecycle\SeveranceCalculator;
+use App\Libraries\Lifecycle\TerminationService;
 use PHPUnit\Framework\TestCase;
 
 /**

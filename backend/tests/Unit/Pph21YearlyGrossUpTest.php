@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\Pph21TerCalculator;
+use App\Libraries\Payroll\Pph21TerCalculator;
 use PHPUnit\Framework\TestCase;
 
 /**

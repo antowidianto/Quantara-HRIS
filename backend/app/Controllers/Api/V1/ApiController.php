@@ -53,7 +53,7 @@ abstract class ApiController extends BaseController
      * data personal employee (leave, payslip, overtime, attendance, dsb).
      * Lihat docs/DATA_PRIVACY.md untuk pola penggunaan.
      */
-    protected function privacy(): \App\Libraries\PrivacyScope
+    protected function privacy(): \App\Libraries\Compliance\PrivacyScope
     {
         return Services::privacy();
     }

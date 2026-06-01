@@ -194,10 +194,10 @@ if ($cmdClassExists) {
 
 // 8. Test AnniversaryController class
 echo "\n8. Test AnniversaryController class\n";
-$ctrlClassExists = class_exists('\\App\\Controllers\\Api\\V1\\AnniversaryController');
+$ctrlClassExists = class_exists('\\App\Controllers\Api\V1\Employee\AnniversaryController');
 check('Controller AnniversaryController terdaftar', $ctrlClassExists);
 if ($ctrlClassExists) {
-    $reflectCtrl = new \ReflectionClass(\App\Controllers\Api\V1\AnniversaryController::class);
+    $reflectCtrl = new \ReflectionClass(\App\Controllers\Api\V1\Employee\AnniversaryController::class);
     check('Method upcoming() ada', $reflectCtrl->hasMethod('upcoming'));
     check('Method today() ada', $reflectCtrl->hasMethod('today'));
 }

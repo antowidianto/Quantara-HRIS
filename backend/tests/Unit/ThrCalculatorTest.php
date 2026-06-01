@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Controllers\Api\V1\PayrollController;
+use App\Controllers\Api\V1\Payroll\PayrollController;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

@@ -69,7 +69,7 @@ $db->table('training_registrations')->where('notes LIKE', 'TEST_TRN%')->delete()
 $db->table('trainings')->where('title LIKE', 'TEST_TRN%')->delete();
 $db->table('training_budgets')->where('notes', 'TEST_BUDGET')->delete();
 
-$svc = new \App\Libraries\TrainingService();
+$svc = new \App\Libraries\Training\TrainingService();
 
 // 3. Generators
 echo "\n3. Generators\n";
@@ -276,8 +276,8 @@ check('Stats: budget structure ada', isset($stats['budget']['allocated'], $stats
 
 // 14. Class structure
 echo "\n14. Class structure\n";
-check('Class TrainingService loaded', class_exists('\\App\\Libraries\\TrainingService'));
-check('Class TrainingController loaded', class_exists('\\App\\Controllers\\Api\\V1\\TrainingController'));
+check('Class TrainingService loaded', class_exists('\\App\Libraries\Training\TrainingService'));
+check('Class TrainingController loaded', class_exists('\\App\Controllers\Api\V1\Training\TrainingController'));
 check('Service::training() registered', method_exists(\Config\Services::class, 'training'));
 
 // Cleanup

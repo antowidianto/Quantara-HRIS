@@ -9,9 +9,9 @@ use CodeIgniter\Database\Migration;
  *
  * Tabel yang ditambah:
  *   1. `password_history` — track hash N password terakhir (R5: tidak boleh
- *      reuse dari 5 password sebelumnya). Lihat `App\Libraries\PasswordPolicy`.
+ *      reuse dari 5 password sebelumnya). Lihat `App\Libraries\Auth\PasswordPolicy`.
  *   2. `twofa_backup_codes` — kode recovery 2FA single-use, 8 kode/user
- *      yang di-hash via Argon2id. Lihat `App\Libraries\TwoFactorBackupCodes`.
+ *      yang di-hash via Argon2id. Lihat `App\Libraries\Auth\TwoFactorBackupCodes`.
  *
  * Migration ini ADDITIVE — tidak mengubah tabel existing.
  */

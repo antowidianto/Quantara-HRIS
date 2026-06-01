@@ -2,7 +2,7 @@
 
 namespace App\Commands;
 
-use App\Libraries\AuditLogger;
+use App\Libraries\Compliance\AuditLogger;
 use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
 

@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\CostCenterService;
+use App\Libraries\Master\CostCenterService;
 use PHPUnit\Framework\TestCase;
 
 /**

@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\OnboardingPlanService;
+use App\Libraries\Recruitment\OnboardingPlanService;
 use PHPUnit\Framework\TestCase;
 
 /**

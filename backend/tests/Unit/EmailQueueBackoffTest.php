@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\EmailQueueBackoff;
+use App\Libraries\System\EmailQueueBackoff;
 use PHPUnit\Framework\TestCase;
 
 /**

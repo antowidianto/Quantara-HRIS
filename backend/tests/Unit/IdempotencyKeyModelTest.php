@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Models\IdempotencyKeyModel;
+use App\Models\System\IdempotencyKeyModel;
 use PHPUnit\Framework\TestCase;
 
 /**

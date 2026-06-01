@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\PayrollSettings;
+use App\Libraries\Payroll\PayrollSettings;
 use PHPUnit\Framework\TestCase;
 
 /**

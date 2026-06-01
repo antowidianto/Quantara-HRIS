@@ -2,8 +2,8 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\InboundWebhookHandler;
-use App\Libraries\WebhookSigner;
+use App\Libraries\Webhook\InboundWebhookHandler;
+use App\Libraries\Webhook\WebhookSigner;
 use PHPUnit\Framework\TestCase;
 
 /**

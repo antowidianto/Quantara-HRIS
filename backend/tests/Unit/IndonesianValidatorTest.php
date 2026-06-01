@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\IndonesianValidator;
+use App\Libraries\System\IndonesianValidator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 

@@ -70,7 +70,7 @@ $db->table('goal_check_ins')->where('goal_id IN (SELECT id FROM goals WHERE titl
 $db->table('goals')->where('title LIKE', 'TEST_GOAL%')->delete();
 $db->table('performance_cycles')->where('code LIKE', 'TEST_PERF%')->delete();
 
-$svc = new \App\Libraries\PerformanceService();
+$svc = new \App\Libraries\Performance\PerformanceService();
 
 // 3. Create cycle
 echo "\n3. Create cycle\n";
@@ -253,8 +253,8 @@ check('Stats: rating_distribution["EXCEEDS"] = 1', ($stats['reviews']['rating_di
 
 // 14. Class structure
 echo "\n14. Class structure\n";
-check('Class PerformanceService loaded', class_exists('\\App\\Libraries\\PerformanceService'));
-check('Class PerformanceController loaded', class_exists('\\App\\Controllers\\Api\\V1\\PerformanceController'));
+check('Class PerformanceService loaded', class_exists('\\App\Libraries\Performance\PerformanceService'));
+check('Class PerformanceController loaded', class_exists('\\App\Controllers\Api\V1\Performance\PerformanceController'));
 check('Service::performance() registered', method_exists(\Config\Services::class, 'performance'));
 
 // Cleanup

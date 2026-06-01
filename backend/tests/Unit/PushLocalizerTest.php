@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Libraries\PushLocalizer;
+use App\Libraries\Notification\PushLocalizer;
 use PHPUnit\Framework\TestCase;
 
 /**
