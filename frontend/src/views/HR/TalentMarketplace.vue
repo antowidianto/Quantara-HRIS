@@ -38,7 +38,7 @@ const isHR = computed(() =>
 // ─── Skills ─────────────────────────────────────────
 const mySkills = ref([])
 const showAddSkill = ref(false)
-const skillForm = reactive({ name: '', category: 'TECHNICAL', level: 3, evidence: '' })
+const skillForm = reactive({ skill_name: '', category: 'TECHNICAL', level: 3, evidence: '' })
 
 async function loadMySkills() {
   if (! auth.user?.employee_id) return
@@ -51,7 +51,7 @@ async function loadMySkills() {
 }
 
 async function addSkill() {
-  if (! skillForm.name?.trim() || skillForm.name.length < 2) {
+  if (! skillForm.skill_name?.trim() || skillForm.skill_name.length < 2) {
     toast.warning('Nama skill minimal 2 karakter')
     return
   }
@@ -59,7 +59,7 @@ async function addSkill() {
     await api.post(`/employees/${auth.user.employee_id}/skills`, skillForm)
     toast.success('Skill ditambahkan')
     showAddSkill.value = false
-    Object.assign(skillForm, { name: '', category: 'TECHNICAL', level: 3, evidence: '' })
+    Object.assign(skillForm, { skill_name: '', category: 'TECHNICAL', level: 3, evidence: '' })
     loadMySkills()
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal menambah skill')
@@ -225,7 +225,7 @@ onMounted(loadMySkills)
               </tr>
               <tr v-for="s in mySkills" :key="s.id">
                 <td>
-                  <div class="font-medium">{{ s.name }}</div>
+                  <div class="font-medium">{{ s.skill_name }}</div>
                   <div v-if="s.evidence" class="text-xs text-gray-500 mt-0.5">
                     {{ s.evidence }}
                   </div>
@@ -390,7 +390,7 @@ onMounted(loadMySkills)
         <div class="p-5 space-y-3">
           <div>
             <label class="label">Nama Skill</label>
-            <input v-model="skillForm.name" class="input" placeholder="contoh: PHP, Public Speaking, Excel" />
+            <input v-model="skillForm.skill_name" class="input" placeholder="contoh: PHP, Public Speaking, Excel" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>

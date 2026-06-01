@@ -1,14 +1,17 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { fmtDate, fmtCurrency } from '@/composables/useResource'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, CalculatorIcon, CheckBadgeIcon } from '@heroicons/vue/24/outline'
+import PayrollPeriodModal from '@/components/PayrollPeriodModal.vue'
 
+const router = useRouter()
 const toast = useToast()
 const items = ref([])
+const showModal = ref(false)
 
 async function fetchData() {
   const res = await api.get('/payroll-periods', { params: { per_page: 50 } })
@@ -46,13 +49,29 @@ async function finalize(id) {
     fetchData()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
 }
+
+function openModal() {
+  showModal.value = true
+}
+
+function closeModal() {
+  showModal.value = false
+}
+
+function handlePeriodCreated(period) {
+  fetchData()
+  // Navigate ke detail periode yang baru dibuat
+  router.push(`/payroll/periods/${period.id}`)
+}
 </script>
 
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold">Periode Payroll</h1>
-      <RouterLink to="/payroll/periods/new" class="btn-primary"><PlusIcon class="w-4 h-4" /> Periode Baru</RouterLink>
+      <button @click="openModal" class="btn-primary">
+        <PlusIcon class="w-4 h-4" /> Periode Baru
+      </button>
     </div>
     <div class="card">
       <div class="overflow-x-auto">
@@ -99,5 +118,12 @@ async function finalize(id) {
         </table>
       </div>
     </div>
+
+    <!-- Modal -->
+    <PayrollPeriodModal 
+      :show="showModal" 
+      @close="closeModal"
+      @created="handlePeriodCreated"
+    />
   </div>
 </template>

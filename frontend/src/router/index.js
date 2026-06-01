@@ -252,6 +252,8 @@ const routes = [
       { path: 'admin/companies', name: 'companies', component: () => import('@/views/Admin/Companies.vue') },
       { path: 'admin/settings', name: 'settings', component: () => import('@/views/Admin/Settings.vue') },
       { path: 'admin/email-settings', name: 'email-settings', component: () => import('@/views/Admin/EmailSettings.vue') },
+      // Migration #076 — Menu Manager (sidebar dinamis)
+      { path: 'admin/menus', name: 'menus', component: () => import('@/views/Admin/Menus.vue') },
 
       // Profile
       { path: 'profile', name: 'profile', component: () => import('@/views/Profile.vue') },

@@ -506,7 +506,7 @@ function isChanged(oldVal, newVal) {
           <div v-if="['BRANCH','COMBINED'].includes(editing.transfer_type)" class="md:col-span-2">
             <label class="label">Cabang Tujuan</label>
             <SearchableSelect
-              v-model="editing.new_branch_id"
+              v-model="editing.new_branch_name"
               :items="branches"
               value-key="id"
               label-key="name"

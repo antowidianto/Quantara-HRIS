@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { fmtDate, fmtCurrency } from '@/composables/useResource'
 import { useToast } from 'vue-toastification'
-import { confirm as confirmDialog } from '@/composables/useConfirm'
+import { promptDialog } from '@/composables/useConfirm'
 import { PlusIcon } from '@heroicons/vue/24/outline'
 
 /**
@@ -107,15 +107,30 @@ const STATUS_BADGE = {
 }
 
 async function cancel(row) {
-  const ok = await confirmDialog({
+  // Backend mewajibkan `reason` minimal 5 karakter sebagai audit trail
+  // (lihat BonusController::cancelRun). Pakai promptDialog supaya user
+  // langsung input alasan di modal yang sama dengan konfirmasi —
+  // sebelumnya hanya konfirmasi tanpa reason → server reject 422
+  // "Alasan minimal 5 karakter" walaupun status DB sudah berubah karena
+  // request ke-2 dari user yang re-try (atau di scenario lain bingung).
+  const reason = await promptDialog({
     title: 'Batalkan bonus run?',
-    message: `Run "${row.name}" akan di-set CANCELLED dan recipient list akan jadi history saja.`,
+    message: `Run "${row.name}" akan di-set CANCELLED dan recipient list akan jadi history saja. Tulis alasan pembatalan untuk audit trail.`,
     okText: 'Batalkan',
     variant: 'danger',
+    inputLabel: 'Alasan pembatalan',
+    inputType: 'textarea',
+    inputPlaceholder: 'mis. salah perhitungan, run dibuat ganda, dst.',
+    inputRequired: true,
   })
-  if (! ok) return
+  if (reason === null) return
+  const trimmed = (reason || '').trim()
+  if (trimmed.length < 5) {
+    toast.error('Alasan minimal 5 karakter')
+    return
+  }
   try {
-    await api.post(`/bonus-runs/${row.id}/cancel`)
+    await api.post(`/bonus-runs/${row.id}/cancel`, { reason: trimmed })
     toast.success('Run dibatalkan')
     fetchData()
   } catch (e) {

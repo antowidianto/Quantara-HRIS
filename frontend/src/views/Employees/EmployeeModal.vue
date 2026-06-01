@@ -12,7 +12,7 @@ import {
   BanknotesIcon, MapPinIcon, GiftIcon, DocumentTextIcon, CalendarDaysIcon,
   ClockIcon, EnvelopeIcon, PhoneIcon, BuildingOffice2Icon, AcademicCapIcon,
   XMarkIcon, PencilSquareIcon, TrashIcon, EyeIcon, ArrowPathIcon,
-  CheckCircleIcon,
+  CheckCircleIcon, ClipboardDocumentListIcon,
 } from '@heroicons/vue/24/outline'
 
 /**
@@ -44,10 +44,17 @@ const toast = useToast()
 const internalMode = ref(props.mode)
 const employee = ref(null)
 const balances = ref([])
+const balanceYear = ref(new Date().getFullYear())
 const contracts = ref([])
 const allowances = ref([])
 const loading = ref(false)
 const saving = ref(false)
+
+// Leave history (riwayat pengajuan cuti, di-load saat tab dibuka)
+const leaves = ref([])
+const leavesLoaded = ref(false)
+const leavesLoading = ref(false)
+const leavesError = ref('')
 
 const departments = ref([])
 const positions = ref([])
@@ -71,6 +78,23 @@ const historyTasks = ref([])
 const historyLoaded = ref(false)
 const historyLoading = ref(false)
 const historyError = ref('')
+
+async function loadLeaveHistory() {
+  if (! props.employeeId || leavesLoaded.value || leavesLoading.value) return
+  leavesLoading.value = true
+  leavesError.value = ''
+  try {
+    const res = await api.get('/leaves', {
+      params: { employee_id: props.employeeId, per_page: 50 },
+    })
+    leaves.value = res.data?.data || []
+    leavesLoaded.value = true
+  } catch (e) {
+    leavesError.value = e.response?.data?.message || 'Gagal memuat riwayat cuti'
+  } finally {
+    leavesLoading.value = false
+  }
+}
 
 async function loadHistoryTab() {
   if (! props.employeeId || historyLoaded.value || historyLoading.value) return
@@ -176,7 +200,14 @@ async function loadEmployee() {
       employee.value = emp.value.data.data
       form.value = { ...blankForm(), ...employee.value }
     }
-    if (bal.status === 'fulfilled') balances.value = bal.value.data.data || []
+    if (bal.status === 'fulfilled') {
+      // LeaveController::balance return { employee_id, year, balances: [...], today }.
+      // Sebelumnya kita salah baca data.data sebagai array — itu sebabnya saldo
+      // muncul kosong meski endpoint sukses 200.
+      const payload = bal.value.data?.data || {}
+      balances.value = Array.isArray(payload.balances) ? payload.balances : []
+      if (payload.year) balanceYear.value = payload.year
+    }
     if (ctr.status === 'fulfilled') {
       const raw = ctr.value.data?.data
       contracts.value = Array.isArray(raw) ? raw.filter(Boolean) : []
@@ -186,6 +217,9 @@ async function loadEmployee() {
       const raw = gen.value.data?.data
       generatedContracts.value = Array.isArray(raw) ? raw.filter(Boolean) : []
     } else { console.warn('Gagal load generated_contracts:', gen.reason?.response?.data || gen.reason) }
+    // Reset cache riwayat cuti supaya tab di-refetch saat dibuka.
+    leavesLoaded.value = false
+    leaves.value = []
   } catch (e) {
     toast.error('Gagal memuat data karyawan')
   } finally {
@@ -387,6 +421,7 @@ const tabGroups = computed(() => {
         { id: 'allowances', label: 'Tunjangan',       icon: GiftIcon },
         { id: 'contracts',  label: 'Kontrak',         icon: DocumentTextIcon },
         { id: 'leave',      label: 'Saldo Cuti',      icon: CalendarDaysIcon },
+        { id: 'leave-history', label: 'Riwayat Cuti', icon: ClipboardDocumentListIcon },
       ],
     },
     {
@@ -411,7 +446,15 @@ const activeTab = ref('general')
 watch(activeTab, (val) => {
   if (val === 'history') loadHistoryTab()
   if (val === 'contracts') loadContractData()
+  if (val === 'leave-history') loadLeaveHistory()
 })
+
+const LEAVE_STATUS_BADGE = {
+  PENDING: 'badge-yellow',
+  APPROVED: 'badge-green',
+  REJECTED: 'badge-red',
+  CANCELLED: 'badge-gray',
+}
 
 const allTabs = computed(() => tabGroups.value.flatMap(g => g.tabs))
 const currentTabLabel = computed(() => allTabs.value.find(t => t.id === activeTab.value)?.label || '')
@@ -1273,13 +1316,20 @@ function statusBadgeClass(s) {
 
             <!-- ── SALDO CUTI ────────────────────────────────── -->
             <div v-else-if="activeTab === 'leave'">
+              <p class="text-xs text-gray-500 mb-3">
+                Saldo cuti tahun {{ balanceYear }} — sudah disesuaikan dengan jenis kelamin karyawan
+                (mis. cuti melahirkan hanya muncul untuk perempuan).
+              </p>
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div v-if="balances.length === 0" class="md:col-span-3 rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-400 text-sm">
-                  Belum ada saldo cuti
+                  Belum ada saldo cuti yang berlaku untuk karyawan ini.
                 </div>
-                <div v-for="b in balances" :key="b.id"
+                <div v-for="b in balances" :key="b.leave_type_id"
                      class="rounded-lg border border-gray-200 bg-white p-4 hover:shadow-sm transition">
-                  <div class="text-sm font-semibold text-gray-700 mb-2">{{ b.name }}</div>
+                  <div class="flex items-start justify-between gap-2 mb-2">
+                    <div class="text-sm font-semibold text-gray-700 truncate">{{ b.name }}</div>
+                    <span class="text-[10px] font-mono text-gray-400 shrink-0">{{ b.code }}</span>
+                  </div>
                   <div class="flex items-baseline gap-2 mb-2">
                     <span class="text-2xl font-bold text-primary-700 tabular-nums">{{ b.remaining }}</span>
                     <span class="text-sm text-gray-500">/ {{ b.allocated }} hari</span>
@@ -1288,9 +1338,80 @@ function statusBadgeClass(s) {
                     <div class="bg-primary-600 h-full rounded-full transition-all"
                          :style="{ width: b.allocated ? Math.min(100, (b.remaining / b.allocated) * 100) + '%' : '0%' }"></div>
                   </div>
-                  <div class="text-xs text-gray-500 mt-2">{{ b.used }} hari terpakai</div>
+                  <div class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500 mt-2">
+                    <span>{{ b.used }} hari terpakai</span>
+                    <span v-if="b.is_prorated && b.prorate_factor < 1">
+                      · Prorate {{ b.months_worked }}/12 bln
+                    </span>
+                    <span v-if="b.carried_over > 0">
+                      · Carry-over {{ b.carried_over }} hari
+                    </span>
+                    <span v-if="b.is_expired" class="text-red-600 font-medium">
+                      · Kadaluwarsa
+                    </span>
+                  </div>
                 </div>
               </div>
+            </div>
+
+            <!-- ── RIWAYAT CUTI ──────────────────────────────── -->
+            <div v-else-if="activeTab === 'leave-history'" class="space-y-4">
+              <div v-if="leavesLoading" class="text-center py-8 text-gray-400 text-sm">
+                <ArrowPathIcon class="w-5 h-5 mx-auto mb-2 animate-spin" />
+                Memuat riwayat cuti…
+              </div>
+              <div v-else-if="leavesError"
+                   class="rounded-md p-3 bg-red-50 border border-red-200 text-red-700 text-sm">
+                {{ leavesError }}
+                <button class="ml-2 underline" @click="leavesLoaded = false; loadLeaveHistory()">
+                  Coba lagi
+                </button>
+              </div>
+              <template v-else>
+                <p class="text-xs text-gray-500">
+                  Daftar pengajuan cuti karyawan ini, terbaru di atas. Termasuk yang masih PENDING,
+                  sudah APPROVED, REJECTED, atau CANCELLED.
+                </p>
+                <div class="rounded-lg border border-gray-200 overflow-hidden">
+                  <table class="table">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th>No. Pengajuan</th>
+                        <th>Tipe</th>
+                        <th>Mulai</th>
+                        <th>Selesai</th>
+                        <th class="text-right">Hari</th>
+                        <th>Status</th>
+                        <th>Alasan</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                      <tr v-if="leaves.length === 0">
+                        <td colspan="7" class="text-center py-6 text-gray-400 text-sm">
+                          Belum ada pengajuan cuti
+                        </td>
+                      </tr>
+                      <tr v-for="l in leaves" :key="l.id">
+                        <td class="font-mono text-xs">{{ l.request_number }}</td>
+                        <td class="text-sm">
+                          <div class="font-medium">{{ l.leave_name || '—' }}</div>
+                          <div v-if="l.leave_code" class="text-xs text-gray-500 font-mono">{{ l.leave_code }}</div>
+                        </td>
+                        <td class="text-sm">{{ fmtDateOrDash(l.start_date) }}</td>
+                        <td class="text-sm">{{ fmtDateOrDash(l.end_date) }}</td>
+                        <td class="text-right tabular-nums font-medium">{{ l.days }}</td>
+                        <td>
+                          <span :class="LEAVE_STATUS_BADGE[l.status] || 'badge-gray'">{{ l.status }}</span>
+                        </td>
+                        <td class="text-sm text-gray-600 max-w-xs truncate" :title="l.reason">
+                          {{ l.reason || '—' }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="text-xs text-gray-400 text-right">{{ leaves.length }} entri ditampilkan</p>
+              </template>
             </div>
 
             <!-- ── RIWAYAT & ASET ────────────────────────────── -->
