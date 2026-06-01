@@ -1,38 +1,41 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter, useRoute, RouterLink, RouterView } from 'vue-router'
+/**
+ * AppLayout — wrapper utama dashboard (sidebar + topbar + main content).
+ *
+ * Sidebar di-render dari menu store yang tarik tree dari backend
+ * (GET /menus/me, lihat migration #076 + MenuController). Sebelumnya
+ * menu didefinisikan inline sebagai array `groups` di file ini, sekarang
+ * sumbernya database supaya admin bisa atur urutan/parent/label tanpa
+ * rebuild frontend. Komponen `SidebarMenu` me-render tiap node SECTION/
+ * PARENT/ITEM secara recursive.
+ */
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter, RouterLink, RouterView } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useMenuStore } from '@/stores/menu'
 import api from '@/api/client'
 import {
-  HomeIcon, UsersIcon, ClockIcon, CalendarDaysIcon, BanknotesIcon,
-  Cog6ToothIcon, BellIcon, ArrowLeftStartOnRectangleIcon, ChartBarIcon,
+  // Hanya ikon yang dipakai topbar/branding. Ikon sidebar resolved via
+  // components/menu/iconMap.js dari kolom `icon` di tabel menus.
+  BellIcon, ArrowLeftStartOnRectangleIcon,
   BuildingOffice2Icon, ShieldCheckIcon, ChevronDownIcon, Bars3Icon, XMarkIcon,
-  CurrencyDollarIcon, ClipboardDocumentListIcon, UserCircleIcon,
+  UserCircleIcon,
   SunIcon, MoonIcon, ComputerDesktopIcon, LanguageIcon, CheckIcon,
-  ArrowsRightLeftIcon,
-  // Sprint 2 / 4 polish — icons untuk menu baru
-  ExclamationTriangleIcon, ChatBubbleLeftRightIcon, DocumentChartBarIcon,
-  NoSymbolIcon,
-  // Horizon 1-4 frontend (Sprint 7+) — Talent, Wellbeing, Compensation
-  HomeModernIcon, GiftIcon, FunnelIcon, UserMinusIcon, CalculatorIcon,
-  ShareIcon, AcademicCapIcon, KeyIcon, SparklesIcon, HeartIcon,
-  PresentationChartLineIcon, ScaleIcon,
-  // Tambahan Sprint 7-12 — WhatsApp, Referral, Peer Review
-  ChatBubbleLeftEllipsisIcon, UserGroupIcon, TrophyIcon,
 } from '@heroicons/vue/24/outline'
+import SidebarMenu from '@/components/menu/SidebarMenu.vue'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useI18n } from '@/locales'
 
 // Sprint 5-6 item S — toggle dark mode di topbar.
-const { mode: darkMode, effective: effectiveDarkMode, toggle: toggleDarkMode } = useDarkMode()
+const { mode: darkMode, toggle: toggleDarkMode } = useDarkMode()
 
 // i18n — language switcher di topbar.
 const { t, locale, setLocale, availableLocales } = useI18n()
 const langs = availableLocales()
 
 const auth = useAuthStore()
+const menuStore = useMenuStore()
 const router = useRouter()
-const route = useRoute()
 
 const sidebarOpen = ref(false)
 const userMenuOpen = ref(false)
@@ -41,6 +44,10 @@ const langMenuOpen = ref(false)
 const companyMenuOpen = ref(false)
 const unreadCount = ref(0)
 const notifications = ref([])
+
+// Tree dari MenuStore — sudah ter-filter sesuai permission user di backend.
+const menuTree = computed(() => menuStore.tree)
+const menuLoading = computed(() => menuStore.loading)
 
 // Cari profil company yg sedang aktif untuk ditampilkan di tombol dropdown.
 // Dipakai super admin saja — user biasa tinggal lihat nama company-nya.
@@ -57,188 +64,6 @@ function pickCompany(id) {
   companyMenuOpen.value = false
   if (typeof window !== 'undefined') window.location.reload()
 }
-
-const groups = computed(() => {
-  const can = auth.can
-  // `locale.value` di-touch supaya group ikut re-compute saat ganti bahasa.
-  void locale.value
-  return [
-    {
-      title: t('nav.home'),
-      items: [{ name: t('nav.items.dashboard'), to: '/dashboard', icon: HomeIcon }],
-    },
-    {
-      title: t('nav.my'),
-      items: [
-        { name: t('nav.items.my_attendance'),       to: '/attendance/my',           icon: ClockIcon },
-        { name: t('nav.items.clock_in_out'),        to: '/attendance/clock',        icon: ClockIcon },
-        { name: t('nav.items.attendance_request'),  to: '/attendance/my-changes',   icon: ClipboardDocumentListIcon },
-        { name: t('nav.items.my_leaves'),           to: '/leaves',                  icon: CalendarDaysIcon },
-        { name: t('nav.items.leave_balance'),       to: '/leaves/balance',          icon: CalendarDaysIcon },
-        { name: t('nav.items.my_overtimes'),        to: '/overtimes',               icon: ClockIcon },
-        // H1.5 — Pengajuan WFH (self-service)
-        { name: 'Pengajuan WFH',                     to: '/attendance/wfh',          icon: HomeModernIcon },
-        { name: t('nav.items.my_payslips'),         to: '/payslips/my',             icon: CurrencyDollarIcon },
-        // Sprint 21+ — Self-service riwayat bonus
-        { name: 'Riwayat Bonus',                     to: '/bonuses/my',              icon: BanknotesIcon },
-        // H4.4 — Pulse Survey aktif (semua karyawan bisa respond anonim)
-        { name: 'Pulse Survey',                      to: '/hr/pulse-survey',         icon: HeartIcon },
-        // H3.6 — Talent Marketplace (skill self-service + internal job board)
-        { name: 'Talent Marketplace',                to: '/hr/talent-marketplace',   icon: SparklesIcon },
-        // H2.5 — Employee Referral Program (share link + leaderboard)
-        { name: 'Referral Program',                  to: '/recruitment/referral',    icon: TrophyIcon },
-        // H2.3 — Peer Review 360° yang harus saya isi
-        { name: 'Peer Review',                       to: '/performance/peer-review', icon: UserGroupIcon },
-        // H1.6 — Rencana Lembur (pre-approval)
-        { name: 'Rencana Lembur',                    to: '/overtimes/plan',          icon: ClockIcon },
-        { name: t('nav.items.approval_inbox'),      to: '/approvals/inbox',         icon: ClipboardDocumentListIcon },
-        { name: t('nav.items.approval_delegations'),to: '/approvals/delegations',   icon: ShieldCheckIcon },
-        { name: t('nav.items.my_performance'),      to: '/performance/my',          icon: ChartBarIcon },
-        // Pengajuan resignation self-service. Selalu visible — engine
-        // backend yang block kalau user tidak terhubung ke record
-        // employee atau sudah punya pengajuan aktif.
-        { name: t('nav.items.my_resignation'),      to: '/hr/my-resignation',       icon: ArrowLeftStartOnRectangleIcon },
-        // Mutasi karyawan — self-service untuk lihat & approve/reject mutasi
-        // yang menyangkut diri sendiri (penting saat HR submit mutasi dengan
-        // requires_consent=1).
-        { name: 'Mutasi Saya',                       to: '/hr/my-transfers',         icon: ArrowsRightLeftIcon },
-      ],
-    },
-    {
-      title: t('nav.hr'),
-      items: [
-        { name: t('nav.items.employees'),           to: '/employees',                                  icon: UsersIcon,                  perm: 'employee.view' },
-        { name: t('nav.items.employee_contracts'),  to: '/employees/contracts',                        icon: ClipboardDocumentListIcon,  perm: 'employee.view' },
-        { name: t('nav.items.attendance'),          to: '/attendance',                                 icon: ClockIcon,                  perm: 'attendance.view_all' },
-        { name: t('nav.items.shift_roster'),        to: '/roster',                                     icon: CalendarDaysIcon,           perm: 'roster.view' },
-        { name: t('nav.items.change_requests'),     to: '/attendance/change-requests/approvals',       icon: ClipboardDocumentListIcon,  perm: 'attendance.approve_change' },
-        { name: t('nav.items.anomalies'),           to: '/attendance/anomalies',                       icon: ShieldCheckIcon,            perm: 'attendance.review_anomaly' },
-        { name: t('nav.items.leaves'),              to: '/leaves?status=PENDING',                      icon: CalendarDaysIcon,           perm: 'leave.view' },
-        { name: t('nav.items.team_calendar'),       to: '/leaves/team-calendar',                       icon: CalendarDaysIcon,           perm: 'leave.team_calendar' },
-        { name: t('nav.items.overtimes'),           to: '/overtimes?status=PENDING',                   icon: ClockIcon,                  perm: 'overtime.view' },
-        { name: t('nav.items.reimbursements'),      to: '/reimbursements',                             icon: BanknotesIcon,              perm: 'reimbursement.view' },
-        { name: t('nav.items.loans'),               to: '/loans',                                      icon: BanknotesIcon,              perm: 'loan.view' },
-        { name: t('nav.items.disciplinary'),        to: '/hr/disciplinary',                            icon: ClipboardDocumentListIcon,  perm: 'disciplinary.view' },
-        { name: 'Promosi / Demosi (JIC)',           to: '/hr/jic',                                     icon: ClipboardDocumentListIcon,  perm: 'jic.view' },
-        { name: 'Mutasi Karyawan',                  to: '/hr/transfers',                               icon: ArrowsRightLeftIcon,        perm: 'employee_transfer.view' },
-        { name: t('nav.items.severance'),           to: '/hr/severance',                               icon: CurrencyDollarIcon,         perm: 'severance.view' },
-        // Sprint 4 / OFF-5 — PHK formal workflow (multi-step approval)
-        { name: 'Termination (PHK)',                to: '/hr/terminations',                            icon: NoSymbolIcon,               perm: 'termination.view' },
-        { name: t('nav.items.resignations'),        to: '/hr/resignations',                            icon: ArrowLeftStartOnRectangleIcon, perm: 'resignation.view' },
-        // Sprint 4 / OFF-1 — Exit Interview + analytics turnover
-        { name: 'Exit Interviews',                  to: '/hr/exit-interviews',                         icon: ChatBubbleLeftRightIcon,    perm: 'exit_interview.view' },
-        { name: t('nav.items.onboarding'),          to: '/hr/onboarding',                              icon: ClipboardDocumentListIcon,  perm: 'onboarding.view' },
-        // Sprint 2 polish — Probation Tracker (HIRE-1)
-        { name: 'Probation Tracker',                to: '/hr/probation',                               icon: ExclamationTriangleIcon,    perm: 'employee.update' },
-        // Sprint 3 / OD-2 — Individual Development Plan
-        { name: 'Development Plan (IDP)',           to: '/hr/idp',                                     icon: ChartBarIcon,               perm: 'idp.view' },
-        { name: t('nav.items.assets'),              to: '/hr/assets',                                  icon: BuildingOffice2Icon,        perm: 'asset.view' },
-        { name: t('nav.items.business_trips'),      to: '/travel',                                     icon: ClipboardDocumentListIcon,  perm: 'business_trip.view' },
-        { name: 'Manpower Planning (MPP)',          to: '/recruitment/mpp',                            icon: ClipboardDocumentListIcon,  perm: 'mpp.view' },
-        { name: t('nav.items.recruitment'),         to: '/recruitment/jobs',                           icon: UsersIcon,                  perm: 'recruitment.view' },
-        { name: 'Career Portal',                    to: '/recruitment/career-settings',                icon: UsersIcon,                  perm: 'careers.manage' },
-        { name: 'Online Tests',                     to: '/recruitment/online-tests',                   icon: ClipboardDocumentListIcon,  perm: 'online_tests.view' },
-        { name: 'Question Bank',                    to: '/recruitment/online-test-bank',               icon: ClipboardDocumentListIcon,  perm: 'online_tests.manage' },
-        { name: 'Test Assignments',                 to: '/recruitment/online-test-assignments',        icon: ClipboardDocumentListIcon,  perm: 'online_tests.view' },
-        { name: t('nav.items.helpdesk'),            to: '/helpdesk/tickets',                           icon: ClipboardDocumentListIcon,  perm: 'helpdesk.view' },
-        { name: t('nav.items.training'),            to: '/training',                                   icon: ClipboardDocumentListIcon,  perm: 'training.view' },
-        { name: t('nav.items.certificates'),        to: '/certificates',                               icon: ClipboardDocumentListIcon,  perm: 'certificate.view' },
-        { name: t('nav.items.performance'),         to: '/performance',                                icon: ChartBarIcon,               perm: 'performance.view' },
-        // ─── Horizon 1-3 — HR analytics & talent ───────────────
-        // H1.4 Recruitment Funnel — bottleneck pipeline + stale candidates
-        { name: 'Recruitment Funnel',                to: '/recruitment/funnel',                         icon: FunnelIcon,                 perm: 'recruitment.view' },
-        // H2.6 Turnover Analytics — turnover rate + early attrition
-        { name: 'Turnover Analytics',                to: '/hr/turnover-analytics',                      icon: UserMinusIcon,              perm: 'turnover.view' },
-        // H2.2 Goals Cascading Tree — visualisasi alignment goals
-        { name: 'Goals Cascading',                   to: '/performance/goals-tree',                     icon: ShareIcon,                  perm: 'performance.view' },
-        // H3.1 Competency Library — master + position profile + gap
-        { name: 'Competency Library',                to: '/hr/competencies',                            icon: AcademicCapIcon,            perm: 'employee.update' },
-        // H3.2 Succession Planning — critical positions + successor coverage
-        { name: 'Succession Planning',               to: '/hr/succession',                              icon: KeyIcon,                    perm: 'employee.update' },
-        // H2.4 Candidate Scoring Config — bobot kriteria + bulk recompute
-        { name: 'Candidate Scoring',                 to: '/recruitment/candidate-scoring',              icon: ChartBarIcon,               perm: 'recruitment.manage' },
-      ].filter(i => ! i.perm || can(i.perm)),
-    },
-    {
-      title: t('nav.payroll'),
-      items: [
-        { name: t('nav.items.payroll_periods'), to: '/payroll/periods',        icon: CurrencyDollarIcon,        perm: 'payroll.view' },
-        { name: t('nav.items.payslips'),        to: '/payslips',                icon: ClipboardDocumentListIcon, perm: 'payslip.view_all' },
-        // Bonus Engine — Sprint 16+ backend, Sprint 19+ UI. Lihat docs/BONUS_ENGINE.md
-        { name: 'Bonus Schemes',                to: '/payroll/bonus/schemes',  icon: BanknotesIcon,             perm: 'bonus.manage' },
-        { name: 'Bonus Runs',                   to: '/payroll/bonus/runs',     icon: BanknotesIcon,             perm: 'bonus.view' },
-        // ─── Horizon 1-2 — Payroll planning & simulation ───────
-        // H1.8 THR Planning Dashboard — proyeksi total THR per tahun
-        { name: 'THR Planning',                 to: '/payroll/thr-planning',   icon: GiftIcon,                  perm: 'payroll.view' },
-        // H2.7 Payroll Simulation — what-if + compare + reverse THP
-        { name: 'Simulasi Payroll',             to: '/payroll/simulate',       icon: CalculatorIcon,            perm: 'payroll.simulate' },
-      ].filter(i => ! i.perm || can(i.perm)),
-    },
-    {
-      title: t('nav.master_data'),
-      items: [
-        { name: t('nav.items.org_structure'),      to: '/master/org-structure',      icon: BuildingOffice2Icon,        perm: 'department.view' },
-        { name: 'Master Jabatan Kunci',            to: '/master/organization-roles', icon: ShieldCheckIcon,            perm: 'org_structure.view' },
-        { name: t('nav.items.branches'),           to: '/master/branches',           icon: BuildingOffice2Icon,        perm: 'branch.view' },
-        { name: t('nav.items.work_locations'),     to: '/master/work-locations',     icon: BuildingOffice2Icon,        perm: 'branch.view' },
-        { name: t('nav.items.departments'),        to: '/master/departments',        icon: BuildingOffice2Icon,        perm: 'department.view' },
-        { name: t('nav.items.positions'),          to: '/master/positions',          icon: BuildingOffice2Icon,        perm: 'position.view' },
-        { name: 'Master Jabatan',                  to: '/master/job-titles',         icon: BuildingOffice2Icon,        perm: 'job_title.view' },
-        { name: t('nav.items.job_grades'),         to: '/master/job-grades',         icon: BuildingOffice2Icon,        perm: 'position.view' },
-        // Migration #065 — Pipeline rekrutmen custom + jenis test online
-        { name: 'Pipeline Rekrutmen',              to: '/master/recruitment-pipelines', icon: ClipboardDocumentListIcon, perm: 'recruitment_pipeline.view' },
-        { name: 'Jenis Test Online',               to: '/master/online-test-categories', icon: AcademicCapIcon,         perm: 'online_tests.view' },
-        { name: t('nav.items.shifts'),             to: '/master/shifts',             icon: ClockIcon,                  perm: 'shift.view' },
-        { name: t('nav.items.shift_assignments'),  to: '/master/shift-assignments',  icon: ClockIcon,                  perm: 'shift.view' },
-        { name: t('nav.items.shift_patterns'),     to: '/master/shift-patterns',     icon: CalendarDaysIcon,           perm: 'shift_pattern.view' },
-        { name: t('nav.items.leave_types'),        to: '/master/leave-types',        icon: CalendarDaysIcon,           perm: 'leave.manage_types' },
-        { name: t('nav.items.payroll_components'), to: '/master/payroll-components', icon: CurrencyDollarIcon,         perm: 'payroll.manage' },
-        { name: t('nav.items.allowances'),         to: '/master/allowances',         icon: BanknotesIcon,              perm: 'payroll.manage' },
-        // Cost Center master + budget vs actual report. Lihat docs/COST_CENTER.md.
-        { name: 'Cost Center',                     to: '/master/cost-centers',       icon: CurrencyDollarIcon,         perm: 'cost_center.view' },
-        { name: t('nav.items.regulations'),        to: '/master/regulations',        icon: ClipboardDocumentListIcon,  perm: 'settings.manage' },
-        { name: t('nav.items.contract_templates'), to: '/master/contract-templates', icon: ClipboardDocumentListIcon,  perm: 'settings.manage' },
-        { name: t('nav.items.approval_chains'),    to: '/master/approval-chains',    icon: ShieldCheckIcon,            perm: 'settings.manage' },
-        { name: t('nav.items.task_templates'),     to: '/master/task-templates',     icon: ClipboardDocumentListIcon,  perm: 'onboarding.manage' },
-      ].filter(i => ! i.perm || can(i.perm)),
-    },
-    {
-      title: t('nav.reports'),
-      items: [
-        { name: t('nav.items.reports_main'), to: '/reports', icon: ChartBarIcon, perm: 'report.view' },
-        // Sprint 4 / CC-5 — Compliance Reports (WLKP, BPJS, PKWT, PHK, audit, turnover)
-        { name: 'Compliance Reports',        to: '/hr/compliance-reports', icon: DocumentChartBarIcon, perm: 'compliance.report.view' },
-      ].filter(i => ! i.perm || can(i.perm)),
-    },
-    // ─── Horizon 4 — Strategic AI & Intelligence Platform ──────
-    {
-      title: 'Intelligence',
-      items: [
-        // H4.1 AI HR Copilot — chat assistant dengan PII redactor
-        { name: 'AI HR Copilot',             to: '/hr/ai-copilot',           icon: SparklesIcon,              perm: 'ai.use' },
-        // H4.4 Pulse Survey aggregates (manage/dashboard) — HR-only
-        { name: 'Pulse Survey Manage',       to: '/hr/pulse-survey?tab=manage', icon: HeartIcon,              perm: 'pulse_survey.manage' },
-        // H4.3 Workforce Scenario Modeling — Monte Carlo
-        { name: 'Workforce Scenarios',       to: '/hr/workforce-scenarios',  icon: PresentationChartLineIcon, perm: 'workforce.simulate' },
-        // H4.5 Compensation Intelligence — compa-ratio, equity, bands
-        { name: 'Compensation Intel',        to: '/hr/compensation-intel',   icon: ScaleIcon,                 perm: 'compensation.analyze' },
-      ].filter(i => ! i.perm || can(i.perm)),
-    },
-    {
-      title: t('nav.admin'),
-      items: [
-        { name: t('nav.items.users'),      to: '/admin/users',      icon: UsersIcon,                  perm: 'user.manage' },
-        { name: t('nav.items.roles'),      to: '/admin/roles',      icon: ShieldCheckIcon,            perm: 'role.manage' },
-        { name: t('nav.items.audit_logs'), to: '/admin/audit-logs', icon: ClipboardDocumentListIcon,  perm: 'audit.view' },
-        { name: t('nav.items.companies'),  to: '/admin/companies',  icon: BuildingOffice2Icon,        superAdmin: true },
-        { name: t('nav.items.settings'),   to: '/admin/settings',   icon: Cog6ToothIcon,              perm: 'settings.manage' },
-        { name: 'Email Settings',          to: '/admin/email-settings', icon: Cog6ToothIcon,          perm: 'settings.manage' },
-        // H1.9 WhatsApp Provider config
-        { name: 'WhatsApp Settings',       to: '/admin/whatsapp-settings', icon: ChatBubbleLeftEllipsisIcon, perm: 'settings.manage' },
-      ].filter(i => (! i.perm || can(i.perm)) && (! i.superAdmin || auth.isSuperAdmin)),
-    },
-  ].filter(g => g.items.length > 0)
-})
 
 async function loadNotifications() {
   try {
@@ -258,15 +83,24 @@ async function markAllRead() {
 
 async function logout() {
   await auth.logout()
+  menuStore.reset()
   router.push('/login')
 }
 
 let pollTimer = null
 onMounted(() => {
+  // Fetch menu sekali saat layout mount. Kalau gagal, MenuStore set
+  // fallback minimal supaya user setidaknya bisa logout & ke dashboard.
+  menuStore.load()
   loadNotifications()
   pollTimer = setInterval(loadNotifications, 60000)
 })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
+
+// Re-fetch menu kalau user berubah (mis. login user lain di tab yang sama).
+watch(() => auth.user?.id, (newId, oldId) => {
+  if (newId && newId !== oldId) menuStore.refresh()
+})
 </script>
 
 <template>
@@ -293,22 +127,23 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
       </div>
 
       <nav class="sidebar-scroll px-3 py-4 overflow-y-auto h-[calc(100vh-4rem)]">
-        <div v-for="group in groups" :key="group.title" class="mb-5">
-          <h3 class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-[0.18em]">
-            {{ group.title }}
-          </h3>
-          <ul class="space-y-0.5">
-            <li v-for="item in group.items" :key="item.to">
-              <RouterLink :to="item.to"
-                class="nav-item group relative flex items-center gap-3 pl-3 pr-3 py-2 text-sm rounded-md text-slate-300 hover:bg-slate-800/70 hover:text-white transition-colors"
-                :class="{ 'is-active': route.path.startsWith(item.to.split('?')[0]) }">
-                <span class="active-indicator absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-primary-400 opacity-0 transition-opacity"></span>
-                <component :is="item.icon" class="w-5 h-5 flex-shrink-0 text-slate-400 group-hover:text-slate-200" />
-                <span class="truncate">{{ item.name }}</span>
-              </RouterLink>
-            </li>
-          </ul>
+        <!-- Loading state — first paint sebelum /menus/me selesai. -->
+        <div v-if="menuLoading && menuTree.length === 0" class="px-3 py-4 space-y-3">
+          <div v-for="i in 6" :key="i" class="flex flex-col gap-1.5 animate-pulse">
+            <div class="h-2.5 w-20 bg-slate-700/40 rounded"></div>
+            <div class="h-7 bg-slate-800/50 rounded-md"></div>
+            <div class="h-7 bg-slate-800/50 rounded-md"></div>
+          </div>
         </div>
+
+        <!-- Menu tree dari database. SidebarMenu render tiap node recursive. -->
+        <template v-else>
+          <SidebarMenu
+            v-for="node in menuTree"
+            :key="node.id || node.code"
+            :node="node"
+          />
+        </template>
       </nav>
     </aside>
 
@@ -551,23 +386,5 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 }
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
   background-color: rgba(148, 163, 184, 0.75);
-}
-
-/*
- * Nav item active state — corporate look dengan accent kiri tipis +
- * subtle inset background. Lebih kalem dibanding warna solid penuh,
- * cocok untuk dashboard enterprise.
- */
-.nav-item.is-active {
-  background-color: rgba(30, 41, 59, 0.85); /* slate-800 + alpha */
-  color: #fff;
-  font-weight: 500;
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.08);
-}
-.nav-item.is-active .active-indicator {
-  opacity: 1;
-}
-.nav-item.is-active :is(svg) {
-  color: #93c5fd; /* primary-300 — accent tipis */
 }
 </style>

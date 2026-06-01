@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
@@ -8,21 +8,45 @@ import { EyeIcon } from '@heroicons/vue/24/outline'
 const route = useRoute()
 const employee = ref(null)
 const balances = ref([])
+const balanceYear = ref(new Date().getFullYear())
 const contracts = ref([])
 const generatedContracts = ref([])
+const leaves = ref([])
+const leavesLoading = ref(false)
 
-onMounted(async () => {
-  const id = route.params.id
-  const [emp, bal, ctr, gen] = await Promise.allSettled([
+const STATUS_BADGE = {
+  PENDING: 'badge-yellow',
+  APPROVED: 'badge-green',
+  REJECTED: 'badge-red',
+  CANCELLED: 'badge-gray',
+}
+
+async function fetchAll(id) {
+  const [emp, bal, ctr, gen, lv] = await Promise.allSettled([
     api.get(`/employees/${id}`),
     api.get(`/leave-balances/${id}`),
     api.get(`/employees/${id}/contracts`),
     api.get('/generated-contracts', { params: { employee_id: id } }),
+    api.get('/leaves', { params: { employee_id: id, per_page: 50 } }),
   ])
   if (emp.status === 'fulfilled') employee.value = emp.value.data.data
-  if (bal.status === 'fulfilled') balances.value = bal.value.data.data
-  if (ctr.status === 'fulfilled') contracts.value = ctr.value.data.data
-  if (gen.status === 'fulfilled') generatedContracts.value = gen.value.data.data
+  if (bal.status === 'fulfilled') {
+    // LeaveController::balance returns { employee_id, year, balances: [...], today }.
+    // Sebelumnya kita salah baca `data.data` langsung sebagai array — itu sebabnya
+    // `balances.length` selalu undefined dan list di UI tidak pernah render.
+    const payload = bal.value.data?.data || {}
+    balances.value = Array.isArray(payload.balances) ? payload.balances : []
+    if (payload.year) balanceYear.value = payload.year
+  }
+  if (ctr.status === 'fulfilled') contracts.value = ctr.value.data.data || []
+  if (gen.status === 'fulfilled') generatedContracts.value = gen.value.data.data || []
+  if (lv.status === 'fulfilled') leaves.value = lv.value.data.data || []
+  leavesLoading.value = false
+}
+
+onMounted(async () => {
+  leavesLoading.value = true
+  await fetchAll(route.params.id)
 })
 
 function openGeneratedContract(c) {
@@ -33,6 +57,13 @@ function openGeneratedContract(c) {
     console.error('Gagal membuka kontrak:', e)
   })
 }
+
+const totalAllocated = computed(() =>
+  balances.value.reduce((sum, b) => sum + Number(b.allocated || 0), 0)
+)
+const totalRemaining = computed(() =>
+  balances.value.reduce((sum, b) => sum + Number(b.remaining || 0), 0)
+)
 </script>
 
 <template>
@@ -52,6 +83,7 @@ function openGeneratedContract(c) {
           <div><div class="text-gray-500">Status</div><div>{{ employee.employment_status }} · {{ employee.is_active ? 'Aktif' : 'Non-aktif' }}</div></div>
           <div><div class="text-gray-500">Bergabung</div><div>{{ fmtDate(employee.join_date) }}</div></div>
           <div><div class="text-gray-500">Telepon</div><div>{{ employee.phone || '-' }}</div></div>
+          <div><div class="text-gray-500">Jenis Kelamin</div><div>{{ employee.gender === 'F' ? 'Perempuan' : (employee.gender === 'M' ? 'Laki-laki' : '-') }}</div></div>
           <div><div class="text-gray-500">PTKP</div><div>{{ employee.ptkp_status }}</div></div>
           <div><div class="text-gray-500">Gaji Pokok</div><div>{{ fmtCurrency(employee.basic_salary) }}</div></div>
           <div><div class="text-gray-500">NPWP</div><div>{{ employee.npwp || '-' }}</div></div>
@@ -63,16 +95,84 @@ function openGeneratedContract(c) {
       </div>
 
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Saldo Cuti</span></div>
+        <div class="card-header flex items-center justify-between">
+          <span class="font-semibold">Saldo Cuti {{ balanceYear }}</span>
+          <span v-if="balances.length" class="text-xs text-gray-500">
+            Sisa <strong class="text-primary-700">{{ totalRemaining }}</strong>/{{ totalAllocated }} hari
+          </span>
+        </div>
         <div class="card-body">
-          <div v-if="balances.length === 0" class="text-sm text-gray-400">Belum ada saldo</div>
+          <div v-if="balances.length === 0" class="text-sm text-gray-400">
+            Belum ada saldo cuti yang berlaku untuk karyawan ini.
+          </div>
           <ul v-else class="text-sm divide-y divide-gray-100">
-            <li v-for="b in balances" :key="b.id" class="py-2 flex justify-between">
-              <span>{{ b.name }}</span>
-              <span class="font-medium">{{ b.remaining }}/{{ b.allocated }}</span>
+            <li v-for="b in balances" :key="b.leave_type_id" class="py-2">
+              <div class="flex justify-between items-baseline">
+                <span class="font-medium">{{ b.name }}</span>
+                <span class="font-semibold tabular-nums">
+                  {{ b.remaining }}<span class="text-gray-400">/{{ b.allocated }}</span>
+                </span>
+              </div>
+              <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                <span class="font-mono">{{ b.code }}</span>
+                <span>·</span>
+                <span>Terpakai {{ b.used }}</span>
+                <span v-if="b.is_prorated && b.prorate_factor < 1">
+                  · Prorate {{ b.months_worked }}/12 bln
+                </span>
+                <span v-if="b.carried_over > 0">
+                  · Carry-over {{ b.carried_over }} hari
+                </span>
+                <span v-if="b.is_expired" class="text-red-600 font-medium">
+                  · Kadaluwarsa
+                </span>
+              </div>
             </li>
           </ul>
         </div>
+      </div>
+    </div>
+
+    <div class="card mt-6">
+      <div class="card-header flex items-center justify-between">
+        <span class="font-semibold">Riwayat Pengajuan Cuti</span>
+        <span class="text-xs text-gray-500">{{ leaves.length }} entri</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>No. Pengajuan</th>
+              <th>Tipe</th>
+              <th>Mulai</th>
+              <th>Selesai</th>
+              <th class="text-right">Hari</th>
+              <th>Status</th>
+              <th>Alasan</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="leavesLoading">
+              <td colspan="7" class="text-center py-4 text-gray-400">Memuat...</td>
+            </tr>
+            <tr v-else-if="leaves.length === 0">
+              <td colspan="7" class="text-center py-4 text-gray-400">Belum ada pengajuan cuti</td>
+            </tr>
+            <tr v-for="l in leaves" :key="l.id">
+              <td class="font-mono text-xs">{{ l.request_number }}</td>
+              <td class="text-sm">{{ l.leave_name || l.leave_code || '-' }}</td>
+              <td class="text-sm">{{ fmtDate(l.start_date) }}</td>
+              <td class="text-sm">{{ fmtDate(l.end_date) }}</td>
+              <td class="text-right tabular-nums">{{ l.days }}</td>
+              <td>
+                <span :class="STATUS_BADGE[l.status] || 'badge-gray'">{{ l.status }}</span>
+              </td>
+              <td class="text-sm text-gray-600 max-w-md truncate" :title="l.reason">
+                {{ l.reason || '-' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
