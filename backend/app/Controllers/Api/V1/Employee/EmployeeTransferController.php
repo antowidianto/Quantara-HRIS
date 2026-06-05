@@ -76,11 +76,17 @@ class EmployeeTransferController extends ApiController
 
         $b = $db->table('employee_transfers t')
             ->select('t.*, e.full_name AS employee_name, e.employee_number, '
+                . 'newB.name AS new_branch_name, newD.name AS new_department_name, '
+                . 'newP.name AS new_position_name, newWL.name AS new_work_location_name, '
                 . 'creator.name AS creator_name, '
                 . 'approver.name AS approver_name')
-            ->join('employees e',  'e.id = t.employee_id', 'left')
-            ->join('users creator',   'creator.id = t.created_by',       'left')
-            ->join('users approver',  'approver.id = t.approver_user_id','left')
+            ->join('employees e',           'e.id = t.employee_id',           'left')
+            ->join('branches newB',         'newB.id = t.new_branch_id',      'left')
+            ->join('departments newD',      'newD.id = t.new_department_id',  'left')
+            ->join('positions newP',        'newP.id = t.new_position_id',    'left')
+            ->join('work_locations newWL',  'newWL.id = t.new_work_location_id','left')
+            ->join('users creator',         'creator.id = t.created_by',       'left')
+            ->join('users approver',        'approver.id = t.approver_user_id','left')
             ->where('t.deleted_at IS NULL');
         $this->tenant()->applyScope($b, 't.company_id');
 

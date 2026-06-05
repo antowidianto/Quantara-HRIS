@@ -394,7 +394,7 @@ class TalentPoolService
                 $perfRow = $db->table('performance_reviews')
                     ->selectAvg($scoreCol, 'avg_score')
                     ->where('employee_id', $eid)
-                    ->where("{$scoreCol} IS NOT NULL", null, false)
+                    ->where($scoreCol . ' IS NOT NULL', null, false)
                     ->get()->getRowArray();
                 $perf = ! empty($perfRow['avg_score']) ? min(5, ((float) $perfRow['avg_score']) / 20) : 0.0;
             }

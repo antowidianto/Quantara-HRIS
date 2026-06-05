@@ -16,6 +16,7 @@ dijalankan, dan bagaimana setup-nya di Linux/Windows/Docker.
 | Command                          | Frekuensi              | Tujuan                                                       |
 |----------------------------------|------------------------|--------------------------------------------------------------|
 | `hr:archive-audit`               | Mingguan, Min 00:00    | Soft-archive audit_logs > 730 hari (UU PDP & ISO 27001)      |
+| `audit:verify-chain`             | Mingguan, Min 02:00    | Verifikasi integrity hash chain audit_logs (Sprint A / B6)   |
 | `hr:leave-yearend`               | Tahunan, 1 Jan 01:00   | Carry-over saldo cuti dari tahun lama → baru (basis YEAR_END)|
 | `hr:leave-anniversary-carry`     | Harian, 00:30          | Reset saldo cuti per tanggal join (basis ANNIVERSARY)        |
 | `hr:notify-carry-over-cap`       | Bulanan, tanggal 1     | H-30 reminder kalau sisa cuti hampir hangus                  |
@@ -75,9 +76,12 @@ LOG_DIR=/var/www/hris/backend/writable/logs
 0  8 * * *     $HRIS_BIN hr:check-probation        >> $LOG_DIR/probation.log 2>&1
 50 23 * * *    $HRIS_BIN hr:check-offer-expiry     >> $LOG_DIR/offer-expiry.log 2>&1
 
-# Mingguan — Sabtu malam selfie cleanup, Minggu malam audit archive
+# Mingguan — Sabtu malam selfie cleanup, Minggu malam audit archive,
+# Minggu pagi verify chain (sebelum operator masuk Senin pagi).
+# Verify chain (Sprint A / B6) — alert ke ops kalau ada mismatch.
 0 4 * * 6      $HRIS_BIN hr:cleanup-attachments    >> $LOG_DIR/attachments-cleanup.log 2>&1
 0 0 * * 0      $HRIS_BIN hr:archive-audit          >> $LOG_DIR/archive-audit.log 2>&1
+0 2 * * 0      $HRIS_BIN audit:verify-chain --quiet >> $LOG_DIR/audit-verify-chain.log 2>&1
 
 # Bulanan — H-30 reminder cuti hangus
 0 9 1 * *      $HRIS_BIN hr:notify-carry-over-cap  >> $LOG_DIR/carry-over-cap.log 2>&1

@@ -1,0 +1,247 @@
+# HRIS — Docker Compose untuk PRODUCTION.
+#
+# Sprint F / G2. Berbeda dengan docker-compose.yml (dev) di:
+#   - Pakai image `:latest` yang sudah di-build via CI (tidak build inline)
+#   - Tidak mount source code — image self-contained
+#   - php-fpm + nginx terpisah (nginx terminate TLS, fpm di internal network)
+#   - MySQL & Redis di-bind ke 127.0.0.1 (akses lewat tunnel/private link saja)
+#   - Healthcheck wajib ada di semua service
+#   - Resource limit konkret per service untuk anti-noisy-neighbor
+#   - Logging driver `json-file` dengan rotation supaya disk tidak penuh
+#
+# Build & push image (sebelum deploy):
+#   docker build -t registry.example.com/hris/backend:1.0.0 -f backend/Dockerfile backend/
+#   docker build -t registry.example.com/hris/frontend:1.0.0 -f frontend/Dockerfile frontend/
+#   docker push registry.example.com/hris/backend:1.0.0
+#   docker push registry.example.com/hris/frontend:1.0.0
+#
+# Deploy:
+#   export HRIS_VERSION=1.0.0
+#   export HRIS_REGISTRY=registry.example.com/hris
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Pakai bareng `scripts/deploy.sh` untuk zero-downtime + rollback.
+# Lihat docs/DEPLOYMENT.md.
+
+name: hris-prod
+
+services:
+  # ─── MySQL 8 ─────────────────────────────────────────────────────
+  # Port di-bind ke 127.0.0.1 supaya tidak exposed ke public; akses dari
+  # luar harus lewat SSH tunnel atau bastion. Production kelas enterprise
+  # disarankan pakai managed DB (RDS/Cloud SQL) dan service ini di-skip.
+  mysql:
+    image: mysql:8.0
+    container_name: hris-prod-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD wajib di-set}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-hris_db}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER wajib di-set}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD wajib di-set}
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --innodb-buffer-pool-size=512M
+      - --max-connections=200
+      - --slow-query-log=ON
+      - --long-query-time=2
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backups/mysql:/backups
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ─── Redis (cache + session + queue) ─────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: hris-prod-redis
+    restart: always
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "512mb"
+      - --maxmemory-policy
+      - "allkeys-lru"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD wajib di-set}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─── Backend (PHP-FPM 8.2) ───────────────────────────────────────
+  # Image self-contained dari multi-stage Dockerfile (composer --no-dev +
+  # opcache validate_timestamps=0). Mount writable saja untuk persist
+  # logs/uploads, source code di-bake ke image.
+  backend:
+    image: ${HRIS_REGISTRY:-hris}/backend:${HRIS_VERSION:-latest}
+    container_name: hris-prod-backend
+    restart: always
+    env_file:
+      - .env.prod
+    volumes:
+      # writable wajib volume — kalau kena container restart, logs +
+      # uploads + cache file tidak hilang.
+      - backend_writable:/var/www/html/writable
+      # .env opsional di-mount kalau env_file tidak cukup (mis. nilai
+      # multi-line atau secret manager export). .env.prod di-load via
+      # env_file di atas; mount ini sebagai backup.
+      - ./.env.prod:/var/www/html/.env:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(0);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.5"
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "10"
+
+  # ─── Cron worker (spark scheduled tasks) ─────────────────────────
+  # Container terpisah supaya cron tidak share workspace dengan php-fpm
+  # (anti race condition di file lock + restart isolation).
+  # Lihat docs/CRON_JOBS.md untuk daftar command yang dijadwalkan.
+  cron:
+    image: ${HRIS_REGISTRY:-hris}/backend:${HRIS_VERSION:-latest}
+    container_name: hris-prod-cron
+    restart: always
+    env_file:
+      - .env.prod
+    volumes:
+      - backend_writable:/var/www/html/writable
+      - ./.env.prod:/var/www/html/.env:ro
+      - ./deploy/cron.txt:/etc/crontabs/www-data:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    user: root  # crond butuh root, drop ke www-data lewat su -s di entrypoint
+    command:
+      - sh
+      - -c
+      - "crond -f -l 8"
+    healthcheck:
+      test: ["CMD", "pgrep", "crond"]
+      interval: 60s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "10"
+
+  # ─── Nginx (TLS terminator + static SPA) ─────────────────────────
+  # Serve frontend dist/ + reverse proxy ke backend php-fpm.
+  # TLS cert dibawa lewat volume mount (Let's Encrypt / ACM / dst).
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hris-prod-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/conf.d:/etc/nginx/conf.d:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+      - frontend_dist:/usr/share/nginx/html:ro
+      - backend_writable:/var/www/html/writable:ro
+    depends_on:
+      - backend
+      - frontend-build
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "10"
+
+  # ─── Frontend dist builder (one-shot) ────────────────────────────
+  # Container ini hanya menyalin dist/ dari image frontend ke volume
+  # supaya nginx bisa serve static. Run sekali per deploy, lalu exit.
+  # Restart "no" supaya tidak loop.
+  frontend-build:
+    image: ${HRIS_REGISTRY:-hris}/frontend:${HRIS_VERSION:-latest}
+    container_name: hris-prod-frontend-build
+    restart: "no"
+    volumes:
+      - frontend_dist:/dist
+    command:
+      - sh
+      - -c
+      - "cp -rT /usr/share/nginx/html /dist && echo 'Frontend dist copied to volume.'"
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_writable:
+    driver: local
+  frontend_dist:
+    driver: local
+
+networks:
+  default:
+    name: hris-prod
+    driver: bridge
