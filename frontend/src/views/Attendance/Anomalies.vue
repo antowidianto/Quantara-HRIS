@@ -16,6 +16,7 @@ import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useConfirm, promptDialog } from '@/composables/useConfirm'
+import { useI18n } from '@/locales'
 import {
   ShieldExclamationIcon, ExclamationTriangleIcon, CheckCircleIcon,
   DevicePhoneMobileIcon, NoSymbolIcon, HandThumbUpIcon, FlagIcon,
@@ -23,6 +24,7 @@ import {
 
 const toast = useToast()
 const { confirm } = useConfirm()
+const { t } = useI18n()
 
 const tab = ref('anomalies') // 'anomalies' | 'devices'
 
@@ -66,7 +68,7 @@ async function fetchAnomalies() {
     anomalies.value = data.items || data.rows || data || []
     aTotal.value = data.total || anomalies.value.length || 0
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat anomali')
+    toast.error(e.response?.data?.message || t('attendance.anomaly.load_failed'))
   } finally {
     aLoading.value = false
   }
@@ -92,7 +94,7 @@ async function fetchDevices() {
     const res = await api.get('/attendance-devices')
     devices.value = res.data?.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat devices')
+    toast.error(e.response?.data?.message || t('attendance.anomaly.load_devices_failed'))
   } finally {
     dLoading.value = false
   }
@@ -105,7 +107,7 @@ function openReview(row) {
 async function submitReview() {
   if (! reviewing.value) return
   if (reviewNote.value.trim().length < 5) {
-    toast.warning('Catatan review min 5 karakter')
+    toast.warning(t('attendance.anomaly.review_min'))
     return
   }
   reviewSubmitting.value = true
@@ -113,13 +115,13 @@ async function submitReview() {
     await api.post(`/attendance-anomaly/${reviewing.value.id}/review`, {
       note: reviewNote.value.trim(),
     })
-    toast.success('Anomali ditandai sudah direview')
+    toast.success(t('attendance.anomaly.reviewed_ok'))
     reviewing.value = null
     reviewNote.value = ''
     fetchAnomalies()
     fetchStats()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan review')
+    toast.error(e.response?.data?.message || t('attendance.anomaly.review_failed'))
   } finally {
     reviewSubmitting.value = false
   }
@@ -127,41 +129,41 @@ async function submitReview() {
 
 async function trustDevice(d) {
   const ok = await confirm({
-    title: 'Trust Device?',
-    message: `Device "${d.device_name || d.device_fingerprint?.substring(0, 16)}" akan ditandai sebagai trusted dan tidak akan men-trigger flag NEW_DEVICE lagi.`,
-    confirmText: 'Trust',
+    title: t('attendance.anomaly.trust_title'),
+    message: t('attendance.anomaly.trust_message', { name: d.device_name || d.device_fingerprint?.substring(0, 16) }),
+    confirmText: t('attendance.anomaly.trust_confirm'),
     type: 'info',
   })
   if (! ok) return
   try {
     await api.post(`/attendance-devices/${d.id}/trust`)
-    toast.success('Device di-trust')
+    toast.success(t('attendance.anomaly.trusted_ok'))
     fetchDevices()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal trust device')
+    toast.error(e.response?.data?.message || t('attendance.anomaly.trust_failed'))
   }
 }
 
 async function blockDevice(d) {
   const reason = await promptDialog({
-    title: `Blokir device "${d.device_name || 'unknown'}"`,
-    message: 'Alasan akan ditampilkan di audit log.',
-    inputLabel: 'Alasan blok (min 5 karakter)',
+    title: t('attendance.anomaly.block_title', { name: d.device_name || 'unknown' }),
+    message: t('attendance.anomaly.block_message'),
+    inputLabel: t('attendance.anomaly.block_reason_label'),
     inputType: 'textarea',
     inputRequired: true,
-    okText: 'Blokir',
+    okText: t('attendance.anomaly.block_ok'),
     variant: 'danger',
   })
   if (! reason || reason.trim().length < 5) {
-    if (reason !== null) toast.warning('Alasan blok min 5 karakter')
+    if (reason !== null) toast.warning(t('attendance.anomaly.block_min'))
     return
   }
   try {
     await api.post(`/attendance-devices/${d.id}/block`, { reason: reason.trim() })
-    toast.success('Device diblokir')
+    toast.success(t('attendance.anomaly.blocked_ok'))
     fetchDevices()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal blokir device')
+    toast.error(e.response?.data?.message || t('attendance.anomaly.block_failed'))
   }
 }
 
@@ -181,15 +183,15 @@ function fmtDateOnly(d) {
   return new Date(d).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-const flagDescriptions = {
-  MOCK_GPS:        { label: 'Mock GPS terdeteksi', color: 'bg-red-100 text-red-700' },
-  LOW_ACCURACY:    { label: 'Akurasi GPS rendah',  color: 'bg-amber-100 text-amber-700' },
-  NEW_DEVICE:      { label: 'Device baru',          color: 'bg-blue-100 text-blue-700' },
-  BLOCKED_DEVICE:  { label: 'Device di-block',      color: 'bg-red-100 text-red-700' },
-  IP_MISMATCH:     { label: 'IP tidak biasa',       color: 'bg-amber-100 text-amber-700' },
-  GEOFENCE_FAR:    { label: 'Jauh dari geofence',   color: 'bg-amber-100 text-amber-700' },
-  NO_SELFIE:       { label: 'Tidak ada selfie',     color: 'bg-gray-100 text-gray-700' },
-}
+const flagDescriptions = computed(() => ({
+  MOCK_GPS:        { label: t('attendance.anomaly.flag_mock_gps'),       color: 'bg-red-100 text-red-700' },
+  LOW_ACCURACY:    { label: t('attendance.anomaly.flag_low_accuracy'),   color: 'bg-amber-100 text-amber-700' },
+  NEW_DEVICE:      { label: t('attendance.anomaly.flag_new_device'),     color: 'bg-blue-100 text-blue-700' },
+  BLOCKED_DEVICE:  { label: t('attendance.anomaly.flag_blocked_device'), color: 'bg-red-100 text-red-700' },
+  IP_MISMATCH:     { label: t('attendance.anomaly.flag_ip_mismatch'),    color: 'bg-amber-100 text-amber-700' },
+  GEOFENCE_FAR:    { label: t('attendance.anomaly.flag_geofence_far'),   color: 'bg-amber-100 text-amber-700' },
+  NO_SELFIE:       { label: t('attendance.anomaly.flag_no_selfie'),      color: 'bg-gray-100 text-gray-700' },
+}))
 
 function scoreColor(score) {
   const s = Number(score) || 0
@@ -210,11 +212,10 @@ onMounted(() => {
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2">
           <ShieldExclamationIcon class="w-6 h-6 text-red-600" />
-          Anomali Absensi & Device Management
+          {{ t('attendance.anomaly.title') }}
         </h1>
         <p class="text-sm text-gray-500">
-          Review absensi yang punya skor anomali tinggi (mock GPS, akurasi rendah, dll.)
-          dan kelola device yang dipakai karyawan.
+          {{ t('attendance.anomaly.subtitle') }}
         </p>
       </div>
       <div class="flex gap-1 bg-gray-100 rounded-lg p-1">
@@ -223,14 +224,14 @@ onMounted(() => {
           :class="tab === 'anomalies' ? 'bg-white text-primary-700 shadow' : 'text-gray-600'"
           @click="tab = 'anomalies'"
         >
-          <FlagIcon class="w-4 h-4 inline -mt-0.5" /> Anomali
+          <FlagIcon class="w-4 h-4 inline -mt-0.5" /> {{ t('attendance.anomaly.tab_anomalies') }}
         </button>
         <button
           class="px-3 py-1.5 text-sm rounded-md transition"
           :class="tab === 'devices' ? 'bg-white text-primary-700 shadow' : 'text-gray-600'"
           @click="tab = 'devices'; fetchDevices()"
         >
-          <DevicePhoneMobileIcon class="w-4 h-4 inline -mt-0.5" /> Device
+          <DevicePhoneMobileIcon class="w-4 h-4 inline -mt-0.5" /> {{ t('attendance.anomaly.tab_devices') }}
         </button>
       </div>
     </div>
@@ -240,19 +241,19 @@ onMounted(() => {
       <!-- Stats -->
       <div v-if="stats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div class="card p-3">
-          <div class="text-xs text-gray-500">Total Anomali</div>
+          <div class="text-xs text-gray-500">{{ t('attendance.anomaly.stat_total') }}</div>
           <div class="text-xl font-bold">{{ stats.total ?? 0 }}</div>
         </div>
         <div class="card p-3">
-          <div class="text-xs text-gray-500">Sudah Direview</div>
+          <div class="text-xs text-gray-500">{{ t('attendance.anomaly.stat_reviewed') }}</div>
           <div class="text-xl font-bold text-emerald-600">{{ stats.reviewed ?? 0 }}</div>
         </div>
         <div class="card p-3">
-          <div class="text-xs text-gray-500">Belum Direview</div>
+          <div class="text-xs text-gray-500">{{ t('attendance.anomaly.stat_unreviewed') }}</div>
           <div class="text-xl font-bold text-amber-600">{{ stats.unreviewed ?? 0 }}</div>
         </div>
         <div class="card p-3">
-          <div class="text-xs text-gray-500">Skor Tertinggi</div>
+          <div class="text-xs text-gray-500">{{ t('attendance.anomaly.stat_max_score') }}</div>
           <div class="text-xl font-bold text-red-600">{{ stats.max_score ?? 0 }}</div>
         </div>
       </div>
@@ -261,27 +262,27 @@ onMounted(() => {
       <div class="card mb-4">
         <div class="card-body grid grid-cols-1 md:grid-cols-5 gap-3">
           <div>
-            <label class="label text-xs">Skor Minimal</label>
+            <label class="label text-xs">{{ t('attendance.anomaly.filter_min_score') }}</label>
             <input v-model.number="aFilters.min_score" type="number" min="0" max="100" class="input" />
           </div>
           <div>
-            <label class="label text-xs">Status Review</label>
+            <label class="label text-xs">{{ t('attendance.anomaly.filter_review_status') }}</label>
             <select v-model="aFilters.reviewed" class="input">
-              <option value="">Semua</option>
-              <option :value="0">Belum direview</option>
-              <option :value="1">Sudah direview</option>
+              <option value="">{{ t('attendance.anomaly.filter_all') }}</option>
+              <option :value="0">{{ t('attendance.anomaly.filter_unreviewed') }}</option>
+              <option :value="1">{{ t('attendance.anomaly.filter_reviewed') }}</option>
             </select>
           </div>
           <div>
-            <label class="label text-xs">Dari Tanggal</label>
+            <label class="label text-xs">{{ t('attendance.anomaly.filter_from') }}</label>
             <input v-model="aFilters.from_date" type="date" class="input" />
           </div>
           <div>
-            <label class="label text-xs">Sampai Tanggal</label>
+            <label class="label text-xs">{{ t('attendance.anomaly.filter_to') }}</label>
             <input v-model="aFilters.to_date" type="date" class="input" />
           </div>
           <div class="flex items-end">
-            <button class="btn-primary w-full" @click="applyFilters">Filter</button>
+            <button class="btn-primary w-full" @click="applyFilters">{{ t('common.filter') }}</button>
           </div>
         </div>
       </div>
@@ -291,23 +292,23 @@ onMounted(() => {
         <table class="w-full text-sm">
           <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
-              <th class="px-3 py-2 text-left">Karyawan</th>
-              <th class="px-3 py-2 text-left">Tanggal</th>
-              <th class="px-3 py-2 text-left">Clock In/Out</th>
-              <th class="px-3 py-2 text-center">Skor</th>
-              <th class="px-3 py-2 text-left">Flags</th>
-              <th class="px-3 py-2 text-left">Status</th>
-              <th class="px-3 py-2 text-right">Aksi</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_employee') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_date') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_clock') }}</th>
+              <th class="px-3 py-2 text-center">{{ t('attendance.anomaly.col_score') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_flags') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_status') }}</th>
+              <th class="px-3 py-2 text-right">{{ t('attendance.anomaly.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-if="aLoading">
-              <td colspan="7" class="px-4 py-6 text-center text-gray-400">Memuat…</td>
+              <td colspan="7" class="px-4 py-6 text-center text-gray-400">{{ t('attendance.anomaly.loading') }}</td>
             </tr>
             <tr v-else-if="!anomalies.length">
               <td colspan="7" class="px-4 py-12 text-center text-gray-400">
                 <CheckCircleIcon class="w-10 h-10 mx-auto mb-2 text-emerald-300" />
-                Tidak ada anomali sesuai filter
+                {{ t('attendance.anomaly.no_anomalies') }}
               </td>
             </tr>
             <tr v-for="a in anomalies" :key="a.id" class="hover:bg-gray-50">
@@ -317,8 +318,8 @@ onMounted(() => {
               </td>
               <td class="px-3 py-2">{{ fmtDateOnly(a.attendance_date) }}</td>
               <td class="px-3 py-2 text-xs">
-                <div v-if="a.clock_in_time">In: {{ a.clock_in_time }}</div>
-                <div v-if="a.clock_out_time">Out: {{ a.clock_out_time }}</div>
+                <div v-if="a.clock_in_time">{{ t('attendance.anomaly.in_prefix', { time: a.clock_in_time }) }}</div>
+                <div v-if="a.clock_out_time">{{ t('attendance.anomaly.out_prefix', { time: a.clock_out_time }) }}</div>
               </td>
               <td class="px-3 py-2 text-center">
                 <span :class="['inline-block px-2 py-0.5 rounded border text-xs font-bold', scoreColor(a.anomaly_score)]">
@@ -340,15 +341,15 @@ onMounted(() => {
                   <CheckCircleIcon class="w-3.5 h-3.5" /> {{ fmtDate(a.anomaly_reviewed_at) }}
                 </span>
                 <span v-else class="text-amber-700 flex items-center gap-1">
-                  <ExclamationTriangleIcon class="w-3.5 h-3.5" /> Belum direview
+                  <ExclamationTriangleIcon class="w-3.5 h-3.5" /> {{ t('attendance.anomaly.reviewed_label') }}
                 </span>
               </td>
               <td class="px-3 py-2 text-right">
                 <button v-if="!a.anomaly_reviewed_at" class="btn-secondary text-xs" @click="openReview(a)">
-                  Review
+                  {{ t('attendance.anomaly.review') }}
                 </button>
-                <button v-else class="btn-secondary text-xs" @click="openReview(a)" title="Lihat / tambahkan catatan">
-                  Lihat
+                <button v-else class="btn-secondary text-xs" @click="openReview(a)" :title="t('attendance.anomaly.view_add_note')">
+                  {{ t('attendance.anomaly.view') }}
                 </button>
               </td>
             </tr>
@@ -363,20 +364,20 @@ onMounted(() => {
         <table class="w-full text-sm">
           <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
             <tr>
-              <th class="px-3 py-2 text-left">User / Karyawan</th>
-              <th class="px-3 py-2 text-left">Device</th>
-              <th class="px-3 py-2 text-left">First/Last Seen</th>
-              <th class="px-3 py-2 text-center">Usage</th>
-              <th class="px-3 py-2 text-left">Status</th>
-              <th class="px-3 py-2 text-right">Aksi</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_user') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_device') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_seen') }}</th>
+              <th class="px-3 py-2 text-center">{{ t('attendance.anomaly.col_usage') }}</th>
+              <th class="px-3 py-2 text-left">{{ t('attendance.anomaly.col_status') }}</th>
+              <th class="px-3 py-2 text-right">{{ t('attendance.anomaly.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-if="dLoading">
-              <td colspan="6" class="px-4 py-6 text-center text-gray-400">Memuat…</td>
+              <td colspan="6" class="px-4 py-6 text-center text-gray-400">{{ t('attendance.anomaly.loading') }}</td>
             </tr>
             <tr v-else-if="!devices.length">
-              <td colspan="6" class="px-4 py-12 text-center text-gray-400">Belum ada device tercatat</td>
+              <td colspan="6" class="px-4 py-12 text-center text-gray-400">{{ t('attendance.anomaly.no_devices') }}</td>
             </tr>
             <tr v-for="d in devices" :key="d.id" class="hover:bg-gray-50"
               :class="{ 'bg-red-50/40': d.is_blocked }">
@@ -385,29 +386,29 @@ onMounted(() => {
                 <div class="text-xs text-gray-500">{{ d.employee_number || '-' }}</div>
               </td>
               <td class="px-3 py-2">
-                <div class="text-sm">{{ d.device_name || 'Unknown device' }}</div>
+                <div class="text-sm">{{ d.device_name || t('attendance.anomaly.unknown_device') }}</div>
                 <code class="text-[10px] text-gray-500 break-all">
                   {{ (d.device_fingerprint || '').substring(0, 32) }}…
                 </code>
               </td>
               <td class="px-3 py-2 text-xs">
-                <div>First: {{ fmtDate(d.first_seen_at) }}</div>
-                <div>Last:  {{ fmtDate(d.last_seen_at) }}</div>
+                <div>{{ t('attendance.anomaly.first_seen', { time: fmtDate(d.first_seen_at) }) }}</div>
+                <div>{{ t('attendance.anomaly.last_seen', { time: fmtDate(d.last_seen_at) }) }}</div>
               </td>
-              <td class="px-3 py-2 text-center">{{ d.usage_count || 0 }}×</td>
+              <td class="px-3 py-2 text-center">{{ t('attendance.anomaly.usage_count', { n: d.usage_count || 0 }) }}</td>
               <td class="px-3 py-2">
-                <span v-if="d.is_blocked" class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">Blocked</span>
-                <span v-else-if="d.is_trusted" class="text-xs px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">Trusted</span>
-                <span v-else class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">Normal</span>
+                <span v-if="d.is_blocked" class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">{{ t('attendance.anomaly.blocked') }}</span>
+                <span v-else-if="d.is_trusted" class="text-xs px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">{{ t('attendance.anomaly.trusted') }}</span>
+                <span v-else class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">{{ t('attendance.anomaly.normal') }}</span>
               </td>
               <td class="px-3 py-2 text-right">
                 <button v-if="!d.is_trusted && !d.is_blocked"
                   class="btn-secondary text-xs text-emerald-600 mr-1" @click="trustDevice(d)">
-                  <HandThumbUpIcon class="w-3.5 h-3.5" /> Trust
+                  <HandThumbUpIcon class="w-3.5 h-3.5" /> {{ t('attendance.anomaly.trust') }}
                 </button>
                 <button v-if="!d.is_blocked"
                   class="btn-secondary text-xs text-red-600" @click="blockDevice(d)">
-                  <NoSymbolIcon class="w-3.5 h-3.5" /> Block
+                  <NoSymbolIcon class="w-3.5 h-3.5" /> {{ t('attendance.anomaly.block') }}
                 </button>
               </td>
             </tr>
@@ -421,15 +422,14 @@ onMounted(() => {
       <div v-if="reviewing" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-lg w-full max-w-lg shadow-xl">
           <div class="px-5 py-3 border-b">
-            <div class="text-lg font-semibold">Review Anomali</div>
+            <div class="text-lg font-semibold">{{ t('attendance.anomaly.review_modal_title') }}</div>
             <div class="text-xs text-gray-500">
-              {{ reviewing.employee_name }} · {{ fmtDateOnly(reviewing.attendance_date) }}
-              · Skor: {{ reviewing.anomaly_score }}
+              {{ t('attendance.anomaly.review_modal_sub', { name: reviewing.employee_name, date: fmtDateOnly(reviewing.attendance_date), score: reviewing.anomaly_score }) }}
             </div>
           </div>
           <div class="p-5 space-y-3">
             <div class="bg-gray-50 rounded p-3 text-xs">
-              <div class="font-semibold mb-1">Flags terdeteksi:</div>
+              <div class="font-semibold mb-1">{{ t('attendance.anomaly.flags_detected') }}</div>
               <div class="flex flex-wrap gap-1">
                 <span v-for="f in reviewing.anomaly_flags || []" :key="f"
                   class="text-[10px] px-1.5 py-0.5 rounded"
@@ -438,29 +438,29 @@ onMounted(() => {
                 </span>
               </div>
               <div v-if="reviewing.gps_accuracy" class="mt-2 text-gray-600">
-                GPS accuracy: {{ reviewing.gps_accuracy }} m
+                {{ t('attendance.anomaly.gps_accuracy', { n: reviewing.gps_accuracy }) }}
               </div>
               <div v-if="reviewing.ip_address" class="text-gray-600">
-                IP: {{ reviewing.ip_address }}
+                {{ t('attendance.anomaly.ip_label', { ip: reviewing.ip_address }) }}
               </div>
             </div>
             <div v-if="reviewing.anomaly_reviewed_at" class="text-xs text-emerald-700 italic">
-              Sudah direview {{ fmtDate(reviewing.anomaly_reviewed_at) }}
+              {{ t('attendance.anomaly.already_reviewed', { time: fmtDate(reviewing.anomaly_reviewed_at) }) }}
               <span v-if="reviewing.anomaly_review_note">
                 — "{{ reviewing.anomaly_review_note }}"
               </span>
             </div>
             <div v-if="!reviewing.anomaly_reviewed_at">
-              <label class="label">Catatan Review *</label>
+              <label class="label">{{ t('attendance.anomaly.review_note') }}</label>
               <textarea v-model="reviewNote" rows="4" class="input"
-                placeholder="Tulis hasil investigasi: alasan dimaafkan / tindak lanjut / dll. (min 5 karakter)"></textarea>
+                :placeholder="t('attendance.anomaly.review_note_ph')"></textarea>
             </div>
           </div>
           <div class="px-5 py-3 border-t flex justify-end gap-2">
-            <button class="btn-secondary" @click="reviewing = null">Tutup</button>
+            <button class="btn-secondary" @click="reviewing = null">{{ t('attendance.anomaly.close') }}</button>
             <button v-if="!reviewing.anomaly_reviewed_at"
               class="btn-primary" :disabled="reviewSubmitting" @click="submitReview">
-              {{ reviewSubmitting ? 'Menyimpan…' : 'Tandai Sudah Direview' }}
+              {{ reviewSubmitting ? t('attendance.anomaly.saving') : t('attendance.anomaly.mark_reviewed') }}
             </button>
           </div>
         </div>

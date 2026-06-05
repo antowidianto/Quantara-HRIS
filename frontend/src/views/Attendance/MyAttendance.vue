@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { fmtDate } from '@/composables/useResource'
+import { useI18n } from '@/locales'
 import ChangeRequestModal from './ChangeRequestModal.vue'
 import QuickLeaveModal from './QuickLeaveModal.vue'
 import {
@@ -15,6 +16,7 @@ import {
 
 const toast = useToast()
 const router = useRouter()
+const { t } = useI18n()
 
 const today = new Date().toISOString().slice(0, 10)
 const cursorMonth = ref(new Date().toISOString().slice(0, 7)) // YYYY-MM
@@ -72,7 +74,11 @@ function isLockedCell(cell) {
     || cell.status === 'AFTER_RESIGN'
 }
 
-const dayHeaders = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min']
+const dayHeaders = computed(() => [
+  t('attendance.my.day_mon'), t('attendance.my.day_tue'), t('attendance.my.day_wed'),
+  t('attendance.my.day_thu'), t('attendance.my.day_fri'), t('attendance.my.day_sat'),
+  t('attendance.my.day_sun'),
+])
 
 async function fetchData() {
   loading.value = true
@@ -89,7 +95,7 @@ async function fetchData() {
       selectedDay.value = found || null
     }
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat data absensi')
+    toast.error(e.response?.data?.message || t('attendance.my.load_failed'))
   } finally {
     loading.value = false
   }
@@ -126,13 +132,13 @@ function openLeaveModal(day, category = '') {
 function onChangeSubmitted() {
   showChangeModal.value = false
   fetchData()
-  toast.success('Pengajuan perubahan absensi berhasil dikirim')
+  toast.success(t('attendance.my.change_submitted'))
 }
 
 function onLeaveSubmitted() {
   showLeaveModal.value = false
   fetchData()
-  toast.success('Pengajuan cuti / izin berhasil dikirim')
+  toast.success(t('attendance.my.leave_submitted'))
 }
 
 // ─── Helpers tampilan ───────────────────────────────────────────────
@@ -157,12 +163,12 @@ function formatTime(dt) {
 }
 
 function formatHours(minutes) {
-  if (! minutes) return '0 jam'
+  if (! minutes) return t('attendance.my.hours_zero')
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
-  if (h && m) return `${h} jam ${m} menit`
-  if (h) return `${h} jam`
-  return `${m} menit`
+  if (h && m) return t('attendance.my.hours_h_m', { h, m })
+  if (h) return t('attendance.my.hours_h', { h })
+  return t('attendance.my.minutes_m', { m })
 }
 
 const crStatusClass = {
@@ -179,13 +185,13 @@ const leaveStatusClass = {
   CANCELLED: 'bg-gray-100 text-gray-600',
 }
 
-const changeTypeLabel = {
-  CLOCK_IN:  'Perbaiki Clock-In',
-  CLOCK_OUT: 'Perbaiki Clock-Out',
-  BOTH:      'Perbaiki Clock-In & Out',
-  STATUS:    'Ubah Status',
-  MISSED:    'Lupa Absen',
-}
+const changeTypeLabel = computed(() => ({
+  CLOCK_IN:  t('attendance.my.change_type_clock_in'),
+  CLOCK_OUT: t('attendance.my.change_type_clock_out'),
+  BOTH:      t('attendance.my.change_type_both'),
+  STATUS:    t('attendance.my.change_type_status'),
+  MISSED:    t('attendance.my.change_type_missed'),
+}))
 
 // Ringkasan situasi hari yang dipilih untuk menentukan tombol-tombol apa
 // yang masuk akal ditawarkan (mis. ABSENT → tombol Sakit / Cuti).
@@ -230,24 +236,24 @@ onMounted(fetchData)
   <div>
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
-        <h1 class="text-2xl font-bold">Absensi Saya</h1>
-        <p class="text-sm text-gray-500">Lihat absensi tanggal lampau, hari ini, dan jadwal mendatang.</p>
+        <h1 class="text-2xl font-bold">{{ t('attendance.my_attendance') }}</h1>
+        <p class="text-sm text-gray-500">{{ t('attendance.my.subtitle') }}</p>
       </div>
       <div class="flex items-center gap-2">
-        <button class="btn-secondary" @click="shiftMonth(-1)" :disabled="loading">‹ Bulan Lalu</button>
+        <button class="btn-secondary" @click="shiftMonth(-1)" :disabled="loading">{{ t('attendance.my.prev_month') }}</button>
         <span class="font-semibold w-44 text-center">{{ monthLabel }}</span>
-        <button class="btn-secondary" @click="shiftMonth(1)" :disabled="loading">Bulan Berikutnya ›</button>
+        <button class="btn-secondary" @click="shiftMonth(1)" :disabled="loading">{{ t('attendance.my.next_month') }}</button>
       </div>
     </div>
 
     <!-- Summary cards -->
     <div v-if="data.summary" class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
-      <div class="card p-3"><div class="text-xs text-gray-500">Hadir</div><div class="text-xl font-bold text-green-600">{{ data.summary.present }}</div></div>
-      <div class="card p-3"><div class="text-xs text-gray-500">Terlambat</div><div class="text-xl font-bold text-amber-600">{{ data.summary.late }}</div></div>
-      <div class="card p-3"><div class="text-xs text-gray-500">Tanpa Kabar</div><div class="text-xl font-bold text-red-600">{{ data.summary.absent }}</div></div>
-      <div class="card p-3"><div class="text-xs text-gray-500">Cuti/Sakit</div><div class="text-xl font-bold text-blue-600">{{ data.summary.leave }}</div></div>
-      <div class="card p-3"><div class="text-xs text-gray-500">Libur</div><div class="text-xl font-bold text-blue-500">{{ data.summary.holiday + data.summary.off }}</div></div>
-      <div class="card p-3"><div class="text-xs text-gray-500">Total Telat (menit)</div><div class="text-xl font-bold text-amber-700">{{ data.summary.late_minutes }}</div></div>
+      <div class="card p-3"><div class="text-xs text-gray-500">{{ t('attendance.my.sum_present') }}</div><div class="text-xl font-bold text-green-600">{{ data.summary.present }}</div></div>
+      <div class="card p-3"><div class="text-xs text-gray-500">{{ t('attendance.my.sum_late') }}</div><div class="text-xl font-bold text-amber-600">{{ data.summary.late }}</div></div>
+      <div class="card p-3"><div class="text-xs text-gray-500">{{ t('attendance.my.sum_absent') }}</div><div class="text-xl font-bold text-red-600">{{ data.summary.absent }}</div></div>
+      <div class="card p-3"><div class="text-xs text-gray-500">{{ t('attendance.my.sum_leave') }}</div><div class="text-xl font-bold text-blue-600">{{ data.summary.leave }}</div></div>
+      <div class="card p-3"><div class="text-xs text-gray-500">{{ t('attendance.my.sum_holiday') }}</div><div class="text-xl font-bold text-blue-500">{{ data.summary.holiday + data.summary.off }}</div></div>
+      <div class="card p-3"><div class="text-xs text-gray-500">{{ t('attendance.my.sum_late_minutes') }}</div><div class="text-xl font-bold text-amber-700">{{ data.summary.late_minutes }}</div></div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -297,7 +303,7 @@ onMounted(fetchData)
                 <template v-else>
                   <div class="flex items-start justify-between text-xs">
                     <span class="font-semibold">{{ Number(cell.date.slice(8, 10)) }}</span>
-                    <span v-if="cell.is_today" class="px-1 rounded bg-primary-600 text-white text-[10px]">Hari ini</span>
+                    <span v-if="cell.is_today" class="px-1 rounded bg-primary-600 text-white text-[10px]">{{ t('attendance.my.today') }}</span>
                   </div>
                   <div class="mt-1 flex items-center gap-1 text-[11px] leading-tight">
                     <span :class="['inline-block w-2 h-2 rounded-full', dotColor(cell.status_color)]"></span>
@@ -334,7 +340,7 @@ onMounted(fetchData)
       <!-- Day detail panel -->
       <div class="card p-4">
         <div v-if="!selectedDay" class="text-center text-gray-400 py-12">
-          Pilih tanggal pada kalender untuk melihat detail absensi.
+          {{ t('attendance.my.pick_date') }}
         </div>
 
         <div v-else>
@@ -358,13 +364,13 @@ onMounted(fetchData)
             </svg>
             <div>
               <div class="font-medium text-gray-700">
-                {{ dayContext.isBeforeJoin ? 'Belum Bergabung' : 'Sudah Resign' }}
+                {{ dayContext.isBeforeJoin ? t('attendance.my.before_join') : t('attendance.my.after_resign') }}
               </div>
               <div class="text-xs text-gray-600 mt-0.5">
                 {{ selectedDay.note }}
               </div>
               <div class="text-xs text-gray-500 mt-1 italic">
-                Tanggal di luar masa kerja Anda — tidak ada catatan absensi yang berlaku.
+                {{ t('attendance.my.out_of_employment') }}
               </div>
             </div>
           </div>
@@ -374,10 +380,9 @@ onMounted(fetchData)
             class="bg-red-50 border border-red-200 rounded-md p-3 mb-3 text-sm text-red-800 flex items-start gap-2">
             <ExclamationTriangleIcon class="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>
-              <div class="font-medium">Alfa / Tanpa Keterangan</div>
+              <div class="font-medium">{{ t('attendance.my.absent_title') }}</div>
               <div class="text-xs mt-0.5">
-                Belum ada catatan absensi atau cuti untuk hari ini. Anda bisa mengajukan
-                cuti, izin sakit, atau perubahan absensi (jika lupa absen) di bawah ini.
+                {{ t('attendance.my.absent_note') }}
               </div>
             </div>
           </div>
@@ -390,23 +395,23 @@ onMounted(fetchData)
           <!-- Jadwal shift -->
           <div v-if="selectedDay.shift" class="mb-3 border-l-2 border-primary-300 pl-3">
             <div class="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-1">
-              <CalendarDaysIcon class="w-3.5 h-3.5" /> Jadwal Shift
+              <CalendarDaysIcon class="w-3.5 h-3.5" /> {{ t('attendance.my.shift_schedule') }}
             </div>
             <div class="text-sm font-medium">{{ selectedDay.shift.name }}</div>
             <div class="text-xs text-gray-600">
               {{ selectedDay.shift.start_time?.slice(0, 5) }} – {{ selectedDay.shift.end_time?.slice(0, 5) }}
-              <span v-if="selectedDay.shift.is_off" class="ml-1 text-gray-400">(Off-day)</span>
+              <span v-if="selectedDay.shift.is_off" class="ml-1 text-gray-400">{{ t('attendance.my.off_day') }}</span>
             </div>
           </div>
 
           <!-- Detail absensi (transaksi clock-in/out) -->
           <div v-if="selectedDay.attendance" class="mb-3">
             <div class="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-1 mb-2">
-              <ClockIcon class="w-3.5 h-3.5" /> Catatan Absensi
+              <ClockIcon class="w-3.5 h-3.5" /> {{ t('attendance.my.attendance_record') }}
             </div>
             <div class="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <div class="text-xs text-gray-500">Clock-In</div>
+                <div class="text-xs text-gray-500">{{ t('attendance.my.clock_in') }}</div>
                 <div class="font-medium">{{ formatTime(selectedDay.attendance.clock_in_at) }}</div>
                 <div v-if="selectedDay.attendance.clock_in_address" class="text-[11px] text-gray-500 flex items-start gap-1 mt-0.5">
                   <MapPinIcon class="w-3 h-3 mt-0.5 flex-shrink-0" />
@@ -414,7 +419,7 @@ onMounted(fetchData)
                 </div>
               </div>
               <div>
-                <div class="text-xs text-gray-500">Clock-Out</div>
+                <div class="text-xs text-gray-500">{{ t('attendance.my.clock_out') }}</div>
                 <div class="font-medium">{{ formatTime(selectedDay.attendance.clock_out_at) }}</div>
                 <div v-if="selectedDay.attendance.clock_out_address" class="text-[11px] text-gray-500 flex items-start gap-1 mt-0.5">
                   <MapPinIcon class="w-3 h-3 mt-0.5 flex-shrink-0" />
@@ -422,18 +427,18 @@ onMounted(fetchData)
                 </div>
               </div>
               <div>
-                <div class="text-xs text-gray-500">Jam kerja</div>
+                <div class="text-xs text-gray-500">{{ t('attendance.my.work_hours') }}</div>
                 <div>{{ formatHours(selectedDay.attendance.work_minutes || 0) }}</div>
               </div>
               <div>
-                <div class="text-xs text-gray-500">Telat / Pulang Cepat</div>
+                <div class="text-xs text-gray-500">{{ t('attendance.my.late_early') }}</div>
                 <div>
                   <span v-if="selectedDay.attendance.late_minutes" class="text-amber-700">
-                    +{{ selectedDay.attendance.late_minutes }} menit
+                    {{ t('attendance.my.minutes_plus', { n: selectedDay.attendance.late_minutes }) }}
                   </span>
                   <span v-else class="text-gray-400">-</span>
                   <span v-if="selectedDay.attendance.early_leave_minutes" class="text-amber-700 ml-1">
-                    / pulang cepat {{ selectedDay.attendance.early_leave_minutes }} m
+                    {{ t('attendance.my.early_leave', { n: selectedDay.attendance.early_leave_minutes }) }}
                   </span>
                 </div>
               </div>
@@ -456,19 +461,19 @@ onMounted(fetchData)
               </span>
             </div>
             <div class="text-xs text-gray-700 mt-2">
-              <span class="text-gray-500">Periode:</span>
+              <span class="text-gray-500">{{ t('attendance.my.period') }}</span>
               {{ selectedDay.leave.start_date }} s/d {{ selectedDay.leave.end_date }}
-              <span v-if="selectedDay.leave.is_half_day" class="ml-1 text-gray-500">(½ hari)</span>
+              <span v-if="selectedDay.leave.is_half_day" class="ml-1 text-gray-500">{{ t('attendance.my.half_day') }}</span>
             </div>
             <div v-if="selectedDay.leave.reason" class="text-xs text-gray-700 mt-1 italic">
               "{{ selectedDay.leave.reason }}"
             </div>
             <div v-if="selectedDay.leave.review_note" class="text-xs text-gray-700 mt-1">
-              <strong>Catatan reviewer:</strong> {{ selectedDay.leave.review_note }}
+              <strong>{{ t('attendance.my.reviewer_note') }}</strong> {{ selectedDay.leave.review_note }}
             </div>
             <div class="mt-2 text-right">
               <RouterLink :to="`/leaves`" class="text-xs text-primary-600 hover:underline inline-flex items-center gap-1">
-                Lihat di Daftar Cuti <ArrowTopRightOnSquareIcon class="w-3 h-3" />
+                {{ t('attendance.my.view_in_leaves') }} <ArrowTopRightOnSquareIcon class="w-3 h-3" />
               </RouterLink>
             </div>
           </div>
@@ -483,52 +488,52 @@ onMounted(fetchData)
             :class="['mb-3 border rounded-md p-3 text-sm', crStatusClass[selectedDay.change_request.status] || 'bg-gray-50 border-gray-200']">
             <div class="flex items-center justify-between">
               <div class="text-xs uppercase tracking-wide font-medium flex items-center gap-1">
-                <PencilSquareIcon class="w-3.5 h-3.5" /> Pengajuan Perubahan
+                <PencilSquareIcon class="w-3.5 h-3.5" /> {{ t('attendance.my.change_request') }}
               </div>
               <span class="px-2 py-0.5 rounded-full bg-white/70 text-[10px] font-medium">
                 {{ selectedDay.change_request.status }}
               </span>
             </div>
             <div class="text-xs mt-2">
-              <span class="text-gray-500">Tipe:</span>
+              <span class="text-gray-500">{{ t('attendance.my.type') }}</span>
               {{ changeTypeLabel[selectedDay.change_request.change_type] || selectedDay.change_request.change_type }}
             </div>
             <div v-if="selectedDay.change_request.requested_clock_in" class="text-xs">
-              <span class="text-gray-500">Diajukan In:</span>
+              <span class="text-gray-500">{{ t('attendance.my.requested_in') }}</span>
               {{ formatTime(selectedDay.change_request.requested_clock_in) }}
             </div>
             <div v-if="selectedDay.change_request.requested_clock_out" class="text-xs">
-              <span class="text-gray-500">Diajukan Out:</span>
+              <span class="text-gray-500">{{ t('attendance.my.requested_out') }}</span>
               {{ formatTime(selectedDay.change_request.requested_clock_out) }}
             </div>
             <div v-if="selectedDay.change_request.requested_status" class="text-xs">
-              <span class="text-gray-500">Status baru:</span> {{ selectedDay.change_request.requested_status }}
+              <span class="text-gray-500">{{ t('attendance.my.new_status') }}</span> {{ selectedDay.change_request.requested_status }}
             </div>
             <div class="text-xs mt-1 italic">"{{ selectedDay.change_request.reason }}"</div>
             <div v-if="selectedDay.change_request.review_note" class="text-xs mt-1">
-              <strong>Catatan reviewer:</strong> {{ selectedDay.change_request.review_note }}
+              <strong>{{ t('attendance.my.reviewer_note') }}</strong> {{ selectedDay.change_request.review_note }}
             </div>
             <div class="mt-2 text-right">
               <RouterLink to="/attendance/my-changes"
                 class="text-xs hover:underline inline-flex items-center gap-1">
-                Lihat semua pengajuan saya <ArrowTopRightOnSquareIcon class="w-3 h-3" />
+                {{ t('attendance.my.view_all_requests') }} <ArrowTopRightOnSquareIcon class="w-3 h-3" />
               </RouterLink>
             </div>
           </div>
 
           <!-- ─── Aksi cepat ─── -->
           <div class="border-t border-gray-200 pt-3 space-y-2">
-            <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">Aksi</div>
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">{{ t('attendance.my.actions') }}</div>
 
             <button
               v-if="dayContext?.allowChange"
               class="btn-secondary w-full justify-center"
               @click="openChangeRequest(selectedDay)"
             >
-              <PencilSquareIcon class="w-4 h-4" /> Ajukan Perubahan Absensi
+              <PencilSquareIcon class="w-4 h-4" /> {{ t('attendance.my.request_change') }}
             </button>
             <div v-else-if="dayContext?.hasPendingChange" class="text-xs text-amber-700 italic px-1">
-              Pengajuan perubahan absensi sedang menunggu review.
+              {{ t('attendance.my.change_pending') }}
             </div>
 
             <button
@@ -536,7 +541,7 @@ onMounted(fetchData)
               class="btn-secondary w-full justify-center"
               @click="openLeaveModal(selectedDay, 'SICK')"
             >
-              <HeartIcon class="w-4 h-4 text-red-500" /> Ajukan Izin Sakit
+              <HeartIcon class="w-4 h-4 text-red-500" /> {{ t('attendance.my.request_sick') }}
             </button>
 
             <button
@@ -544,7 +549,7 @@ onMounted(fetchData)
               class="btn-secondary w-full justify-center"
               @click="openLeaveModal(selectedDay, 'PAID')"
             >
-              <CalendarDaysIcon class="w-4 h-4 text-blue-500" /> Ajukan Cuti
+              <CalendarDaysIcon class="w-4 h-4 text-blue-500" /> {{ t('attendance.my.request_leave') }}
             </button>
 
             <button
@@ -552,21 +557,21 @@ onMounted(fetchData)
               class="btn-secondary w-full justify-center"
               @click="openLeaveModal(selectedDay, '')"
             >
-              <PlusIcon class="w-4 h-4" /> Pengajuan Cuti / Izin Lainnya
+              <PlusIcon class="w-4 h-4" /> {{ t('attendance.my.request_other') }}
             </button>
 
             <div v-if="dayContext?.hasPendingLeave"
               class="text-xs text-amber-700 italic px-1">
-              Pengajuan cuti/izin untuk hari ini sedang menunggu review.
+              {{ t('attendance.my.leave_pending') }}
             </div>
             <div v-if="dayContext?.hasApprovedLeave"
               class="text-xs text-green-700 italic px-1">
-              Cuti/izin sudah disetujui untuk hari ini.
+              {{ t('attendance.my.leave_approved') }}
             </div>
 
             <RouterLink to="/attendance/my-changes"
               class="btn-secondary w-full justify-center mt-2">
-              <DocumentTextIcon class="w-4 h-4" /> Riwayat Pengajuan Saya
+              <DocumentTextIcon class="w-4 h-4" /> {{ t('attendance.my.my_requests') }}
             </RouterLink>
           </div>
         </div>

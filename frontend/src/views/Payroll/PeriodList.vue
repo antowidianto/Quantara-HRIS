@@ -7,9 +7,11 @@ import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, CalculatorIcon, CheckBadgeIcon } from '@heroicons/vue/24/outline'
 import PayrollPeriodModal from '@/components/PayrollPeriodModal.vue'
+import { useI18n } from '@/locales'
 
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 const items = ref([])
 const showModal = ref(false)
 
@@ -21,33 +23,33 @@ onMounted(fetchData)
 
 async function calculate(id) {
   const ok = await confirmDialog({
-    title: 'Hitung payroll periode ini?',
-    message: 'Semua slip yang sudah ada untuk periode ini akan dihitung ulang. Tunjangan jarak juga akan diperbarui.',
-    okText: 'Hitung',
+    title: t('payroll.period_list.calc_title'),
+    message: t('payroll.period_list.calc_message'),
+    okText: t('payroll.period_list.calc_ok'),
     variant: 'primary',
   })
   if (! ok) return
-  toast.info('Menghitung payroll...')
+  toast.info(t('payroll.period_list.calc_progress'))
   try {
     await api.post(`/payroll-periods/${id}/calculate`)
-    toast.success('Payroll berhasil dihitung')
+    toast.success(t('payroll.period_list.calc_success'))
     fetchData()
-  } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+  } catch (e) { toast.error(e.response?.data?.message || t('payroll.period_list.failed')) }
 }
 
 async function finalize(id) {
   const ok = await confirmDialog({
-    title: 'Finalisasi periode payroll?',
-    message: 'Setelah final, slip dianggap sudah dibayar dan tidak bisa di-rollback. Notifikasi akan terkirim ke seluruh karyawan.',
-    okText: 'Finalisasi',
+    title: t('payroll.period_list.finalize_title'),
+    message: t('payroll.period_list.finalize_message'),
+    okText: t('payroll.period_list.finalize_ok'),
     variant: 'warning',
   })
   if (! ok) return
   try {
     await api.post(`/payroll-periods/${id}/finalize`)
-    toast.success('Periode difinalisasi & notifikasi terkirim')
+    toast.success(t('payroll.period_list.finalize_success'))
     fetchData()
-  } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+  } catch (e) { toast.error(e.response?.data?.message || t('payroll.period_list.failed')) }
 }
 
 function openModal() {
@@ -68,9 +70,9 @@ function handlePeriodCreated(period) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
-      <h1 class="text-2xl font-bold">Periode Payroll</h1>
+      <h1 class="text-2xl font-bold">{{ t('payroll.period_list.title') }}</h1>
       <button @click="openModal" class="btn-primary">
-        <PlusIcon class="w-4 h-4" /> Periode Baru
+        <PlusIcon class="w-4 h-4" /> {{ t('payroll.period_list.new_period') }}
       </button>
     </div>
     <div class="card">
@@ -78,17 +80,17 @@ function handlePeriodCreated(period) {
         <table class="table">
           <thead>
             <tr>
-              <th>Kode</th>
-              <th>Nama</th>
-              <th>Periode</th>
-              <th>Pay Date</th>
-              <th>Total Net</th>
-              <th>Status</th>
-              <th class="text-right">Aksi</th>
+              <th>{{ t('payroll.period_list.col_code') }}</th>
+              <th>{{ t('payroll.period_list.col_name') }}</th>
+              <th>{{ t('payroll.period_list.col_period') }}</th>
+              <th>{{ t('payroll.period_list.col_pay_date') }}</th>
+              <th>{{ t('payroll.period_list.col_total_net') }}</th>
+              <th>{{ t('payroll.period_list.col_status') }}</th>
+              <th class="text-right">{{ t('payroll.period_list.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="items.length === 0"><td colspan="7" class="text-center py-8 text-gray-400">Belum ada periode</td></tr>
+            <tr v-if="items.length === 0"><td colspan="7" class="text-center py-8 text-gray-400">{{ t('payroll.period_list.no_periods') }}</td></tr>
             <tr v-for="p in items" :key="p.id">
               <td class="font-mono text-xs">{{ p.code }}</td>
               <td><RouterLink :to="`/payroll/periods/${p.id}`" class="text-primary-600 hover:underline">{{ p.name }}</RouterLink></td>
@@ -105,11 +107,11 @@ function handlePeriodCreated(period) {
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button v-if="['DRAFT','CALCULATED'].includes(p.status)" class="btn-secondary" @click="calculate(p.id)" title="Hitung">
-                    <CalculatorIcon class="w-4 h-4" /> Hitung
+                  <button v-if="['DRAFT','CALCULATED'].includes(p.status)" class="btn-secondary" @click="calculate(p.id)" :title="t('payroll.period_list.calculate')">
+                    <CalculatorIcon class="w-4 h-4" /> {{ t('payroll.period_list.calculate') }}
                   </button>
                   <button v-if="p.status === 'CALCULATED'" class="btn-success" @click="finalize(p.id)">
-                    <CheckBadgeIcon class="w-4 h-4" /> Finalisasi
+                    <CheckBadgeIcon class="w-4 h-4" /> {{ t('payroll.period_list.finalize') }}
                   </button>
                 </div>
               </td>

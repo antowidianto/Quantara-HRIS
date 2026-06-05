@@ -6,9 +6,11 @@ import { useAuthStore } from '@/stores/auth'
 import { fmtDate, fmtDateTime } from '@/composables/useResource'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import ExcelImporter from '@/components/ExcelImporter.vue'
+import { useI18n } from '@/locales'
 
 const toast = useToast()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const items = ref([])
 const meta = ref({ total: 0, page: 1, per_page: 30, pages: 1 })
@@ -51,7 +53,7 @@ async function fetchData(page = 1) {
     items.value = res.data.data
     meta.value = res.data.meta
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat absensi')
+    toast.error(e.response?.data?.message || t('attendance.list.load_failed'))
   } finally {
     loading.value = false
   }
@@ -80,12 +82,12 @@ onMounted(async () => {
   <div>
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
-        <h1 class="text-2xl font-bold">Absensi Karyawan</h1>
+        <h1 class="text-2xl font-bold">{{ t('attendance.list.title') }}</h1>
         <p class="text-sm text-gray-500">
-          <span v-if="auth.isSuperAdmin">Mode super admin: lintas perusahaan & cabang.</span>
-          <span v-else-if="canCrossBranch">Anda dapat melihat absensi seluruh cabang dalam {{ auth.company?.name }}.</span>
+          <span v-if="auth.isSuperAdmin">{{ t('attendance.list.mode_super') }}</span>
+          <span v-else-if="canCrossBranch">{{ t('attendance.list.mode_cross', { company: auth.company?.name }) }}</span>
           <span v-else>
-            Anda hanya melihat absensi cabang Anda sendiri ({{ auth.branch?.name || '—' }}).
+            {{ t('attendance.list.mode_branch', { branch: auth.branch?.name || '—' }) }}
           </span>
         </p>
       </div>
@@ -94,11 +96,11 @@ onMounted(async () => {
         <ExcelImporter
           v-if="auth.can('attendances.bulk_import')"
           resource="attendances"
-          button-label="Import Absensi"
+          :button-label="t('attendance.list.import_button')"
           @committed="fetchData()"
         />
         <RouterLink to="/attendance/change-requests/approvals" class="btn-secondary">
-          Kelola Pengajuan Perubahan
+          {{ t('attendance.list.manage_changes') }}
         </RouterLink>
       </div>
     </div>
@@ -114,7 +116,7 @@ onMounted(async () => {
             value-key="id"
             label-key="name"
             :search-keys="['name','code','city']"
-            placeholder="Semua cabang"
+            :placeholder="t('attendance.list.all_branches')"
           />
         </div>
         <div class="w-56">
@@ -124,42 +126,42 @@ onMounted(async () => {
             value-key="id"
             label-key="name"
             :search-keys="['name','code']"
-            placeholder="Semua departemen"
+            :placeholder="t('attendance.list.all_departments')"
           />
         </div>
         <select v-model="filters.status" class="input w-44">
-          <option value="">Semua status</option>
-          <option value="PRESENT">Hadir</option>
-          <option value="LATE">Terlambat</option>
-          <option value="ABSENT">Tanpa Kabar</option>
-          <option value="LEAVE">Cuti</option>
-          <option value="SICK">Sakit</option>
-          <option value="HOLIDAY">Libur</option>
-          <option value="HALF_DAY">Setengah Hari</option>
+          <option value="">{{ t('attendance.list.all_status') }}</option>
+          <option value="PRESENT">{{ t('attendance.list.st_present') }}</option>
+          <option value="LATE">{{ t('attendance.list.st_late') }}</option>
+          <option value="ABSENT">{{ t('attendance.list.st_absent') }}</option>
+          <option value="LEAVE">{{ t('attendance.list.st_leave') }}</option>
+          <option value="SICK">{{ t('attendance.list.st_sick') }}</option>
+          <option value="HOLIDAY">{{ t('attendance.list.st_holiday') }}</option>
+          <option value="HALF_DAY">{{ t('attendance.list.st_half_day') }}</option>
         </select>
-        <input v-model="filters.q" type="text" placeholder="Nama / NIK karyawan" class="input w-56"
+        <input v-model="filters.q" type="text" :placeholder="t('attendance.list.search_emp')" class="input w-56"
           @keyup.enter="fetchData(1)" />
-        <button class="btn-primary" @click="fetchData(1)" :disabled="loading">Filter</button>
+        <button class="btn-primary" @click="fetchData(1)" :disabled="loading">{{ t('common.filter') }}</button>
       </div>
 
       <div class="overflow-x-auto">
         <table class="table">
           <thead>
             <tr>
-              <th>Tanggal</th>
-              <th>Karyawan</th>
-              <th>Cabang</th>
-              <th>Dept</th>
-              <th>Clock In</th>
-              <th>Clock Out</th>
-              <th>Jam Kerja</th>
-              <th>Telat</th>
-              <th>Status</th>
+              <th>{{ t('attendance.list.col_date') }}</th>
+              <th>{{ t('attendance.list.col_employee') }}</th>
+              <th>{{ t('attendance.list.col_branch') }}</th>
+              <th>{{ t('attendance.list.col_dept') }}</th>
+              <th>{{ t('attendance.list.col_clock_in') }}</th>
+              <th>{{ t('attendance.list.col_clock_out') }}</th>
+              <th>{{ t('attendance.list.col_work_hours') }}</th>
+              <th>{{ t('attendance.list.col_late') }}</th>
+              <th>{{ t('attendance.list.col_status') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-if="!loading && items.length === 0">
-              <td colspan="9" class="text-center py-8 text-gray-400">Tidak ada data</td>
+              <td colspan="9" class="text-center py-8 text-gray-400">{{ t('attendance.list.no_data') }}</td>
             </tr>
             <tr v-for="a in items" :key="a.id">
               <td>{{ fmtDate(a.work_date) }}</td>
@@ -171,11 +173,11 @@ onMounted(async () => {
               <td class="text-xs">{{ a.department_name || '—' }}</td>
               <td>{{ a.clock_in_at ? fmtDateTime(a.clock_in_at) : '-' }}</td>
               <td>{{ a.clock_out_at ? fmtDateTime(a.clock_out_at) : '-' }}</td>
-              <td>{{ Math.round((a.work_minutes || 0) / 6) / 10 }} jam</td>
-              <td>{{ a.late_minutes }} menit</td>
+              <td>{{ Math.round((a.work_minutes || 0) / 6) / 10 }} {{ t('attendance.list.hours_unit') }}</td>
+              <td>{{ a.late_minutes }} {{ t('attendance.list.minutes_unit') }}</td>
               <td>
                 <span :class="statusBadge[a.status] || 'badge-gray'">{{ a.status }}</span>
-                <div v-if="a.is_corrected" class="text-[10px] text-amber-700 mt-0.5">⚐ dikoreksi</div>
+                <div v-if="a.is_corrected" class="text-[10px] text-amber-700 mt-0.5">{{ t('attendance.list.corrected') }}</div>
               </td>
             </tr>
           </tbody>
@@ -183,10 +185,10 @@ onMounted(async () => {
       </div>
 
       <div v-if="meta.pages > 1" class="px-4 py-3 flex items-center justify-between border-t border-gray-100 text-sm">
-        <span class="text-gray-500">Total: {{ meta.total }}</span>
+        <span class="text-gray-500">{{ t('attendance.list.total', { n: meta.total }) }}</span>
         <div class="flex gap-1">
           <button class="btn-secondary" :disabled="meta.page <= 1" @click="fetchData(meta.page - 1)">‹</button>
-          <span class="px-3 py-1">Hal {{ meta.page }} / {{ meta.pages }}</span>
+          <span class="px-3 py-1">{{ t('attendance.list.page_of', { page: meta.page, pages: meta.pages }) }}</span>
           <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="fetchData(meta.page + 1)">›</button>
         </div>
       </div>

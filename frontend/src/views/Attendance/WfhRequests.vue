@@ -5,6 +5,7 @@ import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
+import { useI18n } from '@/locales'
 import {
   HomeModernIcon, PlusIcon, CheckIcon, XMarkIcon, ArrowPathIcon,
   ClockIcon, MapPinIcon, ExclamationTriangleIcon, NoSymbolIcon,
@@ -27,6 +28,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 
 const canApprove = computed(() =>
   auth.can('attendance.approve_change') || auth.can('attendance.view_all') || auth.isSuperAdmin
@@ -69,7 +71,7 @@ async function fetchList() {
       return acc
     }, { pending: 0, approved: 0, rejected: 0 })
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat pengajuan WFH')
+    toast.error(e.response?.data?.message || t('attendance.wfh.load_failed'))
   } finally {
     loading.value = false
   }
@@ -83,23 +85,23 @@ function switchTab(t) {
 
 async function submitForm() {
   if (! form.work_date) {
-    toast.warning('Tanggal wajib diisi')
+    toast.warning(t('attendance.wfh.date_required'))
     return
   }
   if (! form.reason || form.reason.trim().length < 5) {
-    toast.warning('Alasan minimal 5 karakter')
+    toast.warning(t('attendance.wfh.reason_min'))
     return
   }
   submitting.value = true
   try {
     await api.post('/wfh-requests', form)
-    toast.success('Pengajuan WFH terkirim')
+    toast.success(t('attendance.wfh.submitted_ok'))
     showCreate.value = false
     form.work_date = ''
     form.reason = ''
     fetchList()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal mengirim pengajuan')
+    toast.error(e.response?.data?.message || t('attendance.wfh.submit_failed'))
   } finally {
     submitting.value = false
   }
@@ -107,50 +109,50 @@ async function submitForm() {
 
 async function approve(item) {
   const ok = await confirmDialog({
-    title: 'Setujui WFH',
-    message: `Setujui pengajuan WFH ${item.employee_name || ''} pada ${item.work_date}?`,
-    confirmText: 'Setujui',
+    title: t('attendance.wfh.approve_title'),
+    message: t('attendance.wfh.approve_msg', { name: item.employee_name || '', date: item.work_date }),
+    confirmText: t('attendance.wfh.approve_confirm'),
   })
   if (! ok) return
   try {
     await api.post(`/wfh-requests/${item.id}/approve`)
-    toast.success('Pengajuan disetujui')
+    toast.success(t('attendance.wfh.approved_ok'))
     fetchList()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyetujui')
+    toast.error(e.response?.data?.message || t('attendance.wfh.approve_failed'))
   }
 }
 
 async function rejectSubmit() {
   if (! rejectNote.value || rejectNote.value.trim().length < 5) {
-    toast.warning('Catatan penolakan minimal 5 karakter')
+    toast.warning(t('attendance.wfh.reject_min'))
     return
   }
   try {
     await api.post(`/wfh-requests/${showReject.value.id}/reject`, { note: rejectNote.value })
-    toast.success('Pengajuan ditolak')
+    toast.success(t('attendance.wfh.rejected_ok'))
     showReject.value = null
     rejectNote.value = ''
     fetchList()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menolak')
+    toast.error(e.response?.data?.message || t('attendance.wfh.reject_failed'))
   }
 }
 
 async function cancel(item) {
   const ok = await confirmDialog({
-    title: 'Batalkan Pengajuan',
-    message: `Batalkan pengajuan WFH ${item.work_date}?`,
-    confirmText: 'Batalkan',
+    title: t('attendance.wfh.cancel_title'),
+    message: t('attendance.wfh.cancel_msg', { date: item.work_date }),
+    confirmText: t('attendance.wfh.cancel_confirm'),
     danger: true,
   })
   if (! ok) return
   try {
     await api.post(`/wfh-requests/${item.id}/cancel`)
-    toast.success('Pengajuan dibatalkan')
+    toast.success(t('attendance.wfh.cancelled_ok'))
     fetchList()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal membatalkan')
+    toast.error(e.response?.data?.message || t('attendance.wfh.cancel_failed'))
   }
 }
 
@@ -178,14 +180,14 @@ onMounted(fetchList)
   <div>
     <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <HomeModernIcon class="w-6 h-6" /> Pengajuan WFH (Work From Home)
+        <HomeModernIcon class="w-6 h-6" /> {{ t('attendance.wfh.title') }}
       </h1>
       <div class="flex items-center gap-2">
         <button class="btn-secondary" @click="fetchList" :disabled="loading">
-          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
+          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> {{ t('common.refresh') }}
         </button>
         <button class="btn-primary" @click="showCreate = true">
-          <PlusIcon class="w-4 h-4" /> Ajukan WFH
+          <PlusIcon class="w-4 h-4" /> {{ t('attendance.wfh.apply') }}
         </button>
       </div>
     </div>
@@ -193,36 +195,36 @@ onMounted(fetchList)
     <!-- Tabs -->
     <div class="border-b border-gray-200 mb-4 flex gap-1">
       <button
-        v-for="t in [
-          { id: 'mine', label: 'Pengajuan Saya' },
-          ...(canApprove ? [{ id: 'inbox', label: 'Inbox Approval' }] : []),
-          ...(canApprove ? [{ id: 'all', label: 'Semua Pengajuan' }] : []),
+        v-for="tabItem in [
+          { id: 'mine', label: t('attendance.wfh.tab_mine') },
+          ...(canApprove ? [{ id: 'inbox', label: t('attendance.wfh.tab_inbox') }] : []),
+          ...(canApprove ? [{ id: 'all', label: t('attendance.wfh.tab_all') }] : []),
         ]"
-        :key="t.id"
-        @click="switchTab(t.id)"
+        :key="tabItem.id"
+        @click="switchTab(tabItem.id)"
         :class="[
           'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-          tab === t.id
+          tab === tabItem.id
             ? 'border-primary-600 text-primary-700'
             : 'border-transparent text-gray-500 hover:text-gray-700'
         ]"
       >
-        {{ t.label }}
+        {{ tabItem.label }}
       </button>
     </div>
 
     <!-- Stats -->
     <div class="grid grid-cols-3 gap-3 mb-4">
       <div class="card-body bg-amber-50 rounded-lg border border-amber-100">
-        <div class="text-xs text-amber-700 font-medium">Pending</div>
+        <div class="text-xs text-amber-700 font-medium">{{ t('attendance.wfh.stat_pending') }}</div>
         <div class="text-2xl font-bold text-amber-900">{{ stats.pending }}</div>
       </div>
       <div class="card-body bg-emerald-50 rounded-lg border border-emerald-100">
-        <div class="text-xs text-emerald-700 font-medium">Disetujui</div>
+        <div class="text-xs text-emerald-700 font-medium">{{ t('attendance.wfh.stat_approved') }}</div>
         <div class="text-2xl font-bold text-emerald-900">{{ stats.approved }}</div>
       </div>
       <div class="card-body bg-red-50 rounded-lg border border-red-100">
-        <div class="text-xs text-red-700 font-medium">Ditolak</div>
+        <div class="text-xs text-red-700 font-medium">{{ t('attendance.wfh.stat_rejected') }}</div>
         <div class="text-2xl font-bold text-red-900">{{ stats.rejected }}</div>
       </div>
     </div>
@@ -231,21 +233,21 @@ onMounted(fetchList)
     <div class="card mb-4">
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div>
-          <label class="label">Status</label>
+          <label class="label">{{ t('attendance.wfh.filter_status') }}</label>
           <select v-model="filters.status" class="input" @change="fetchList">
-            <option value="">Semua</option>
-            <option value="PENDING">Pending</option>
-            <option value="APPROVED">Disetujui</option>
-            <option value="REJECTED">Ditolak</option>
-            <option value="CANCELLED">Dibatalkan</option>
+            <option value="">{{ t('attendance.wfh.st_all') }}</option>
+            <option value="PENDING">{{ t('attendance.wfh.st_pending') }}</option>
+            <option value="APPROVED">{{ t('attendance.wfh.st_approved') }}</option>
+            <option value="REJECTED">{{ t('attendance.wfh.st_rejected') }}</option>
+            <option value="CANCELLED">{{ t('attendance.wfh.st_cancelled') }}</option>
           </select>
         </div>
         <div>
-          <label class="label">Dari</label>
+          <label class="label">{{ t('attendance.wfh.filter_from') }}</label>
           <input type="date" v-model="filters.from" class="input" @change="fetchList" />
         </div>
         <div>
-          <label class="label">Sampai</label>
+          <label class="label">{{ t('attendance.wfh.filter_to') }}</label>
           <input type="date" v-model="filters.to" class="input" @change="fetchList" />
         </div>
       </div>
@@ -257,19 +259,19 @@ onMounted(fetchList)
         <table class="table">
           <thead>
             <tr>
-              <th v-if="tab !== 'mine'">Karyawan</th>
-              <th>Tanggal WFH</th>
-              <th>Alasan</th>
-              <th>Status</th>
-              <th>Approver</th>
-              <th>Diajukan</th>
-              <th class="text-right">Aksi</th>
+              <th v-if="tab !== 'mine'">{{ t('attendance.wfh.col_employee') }}</th>
+              <th>{{ t('attendance.wfh.col_work_date') }}</th>
+              <th>{{ t('attendance.wfh.col_reason') }}</th>
+              <th>{{ t('attendance.wfh.col_status') }}</th>
+              <th>{{ t('attendance.wfh.col_approver') }}</th>
+              <th>{{ t('attendance.wfh.col_submitted') }}</th>
+              <th class="text-right">{{ t('attendance.wfh.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td :colspan="tab === 'mine' ? 6 : 7" class="text-center py-8 text-gray-400">Memuat…</td></tr>
+            <tr v-if="loading"><td :colspan="tab === 'mine' ? 6 : 7" class="text-center py-8 text-gray-400">{{ t('attendance.wfh.loading') }}</td></tr>
             <tr v-else-if="items.length === 0">
-              <td :colspan="tab === 'mine' ? 6 : 7" class="text-center py-8 text-gray-400">Belum ada pengajuan</td>
+              <td :colspan="tab === 'mine' ? 6 : 7" class="text-center py-8 text-gray-400">{{ t('attendance.wfh.no_requests') }}</td>
             </tr>
             <tr v-for="r in items" :key="r.id">
               <td v-if="tab !== 'mine'">
@@ -295,15 +297,15 @@ onMounted(fetchList)
               <td class="text-right">
                 <div class="inline-flex gap-1">
                   <button v-if="r.status === 'PENDING' && canApprove && tab !== 'mine'"
-                    class="btn-icon text-emerald-600" @click="approve(r)" title="Setujui">
+                    class="btn-icon text-emerald-600" @click="approve(r)" :title="t('attendance.wfh.tip_approve')">
                     <CheckIcon class="w-4 h-4" />
                   </button>
                   <button v-if="r.status === 'PENDING' && canApprove && tab !== 'mine'"
-                    class="btn-icon text-red-600" @click="showReject = r" title="Tolak">
+                    class="btn-icon text-red-600" @click="showReject = r" :title="t('attendance.wfh.tip_reject')">
                     <XMarkIcon class="w-4 h-4" />
                   </button>
                   <button v-if="r.status === 'PENDING' && tab === 'mine'"
-                    class="btn-icon text-gray-600" @click="cancel(r)" title="Batalkan">
+                    class="btn-icon text-gray-600" @click="cancel(r)" :title="t('attendance.wfh.tip_cancel')">
                     <NoSymbolIcon class="w-4 h-4" />
                   </button>
                 </div>
@@ -319,36 +321,35 @@ onMounted(fetchList)
       @click.self="showCreate = false">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div class="px-5 py-3 border-b flex items-center justify-between">
-          <h3 class="font-semibold">Pengajuan WFH</h3>
+          <h3 class="font-semibold">{{ t('attendance.wfh.modal_title') }}</h3>
           <button class="text-gray-400 hover:text-gray-700" @click="showCreate = false">
             <XMarkIcon class="w-5 h-5" />
           </button>
         </div>
         <div class="p-5 space-y-3">
           <div>
-            <label class="label">Tanggal WFH <span class="text-red-500">*</span></label>
+            <label class="label">{{ t('attendance.wfh.form_date') }} <span class="text-red-500">*</span></label>
             <input type="date" v-model="form.work_date" class="input" :min="today" :max="maxDate" />
             <p class="text-xs text-gray-500 mt-1">
               <ClockIcon class="w-3 h-3 inline" />
-              Pengajuan paling lambat H-1 atau sebelum jam shift dimulai. Maks 30 hari ke depan.
+              {{ t('attendance.wfh.form_date_hint') }}
             </p>
           </div>
           <div>
-            <label class="label">Alasan <span class="text-red-500">*</span></label>
+            <label class="label">{{ t('attendance.wfh.form_reason') }} <span class="text-red-500">*</span></label>
             <textarea v-model="form.reason" class="input" rows="4"
-              placeholder="Contoh: Anak sakit, perlu mendampingi sambil tetap kerja"></textarea>
+              :placeholder="t('attendance.wfh.form_reason_ph')"></textarea>
           </div>
           <div class="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800">
             <MapPinIcon class="w-4 h-4 inline mr-1" />
-            Saat WFH disetujui, geofence saat clock-in di-skip otomatis.
-            Cap default 12 hari WFH per bulan (bisa berbeda sesuai konfigurasi perusahaan).
+            {{ t('attendance.wfh.form_geofence_note') }}
           </div>
         </div>
         <div class="px-5 py-3 border-t flex justify-end gap-2">
-          <button class="btn-secondary" @click="showCreate = false">Batal</button>
+          <button class="btn-secondary" @click="showCreate = false">{{ t('common.cancel') }}</button>
           <button class="btn-primary" @click="submitForm" :disabled="submitting">
-            <span v-if="submitting">Mengirim…</span>
-            <span v-else>Kirim Pengajuan</span>
+            <span v-if="submitting">{{ t('attendance.wfh.submitting') }}</span>
+            <span v-else>{{ t('attendance.wfh.submit') }}</span>
           </button>
         </div>
       </div>
@@ -359,25 +360,22 @@ onMounted(fetchList)
       @click.self="showReject = null">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div class="px-5 py-3 border-b flex items-center justify-between">
-          <h3 class="font-semibold">Tolak Pengajuan WFH</h3>
+          <h3 class="font-semibold">{{ t('attendance.wfh.reject_modal_title') }}</h3>
           <button class="text-gray-400 hover:text-gray-700" @click="showReject = null">
             <XMarkIcon class="w-5 h-5" />
           </button>
         </div>
         <div class="p-5 space-y-3">
-          <div class="text-sm text-gray-700">
-            Tolak pengajuan WFH <strong>{{ showReject.employee_name }}</strong>
-            untuk tanggal <strong>{{ showReject.work_date }}</strong>?
-          </div>
+          <div class="text-sm text-gray-700" v-html="t('attendance.wfh.reject_modal_msg', { name: `<strong>${showReject.employee_name}</strong>`, date: `<strong>${showReject.work_date}</strong>` })"></div>
           <div>
-            <label class="label">Catatan Penolakan <span class="text-red-500">*</span></label>
+            <label class="label">{{ t('attendance.wfh.reject_note_label') }} <span class="text-red-500">*</span></label>
             <textarea v-model="rejectNote" class="input" rows="3"
-              placeholder="Jelaskan alasan penolakan, akan dikirim ke karyawan"></textarea>
+              :placeholder="t('attendance.wfh.reject_note_ph')"></textarea>
           </div>
         </div>
         <div class="px-5 py-3 border-t flex justify-end gap-2">
-          <button class="btn-secondary" @click="showReject = null">Batal</button>
-          <button class="btn-danger" @click="rejectSubmit">Tolak Pengajuan</button>
+          <button class="btn-secondary" @click="showReject = null">{{ t('common.cancel') }}</button>
+          <button class="btn-danger" @click="rejectSubmit">{{ t('attendance.wfh.reject_submit') }}</button>
         </div>
       </div>
     </div>

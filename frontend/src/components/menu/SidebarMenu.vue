@@ -16,7 +16,7 @@
  *   localStorage `hris_menu_expanded` = JSON array of menu codes.
  *   Refresh halaman → parent yang sebelumnya open tetap open.
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { resolveIcon } from './iconMap'
 import { useI18n } from '@/locales'
@@ -84,9 +84,26 @@ function hasActiveDescendant(node) {
 
 const isOpen = computed(() => {
   if (props.node.type !== 'PARENT') return true
-  if (hasActiveDescendant(props.node)) return true
   return expanded.value.has(props.node.code)
 })
+
+// Auto-expand: kalau navigasi masuk ke salah satu descendant (mis. deep-link),
+// tambahkan parent ke set expanded. Sifatnya additive — hanya menambah, tidak
+// pernah memaksa tetap terbuka — sehingga user tetap bisa menutup dropdown
+// secara manual lewat toggle() tanpa langsung "terbuka lagi".
+watch(
+  () => route.path,
+  () => {
+    if (props.node.type !== 'PARENT') return
+    if (hasActiveDescendant(props.node) && ! expanded.value.has(props.node.code)) {
+      const next = new Set(expanded.value)
+      next.add(props.node.code)
+      expanded.value = next
+      writeExpanded(next)
+    }
+  },
+  { immediate: true },
+)
 
 function toggle() {
   if (props.node.type !== 'PARENT') return

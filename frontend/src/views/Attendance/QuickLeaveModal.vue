@@ -4,6 +4,7 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { LockClosedIcon, InformationCircleIcon } from '@heroicons/vue/24/outline'
 import FileUploader from '@/components/FileUploader.vue'
+import { useI18n } from '@/locales'
 
 /**
  * Modal pengajuan cuti / izin sakit cepat dari halaman Absensi Saya.
@@ -21,6 +22,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'submitted'])
 const toast = useToast()
+const { t } = useI18n()
 
 const types = ref([])      // semua leave types (eligible & ineligible)
 const policy = ref(null)
@@ -49,25 +51,27 @@ function clampDate(d, min, max) {
   return d
 }
 
-const titleByCategory = {
-  SICK: 'Ajukan Izin Sakit',
-  PAID: 'Ajukan Cuti',
-  '':   'Ajukan Cuti / Izin',
-}
-const title = computed(() => titleByCategory[props.preferCategory] || titleByCategory[''])
+const title = computed(() => {
+  const map = {
+    SICK: t('leave.quick.title_sick'),
+    PAID: t('leave.quick.title_paid'),
+    '':   t('leave.quick.title_default'),
+  }
+  return map[props.preferCategory] || map['']
+})
 
-const categoryLabel = {
-  ANNUAL:      'Cuti Tahunan',
-  SICK:        'Sakit',
-  MATERNITY:   'Melahirkan',
-  PATERNITY:   'Pendamping Melahirkan',
-  MENSTRUAL:   'Haid',
-  MARRIAGE:    'Menikah',
-  BEREAVEMENT: 'Duka Cita',
-  HAJJ:        'Haji / Ibadah',
-  UNPAID:      'Tanpa Bayaran',
-  SPECIAL:     'Khusus',
-}
+const categoryLabel = computed(() => ({
+  ANNUAL:      t('leave.quick.cat_annual'),
+  SICK:        t('leave.quick.cat_sick'),
+  MATERNITY:   t('leave.quick.cat_maternity'),
+  PATERNITY:   t('leave.quick.cat_paternity'),
+  MENSTRUAL:   t('leave.quick.cat_menstrual'),
+  MARRIAGE:    t('leave.quick.cat_marriage'),
+  BEREAVEMENT: t('leave.quick.cat_bereavement'),
+  HAJJ:        t('leave.quick.cat_hajj'),
+  UNPAID:      t('leave.quick.cat_unpaid'),
+  SPECIAL:     t('leave.quick.cat_special'),
+}))
 
 const eligibleTypes   = computed(() => types.value.filter(t => t.eligible))
 const ineligibleTypes = computed(() => types.value.filter(t => ! t.eligible))
@@ -87,7 +91,7 @@ onMounted(async () => {
     }
     pickDefault()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat tipe cuti')
+    toast.error(e.response?.data?.message || t('leave.quick.load_failed'))
   } finally {
     loadingTypes.value = false
   }
@@ -130,20 +134,19 @@ watch(() => form.value.start_date, (newVal) => {
 
 async function submit() {
   if (! form.value.leave_type_id) {
-    toast.warning('Pilih tipe cuti terlebih dahulu')
+    toast.warning(t('leave.quick.pick_type'))
     return
   }
   if (selectedType.value && ! selectedType.value.eligible) {
-    toast.error('Tipe cuti yang Anda pilih tidak memenuhi syarat: '
-      + selectedType.value.reasons.join(', '))
+    toast.error(t('leave.quick.not_eligible') + selectedType.value.reasons.join(', '))
     return
   }
   if (form.value.reason.trim().length < 5) {
-    toast.warning('Alasan minimal 5 karakter')
+    toast.warning(t('leave.quick.reason_min'))
     return
   }
   if (selectedType.value?.requires_doc && ! form.value.attachment.trim()) {
-    toast.warning(`Tipe cuti "${selectedType.value.name}" memerlukan lampiran dokumen pendukung.`)
+    toast.warning(t('leave.quick.doc_required', { name: selectedType.value.name }))
     return
   }
 
@@ -162,7 +165,7 @@ async function submit() {
     await api.post('/leaves', payload)
     emit('submitted')
   } catch (e) {
-    const msg = e.response?.data?.message || 'Gagal mengirim pengajuan'
+    const msg = e.response?.data?.message || t('leave.quick.send_failed')
     const errors = e.response?.data?.errors
     if (errors) {
       toast.error(msg + ': ' + Object.values(errors).flat().join(', '))
@@ -187,35 +190,35 @@ async function submit() {
         <div class="bg-gray-50 rounded p-3 text-sm">
           <div class="font-medium">{{ day.day_name }}, {{ day.date }}</div>
           <div class="text-xs text-gray-600 mt-1">
-            Status saat ini: <span class="font-medium">{{ day.status_label }}</span>
+            {{ t('leave.quick.current_status') }} <span class="font-medium">{{ day.status_label }}</span>
           </div>
         </div>
 
-        <div v-if="loadingTypes" class="text-sm text-gray-500 text-center py-3">Memuat tipe cuti...</div>
+        <div v-if="loadingTypes" class="text-sm text-gray-500 text-center py-3">{{ t('leave.quick.loading_types') }}</div>
 
         <div v-else-if="eligibleTypes.length === 0"
           class="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-          <div class="font-medium">Tidak ada tipe cuti yang dapat Anda ajukan saat ini.</div>
+          <div class="font-medium">{{ t('leave.quick.no_types_title') }}</div>
           <div class="text-xs mt-1">
-            Hubungi HR untuk mengonfirmasi data karyawan Anda (gender, status menikah, masa kerja).
+            {{ t('leave.quick.no_types_note') }}
           </div>
         </div>
 
         <template v-else>
           <div>
-            <label class="block text-sm font-medium mb-1">Tipe Cuti / Izin *</label>
+            <label class="block text-sm font-medium mb-1">{{ t('leave.quick.type_label') }}</label>
             <select v-model="form.leave_type_id" class="input w-full" required>
-              <optgroup label="Tersedia untuk Anda">
-                <option v-for="t in eligibleTypes" :key="t.id" :value="t.id">
-                  {{ t.name }} ({{ categoryLabel[t.category] || t.category }})
-                  <template v-if="t.balance">
-                    — sisa {{ t.balance.remaining }}/{{ t.balance.allocated }} hari
+              <optgroup :label="t('leave.quick.group_available')">
+                <option v-for="lt in eligibleTypes" :key="lt.id" :value="lt.id">
+                  {{ lt.name }} ({{ categoryLabel[lt.category] || lt.category }})
+                  <template v-if="lt.balance">
+                    {{ t('leave.quick.balance_remaining', { remaining: lt.balance.remaining, allocated: lt.balance.allocated }) }}
                   </template>
                 </option>
               </optgroup>
-              <optgroup v-if="ineligibleTypes.length" label="🔒 Tidak tersedia untuk Anda" disabled>
-                <option v-for="t in ineligibleTypes" :key="t.id" disabled :value="t.id">
-                  {{ t.name }} — {{ t.reasons[0] }}
+              <optgroup v-if="ineligibleTypes.length" :label="t('leave.quick.group_unavailable')" disabled>
+                <option v-for="lt in ineligibleTypes" :key="lt.id" disabled :value="lt.id">
+                  {{ lt.name }} — {{ lt.reasons[0] }}
                 </option>
               </optgroup>
             </select>
@@ -226,87 +229,86 @@ async function submit() {
               </div>
               <div v-if="selectedType.balance"
                 class="inline-block px-2 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700">
-                Saldo {{ selectedType.balance.remaining }} dari {{ selectedType.balance.allocated }} hari
-                ({{ selectedType.balance.used }} terpakai)
+                {{ t('leave.quick.balance_detail', { remaining: selectedType.balance.remaining, allocated: selectedType.balance.allocated, used: selectedType.balance.used }) }}
               </div>
               <div v-if="selectedType.is_paid"
                 class="inline-block ml-1 px-2 py-0.5 rounded-full text-[11px] bg-green-50 text-green-700">
-                Berbayar
+                {{ t('leave.quick.paid') }}
               </div>
               <div v-else
                 class="inline-block ml-1 px-2 py-0.5 rounded-full text-[11px] bg-gray-100 text-gray-600">
-                Tanpa bayaran
+                {{ t('leave.quick.unpaid') }}
               </div>
               <div v-if="selectedType.requires_doc"
                 class="text-amber-700 flex items-center gap-1 mt-1">
                 <InformationCircleIcon class="w-3.5 h-3.5" />
-                Memerlukan lampiran dokumen pendukung (mis. surat dokter).
+                {{ t('leave.quick.requires_doc') }}
               </div>
               <div v-if="selectedType.min_tenure_months" class="text-gray-500">
-                Masa kerja minimum: {{ selectedType.min_tenure_months }} bulan.
+                {{ t('leave.quick.min_tenure', { n: selectedType.min_tenure_months }) }}
               </div>
             </div>
           </div>
 
           <div v-if="selectedType" class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-sm font-medium mb-1">Mulai *</label>
+              <label class="block text-sm font-medium mb-1">{{ t('leave.quick.start') }}</label>
               <input v-model="form.start_date" type="date" class="input w-full" required
                 :min="selectedType.min_start_date" :max="selectedType.max_start_date" />
             </div>
             <div>
-              <label class="block text-sm font-medium mb-1">Selesai *</label>
+              <label class="block text-sm font-medium mb-1">{{ t('leave.quick.end') }}</label>
               <input v-model="form.end_date" type="date" class="input w-full" required
                 :min="form.start_date" :max="selectedType.max_start_date" />
             </div>
             <div class="col-span-2 text-[11px] text-gray-500">
-              Periode pengajuan: {{ fmtDateID(selectedType.min_start_date) }} – {{ fmtDateID(selectedType.max_start_date) }}.
+              {{ t('leave.quick.request_window', { from: fmtDateID(selectedType.min_start_date), to: fmtDateID(selectedType.max_start_date) }) }}
               <span v-if="policy?.current_period">
-                Mengikuti payroll <span class="font-medium">{{ policy.current_period.name }}</span>.
+                {{ t('leave.quick.following_payroll', { name: policy.current_period.name }) }}
               </span>
             </div>
           </div>
 
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" v-model="form.is_half_day" class="w-4 h-4" />
-            <span>Setengah hari</span>
+            <span>{{ t('leave.quick.half_day') }}</span>
           </label>
           <div v-if="form.is_half_day">
-            <label class="block text-sm font-medium mb-1">Bagian *</label>
+            <label class="block text-sm font-medium mb-1">{{ t('leave.quick.part') }}</label>
             <select v-model="form.half_day_part" class="input w-full">
-              <option value="MORNING">Pagi</option>
-              <option value="AFTERNOON">Siang</option>
+              <option value="MORNING">{{ t('leave.quick.morning') }}</option>
+              <option value="AFTERNOON">{{ t('leave.quick.afternoon') }}</option>
             </select>
           </div>
 
           <div>
-            <label class="block text-sm font-medium mb-1">Alasan *</label>
+            <label class="block text-sm font-medium mb-1">{{ t('leave.quick.reason') }}</label>
             <textarea v-model="form.reason" rows="3" class="input w-full"
               :placeholder="preferCategory === 'SICK'
-                ? 'Contoh: demam tinggi sejak semalam, dilampirkan surat dokter.'
-                : 'Tuliskan alasan pengajuan.'"></textarea>
-            <div class="text-xs text-gray-500 mt-1">Minimal 5 karakter. Akan ditinjau oleh atasan / HR.</div>
+                ? t('leave.quick.reason_sick_ph')
+                : t('leave.quick.reason_ph')"></textarea>
+            <div class="text-xs text-gray-500 mt-1">{{ t('leave.quick.reason_hint') }}</div>
           </div>
 
           <div>
             <label class="block text-sm font-medium mb-1">
-              Lampiran
+              {{ t('leave.quick.attachment') }}
               <span v-if="selectedType?.requires_doc" class="text-red-500">*</span>
-              <span v-else class="text-gray-400">(opsional)</span>
+              <span v-else class="text-gray-400">{{ t('leave.quick.optional') }}</span>
             </label>
             <FileUploader
               v-model="form.attachment"
               context="leave"
-              hint="Surat dokter, surat keterangan, dst. Max 5 MB."
+              :hint="t('leave.quick.attachment_hint')"
             />
           </div>
         </template>
       </div>
 
       <div class="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
-        <button class="btn-secondary" @click="emit('close')" :disabled="submitting">Batal</button>
+        <button class="btn-secondary" @click="emit('close')" :disabled="submitting">{{ t('common.cancel') }}</button>
         <button class="btn-primary" :disabled="submitting || ! form.leave_type_id" @click="submit">
-          {{ submitting ? 'Mengirim...' : 'Kirim Pengajuan' }}
+          {{ submitting ? t('leave.quick.submitting') : t('leave.quick.submit') }}
         </button>
       </div>
     </div>

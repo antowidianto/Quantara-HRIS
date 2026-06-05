@@ -7,6 +7,7 @@ import {
   ChevronLeftIcon, ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import { useI18n } from '@/locales'
 
 /**
  * Kalender cuti tim — visualisasi siapa cuti di rentang tanggal.
@@ -16,6 +17,7 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
  */
 
 const toast = useToast()
+const { t } = useI18n()
 
 const today = new Date()
 const filters = reactive({
@@ -54,7 +56,7 @@ async function fetchData() {
     const res = await api.get('/leaves/team-calendar', { params })
     data.value = res.data.data
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat kalender')
+    toast.error(e.response?.data?.message || t('leave.cal.load_failed'))
   } finally {
     loading.value = false
   }
@@ -110,7 +112,11 @@ const swimlanes = computed(() => {
 function dayHeader(d) {
   const date = new Date(d)
   const dow = date.getDay()
-  const labels = ['Min','Sen','Sel','Rab','Kam','Jum','Sab']
+  const labels = [
+    t('leave.cal.day_sun'), t('leave.cal.day_mon'), t('leave.cal.day_tue'),
+    t('leave.cal.day_wed'), t('leave.cal.day_thu'), t('leave.cal.day_fri'),
+    t('leave.cal.day_sat'),
+  ]
   return { dom: date.getDate(), dow: labels[dow], isWeekend: dow === 0 || dow === 6 }
 }
 
@@ -132,7 +138,10 @@ function categoryLabel(c) {
 }
 
 function tooltip(leave) {
-  return `${leave.employee_name}: ${leave.leave_name} (${leave.start_date} – ${leave.end_date}, ${leave.days} hari) — ${leave.status}`
+  return t('leave.cal.tooltip', {
+    name: leave.employee_name, leave: leave.leave_name,
+    from: leave.start_date, to: leave.end_date, days: leave.days, status: leave.status,
+  })
 }
 </script>
 
@@ -140,18 +149,18 @@ function tooltip(leave) {
   <div>
     <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <CalendarDaysIcon class="w-6 h-6" /> Kalender Cuti Tim
+        <CalendarDaysIcon class="w-6 h-6" /> {{ t('leave.cal.title') }}
       </h1>
       <div class="flex gap-2">
-        <button class="btn-secondary" @click="shiftMonth(-1)" title="Bulan sebelumnya">
+        <button class="btn-secondary" @click="shiftMonth(-1)" :title="t('leave.cal.prev_month')">
           <ChevronLeftIcon class="w-4 h-4" />
         </button>
-        <button class="btn-secondary" @click="shiftMonth(1)" title="Bulan berikutnya">
+        <button class="btn-secondary" @click="shiftMonth(1)" :title="t('leave.cal.next_month')">
           <ChevronRightIcon class="w-4 h-4" />
         </button>
         <button class="btn-secondary" @click="fetchData" :disabled="loading">
           <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" />
-          Refresh
+          {{ t('common.refresh') }}
         </button>
       </div>
     </div>
@@ -160,34 +169,34 @@ function tooltip(leave) {
     <div class="card mb-4">
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div>
-          <label class="label">Mulai</label>
+          <label class="label">{{ t('leave.cal.start') }}</label>
           <input v-model="filters.start_date" type="date" class="input" @change="fetchData" />
         </div>
         <div>
-          <label class="label">Selesai</label>
+          <label class="label">{{ t('leave.cal.end') }}</label>
           <input v-model="filters.end_date" type="date" class="input" @change="fetchData" />
         </div>
         <div>
-          <label class="label">Cabang</label>
+          <label class="label">{{ t('leave.cal.branch') }}</label>
           <SearchableSelect
             v-model="filters.branch_id"
             :items="branches"
             value-key="id"
             label-key="name"
             :search-keys="['name','code','city']"
-            placeholder="— Semua —"
+            :placeholder="t('leave.cal.all')"
             @change="fetchData"
           />
         </div>
         <div>
-          <label class="label">Departemen</label>
+          <label class="label">{{ t('leave.cal.department') }}</label>
           <SearchableSelect
             v-model="filters.department_id"
             :items="departments"
             value-key="id"
             label-key="name"
             :search-keys="['name','code']"
-            placeholder="— Semua —"
+            :placeholder="t('leave.cal.all')"
             @change="fetchData"
           />
         </div>
@@ -201,7 +210,7 @@ function tooltip(leave) {
           <thead class="sticky top-0 bg-white z-10">
             <tr>
               <th class="sticky left-0 bg-white z-20 px-3 py-2 text-left border-b border-gray-200 min-w-[220px]">
-                Karyawan ({{ swimlanes.length }})
+                {{ t('leave.cal.employees', { n: swimlanes.length }) }}
               </th>
               <th
                 v-for="d in dates"
@@ -216,11 +225,11 @@ function tooltip(leave) {
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td :colspan="dates.length + 1" class="text-center py-8 text-gray-400">Memuat…</td>
+              <td :colspan="dates.length + 1" class="text-center py-8 text-gray-400">{{ t('leave.cal.loading') }}</td>
             </tr>
             <tr v-else-if="swimlanes.length === 0">
               <td :colspan="dates.length + 1" class="text-center py-12 text-gray-400">
-                Tidak ada cuti pada rentang ini
+                {{ t('leave.cal.no_leaves') }}
               </td>
             </tr>
             <tr v-for="row in swimlanes" :key="row.employee_id" class="hover:bg-gray-50">
@@ -248,14 +257,14 @@ function tooltip(leave) {
       </div>
       <!-- Legend -->
       <div class="card-body flex flex-wrap items-center gap-4 text-xs text-gray-500 border-t border-gray-100">
-        <span class="font-medium">Keterangan:</span>
+        <span class="font-medium">{{ t('leave.cal.legend') }}</span>
         <span class="flex items-center gap-1">
-          <span class="inline-block w-4 h-4 rounded-sm bg-blue-200 border border-blue-400"></span> Disetujui
+          <span class="inline-block w-4 h-4 rounded-sm bg-blue-200 border border-blue-400"></span> {{ t('leave.cal.legend_approved') }}
         </span>
         <span class="flex items-center gap-1">
-          <span class="inline-block w-4 h-4 rounded-sm bg-amber-200 border border-amber-400 border-dashed"></span> Menunggu
+          <span class="inline-block w-4 h-4 rounded-sm bg-amber-200 border border-amber-400 border-dashed"></span> {{ t('leave.cal.legend_pending') }}
         </span>
-        <span class="text-gray-400">Kode: CT=Tahunan · SK=Sakit · CM=Melahirkan · CN=Menikah · CD=Duka Cita</span>
+        <span class="text-gray-400">{{ t('leave.cal.legend_codes') }}</span>
       </div>
     </div>
   </div>
