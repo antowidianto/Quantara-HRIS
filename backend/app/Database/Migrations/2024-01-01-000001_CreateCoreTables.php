@@ -135,6 +135,36 @@ class CreateCoreTables extends Migration
         $this->forge->addUniqueKey(['company_id', 'slug']);
         $this->forge->createTable('roles');
 
+        // ─── SEED BASE SYSTEM ROLES ───────────────────────────────────
+        // Migrasi berikutnya melakukan grant ke role_permissions dengan
+        // role_id 1-5 (super_admin, hr_admin, dst). Pada MySQL/MariaDB
+        // foreign key di-enforce, jadi role wajib ADA sebelum grant.
+        // (Di SQLite lama FK tidak dipaksa sehingga ini tak terlihat.)
+        // InitialSeeder tetap idempotent karena cek berdasarkan slug.
+        $now        = date('Y-m-d H:i:s');
+        $baseRoles  = [
+            ['id' => 1, 'slug' => 'super_admin', 'name' => 'Super Admin'],
+            ['id' => 2, 'slug' => 'hr_admin',    'name' => 'HR Admin'],
+            ['id' => 3, 'slug' => 'manager',     'name' => 'Manager'],
+            ['id' => 4, 'slug' => 'employee',    'name' => 'Employee'],
+            ['id' => 5, 'slug' => 'finance',     'name' => 'Finance'],
+        ];
+        foreach ($baseRoles as $r) {
+            $exists = $this->db->table('roles')->where('slug', $r['slug'])->countAllResults();
+            if ($exists > 0) {
+                continue;
+            }
+            $this->db->table('roles')->insert([
+                'id'         => $r['id'],
+                'company_id' => null,
+                'slug'       => $r['slug'],
+                'name'       => $r['name'],
+                'is_system'  => 1,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
         // ─── PERMISSIONS ──────────────────────────────────────────────
         $this->forge->addField([
             'id'           => ['type' => 'INT', 'unsigned' => true, 'auto_increment' => true],

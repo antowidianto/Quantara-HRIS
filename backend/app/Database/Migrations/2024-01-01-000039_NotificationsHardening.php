@@ -25,6 +25,13 @@ class NotificationsHardening extends Migration
         $forge = \Config\Database::forge();
         $db    = \Config\Database::connect();
 
+        // Reset cache skema: migrasi sebelumnya (#027) mungkin sudah
+        // menambah kolom di koneksi yang sama. getFieldNames() men-cache
+        // hasil per-koneksi, jadi tanpa reset kita bisa baca daftar kolom
+        // basi → guard idempotent gagal → "Duplicate column". (Di SQLite
+        // lama tak terlihat karena alur cache berbeda.)
+        $db->resetDataCache();
+
         // ─── users.web_push_subscription ────────────────────────────
         if ($db->tableExists('users')) {
             $cols = $db->getFieldNames('users');
