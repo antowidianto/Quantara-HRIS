@@ -10,6 +10,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 import ExcelImporter from '@/components/ExcelImporter.vue'
+import { useI18n } from '@/locales'
 
 /**
  * Halaman saldo cuti karyawan dengan breakdown:
@@ -25,6 +26,7 @@ import ExcelImporter from '@/components/ExcelImporter.vue'
 const auth = useAuthStore()
 const route = useRoute()
 const toast = useToast()
+const { t } = useI18n()
 
 const employees = ref([])
 const filters = reactive({
@@ -43,7 +45,7 @@ async function loadEmployees() { /* deprecated: server-side search */ }
 async function fetchBalance() {
   const empId = filters.employee_id || auth.user?.employee_id
   if (! empId) {
-    toast.warning('Karyawan tidak ditemukan')
+    toast.warning(t('leave.bal.not_found'))
     return
   }
   loading.value = true
@@ -51,7 +53,7 @@ async function fetchBalance() {
     const res = await api.get(`/leave-balances/${empId}`, { params: { year: filters.year } })
     data.value = res.data.data
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat saldo')
+    toast.error(e.response?.data?.message || t('leave.bal.load_failed'))
   } finally {
     loading.value = false
   }
@@ -106,10 +108,10 @@ const totalAtRisk = computed(() => {
 
 function categoryLabel(c) {
   const map = {
-    ANNUAL: 'Tahunan', SICK: 'Sakit', MATERNITY: 'Melahirkan',
-    PATERNITY: 'Pendamping Melahirkan', MENSTRUAL: 'Haid',
-    MARRIAGE: 'Menikah', BEREAVEMENT: 'Duka Cita', HAJJ: 'Haji',
-    UNPAID: 'Tanpa Bayar', SPECIAL: 'Khusus',
+    ANNUAL: t('leave.bal.cat_annual'), SICK: t('leave.bal.cat_sick'), MATERNITY: t('leave.bal.cat_maternity'),
+    PATERNITY: t('leave.bal.cat_paternity'), MENSTRUAL: t('leave.bal.cat_menstrual'),
+    MARRIAGE: t('leave.bal.cat_marriage'), BEREAVEMENT: t('leave.bal.cat_bereavement'), HAJJ: t('leave.bal.cat_hajj'),
+    UNPAID: t('leave.bal.cat_unpaid'), SPECIAL: t('leave.bal.cat_special'),
   }
   return map[c] || c
 }
@@ -129,18 +131,18 @@ const totals = computed(() => {
   <div>
     <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <CalendarDaysIcon class="w-6 h-6" /> Saldo Cuti
+        <CalendarDaysIcon class="w-6 h-6" /> {{ t('leave.bal.title') }}
       </h1>
       <div class="flex items-center gap-2 flex-wrap">
         <!-- Sprint 3 — bulk import saldo cuti awal dari xlsx -->
         <ExcelImporter
           v-if="auth.can('leave_balances.bulk_import')"
           resource="leave_balances"
-          button-label="Import Saldo Cuti"
+          :button-label="t('leave.bal.import_button')"
           @committed="fetchBalance()"
         />
         <button class="btn-secondary" @click="fetchBalance" :disabled="loading">
-          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
+          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> {{ t('common.refresh') }}
         </button>
       </div>
     </div>
@@ -149,16 +151,16 @@ const totals = computed(() => {
     <div class="card mb-4">
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div v-if="isHr" class="md:col-span-2">
-          <label class="label">Karyawan</label>
+          <label class="label">{{ t('leave.bal.employee') }}</label>
           <EmployeeSearchSelect
             v-model="filters.employee_id"
-            placeholder="— Saya sendiri —"
+            :placeholder="t('leave.bal.myself')"
             :only-active="false"
             @change="fetchBalance"
           />
         </div>
         <div>
-          <label class="label">Tahun</label>
+          <label class="label">{{ t('leave.bal.year') }}</label>
           <select v-model.number="filters.year" class="input" @change="fetchBalance">
             <option v-for="y in [new Date().getFullYear() - 2, new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1]" :key="y" :value="y">
               {{ y }}
@@ -174,12 +176,10 @@ const totals = computed(() => {
       <ExclamationTriangleIcon class="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
       <div class="flex-1">
         <div class="font-semibold text-amber-900">
-          {{ fmtDays(totalAtRisk) }} hari cuti akan hangus 1 Januari {{ filters.year + 1 }}
+          {{ t('leave.bal.at_risk_title', { n: fmtDays(totalAtRisk), year: filters.year + 1 }) }}
         </div>
         <div class="text-sm text-amber-800 mt-1">
-          Saldo tahun ini melebihi batas yang bisa di-carry-over ke tahun depan.
-          Silakan ajukan cuti sebelum akhir tahun supaya saldo tidak hangus.
-          Detail per tipe cuti ada di tabel di bawah.
+          {{ t('leave.bal.at_risk_note') }}
         </div>
       </div>
     </div>
@@ -187,43 +187,43 @@ const totals = computed(() => {
     <!-- Total cards -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
       <div class="card-body bg-blue-50 rounded-lg border border-blue-100">
-        <div class="text-xs text-blue-700 font-medium">Quota Tahun Ini</div>
-        <div class="text-2xl font-bold text-blue-900">{{ fmtDays(totals.allocated) }} <span class="text-sm font-normal">hari</span></div>
+        <div class="text-xs text-blue-700 font-medium">{{ t('leave.bal.total_quota') }}</div>
+        <div class="text-2xl font-bold text-blue-900">{{ fmtDays(totals.allocated) }} <span class="text-sm font-normal">{{ t('leave.bal.days') }}</span></div>
       </div>
       <div class="card-body bg-purple-50 rounded-lg border border-purple-100">
-        <div class="text-xs text-purple-700 font-medium">Carry-over</div>
-        <div class="text-2xl font-bold text-purple-900">{{ fmtDays(totals.carried) }} <span class="text-sm font-normal">hari</span></div>
+        <div class="text-xs text-purple-700 font-medium">{{ t('leave.bal.total_carried') }}</div>
+        <div class="text-2xl font-bold text-purple-900">{{ fmtDays(totals.carried) }} <span class="text-sm font-normal">{{ t('leave.bal.days') }}</span></div>
       </div>
       <div class="card-body bg-amber-50 rounded-lg border border-amber-100">
-        <div class="text-xs text-amber-700 font-medium">Sudah Dipakai</div>
-        <div class="text-2xl font-bold text-amber-900">{{ fmtDays(totals.used) }} <span class="text-sm font-normal">hari</span></div>
+        <div class="text-xs text-amber-700 font-medium">{{ t('leave.bal.total_used') }}</div>
+        <div class="text-2xl font-bold text-amber-900">{{ fmtDays(totals.used) }} <span class="text-sm font-normal">{{ t('leave.bal.days') }}</span></div>
       </div>
       <div class="card-body bg-emerald-50 rounded-lg border border-emerald-100">
-        <div class="text-xs text-emerald-700 font-medium">Sisa Saldo</div>
-        <div class="text-2xl font-bold text-emerald-900">{{ fmtDays(totals.remaining) }} <span class="text-sm font-normal">hari</span></div>
+        <div class="text-xs text-emerald-700 font-medium">{{ t('leave.bal.total_remaining') }}</div>
+        <div class="text-2xl font-bold text-emerald-900">{{ fmtDays(totals.remaining) }} <span class="text-sm font-normal">{{ t('leave.bal.days') }}</span></div>
       </div>
     </div>
 
     <!-- Per-type breakdown -->
     <div class="card">
-      <div class="card-header"><span class="font-medium">Detail per Tipe Cuti</span></div>
+      <div class="card-header"><span class="font-medium">{{ t('leave.bal.detail_title') }}</span></div>
       <div class="overflow-x-auto">
         <table class="table">
           <thead>
             <tr>
-              <th>Tipe Cuti</th>
-              <th>Kategori</th>
-              <th class="text-right">Quota</th>
-              <th class="text-right">Carry-over</th>
-              <th class="text-right">Dipakai</th>
-              <th class="text-right">Sisa</th>
-              <th>Catatan</th>
+              <th>{{ t('leave.bal.col_type') }}</th>
+              <th>{{ t('leave.bal.col_category') }}</th>
+              <th class="text-right">{{ t('leave.bal.col_quota') }}</th>
+              <th class="text-right">{{ t('leave.bal.col_carryover') }}</th>
+              <th class="text-right">{{ t('leave.bal.col_used') }}</th>
+              <th class="text-right">{{ t('leave.bal.col_remaining') }}</th>
+              <th>{{ t('leave.bal.col_note') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td colspan="7" class="text-center py-8 text-gray-400">Memuat…</td></tr>
+            <tr v-if="loading"><td colspan="7" class="text-center py-8 text-gray-400">{{ t('leave.bal.loading') }}</td></tr>
             <tr v-else-if="! data || data.balances.length === 0">
-              <td colspan="7" class="text-center py-8 text-gray-400">Belum ada saldo untuk tahun ini</td>
+              <td colspan="7" class="text-center py-8 text-gray-400">{{ t('leave.bal.no_balance') }}</td>
             </tr>
             <tr v-for="b in data?.balances || []" :key="b.leave_type_id">
               <td>
@@ -234,7 +234,7 @@ const totals = computed(() => {
               <td class="text-right">
                 {{ fmtDays(b.allocated) }}
                 <span v-if="b.is_prorated && b.prorate_factor < 1" class="text-xs text-gray-500 block">
-                  ({{ b.months_worked }}/12 bln)
+                  {{ t('leave.bal.months_worked', { n: b.months_worked }) }}
                 </span>
               </td>
               <td class="text-right">
@@ -244,27 +244,26 @@ const totals = computed(() => {
               <td class="text-right text-amber-700">{{ fmtDays(b.used) }}</td>
               <td class="text-right">
                 <span :class="['inline-block px-2 py-0.5 rounded-full text-xs border', badgeColor(b)]">
-                  {{ fmtDays(b.remaining) }} hari
+                  {{ t('leave.bal.remaining_days', { n: fmtDays(b.remaining) }) }}
                 </span>
               </td>
               <td class="text-xs">
                 <!-- Risiko hangus karena melebihi cap (Sprint 7 / H1.2) -->
                 <div v-if="atRiskDays(b) > 0"
-                  class="flex items-center gap-1 text-amber-700 font-medium mb-1"
-                  :title="`Sisa ${fmtDays(b.remaining)} hari, cap carry-over ${b.config.carry_over_max_days} hari`">
+                  class="flex items-center gap-1 text-amber-700 font-medium mb-1">
                   <ExclamationTriangleIcon class="w-3.5 h-3.5" />
-                  {{ fmtDays(atRiskDays(b)) }} hari akan hangus 1 Jan {{ filters.year + 1 }}
+                  {{ t('leave.bal.at_risk_row', { n: fmtDays(atRiskDays(b)), year: filters.year + 1 }) }}
                 </div>
                 <div v-if="b.expires_at" class="flex items-center gap-1"
                   :class="b.is_expired ? 'text-red-600' : 'text-gray-500'">
                   <ExclamationTriangleIcon v-if="b.is_expired" class="w-3.5 h-3.5" />
-                  Carry-over berakhir {{ b.expires_at }}
-                  <span v-if="b.is_expired"> (kadaluarsa)</span>
+                  {{ t('leave.bal.carryover_ends', { date: b.expires_at }) }}
+                  <span v-if="b.is_expired">{{ t('leave.bal.expired') }}</span>
                 </div>
                 <div v-else-if="b.config.is_carry_over_allowed" class="text-gray-500">
-                  Bisa di-carry max {{ b.config.carry_over_max_days || '∞' }} hari
+                  {{ t('leave.bal.can_carry', { n: b.config.carry_over_max_days || '∞' }) }}
                 </div>
-                <div v-else class="text-gray-400">Reset tiap tahun</div>
+                <div v-else class="text-gray-400">{{ t('leave.bal.reset_yearly') }}</div>
               </td>
             </tr>
           </tbody>
@@ -276,9 +275,7 @@ const totals = computed(() => {
     <div class="mt-4 flex items-start gap-2 text-sm text-gray-500 bg-gray-50 rounded p-3">
       <InformationCircleIcon class="w-5 h-5 flex-shrink-0 text-gray-400 mt-0.5" />
       <div>
-        Quota di-prorate proporsional jika Anda bergabung di pertengahan tahun.
-        Carry-over mengacu UU 13/2003 Pasal 79: cuti yang tidak terpakai dalam
-        6 bulan setelah masa berlakunya dapat dianggap gugur.
+        {{ t('leave.bal.help_text') }}
       </div>
     </div>
   </div>
