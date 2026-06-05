@@ -157,9 +157,13 @@ class EmployeeTransferService
 
             // tujuan
             'new_branch_id'           => $newBranchId,
+            'new_branch_name'         => $newBranchName,
             'new_department_id'       => $newDeptId,
+            'new_department_name'     => $newDeptName,
             'new_position_id'         => $newPosId,
+            'new_position_name'       => $newPosName,
             'new_work_location_id'    => $newWorkLocId,
+            'new_work_location_name'  => $newWorkLocName,
 
             'effective_date'          => $effDate,
             'submitted_at'            => $submittedAt,
