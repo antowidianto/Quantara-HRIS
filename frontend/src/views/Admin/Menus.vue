@@ -21,7 +21,9 @@ import { availableIconNames, resolveIcon } from '@/components/menu/iconMap'
 import {
   PlusIcon, ArrowPathIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from '@/locales'
 
+const { t } = useI18n()
 const menuStore = useMenuStore()
 
 const tree = ref([])
@@ -53,7 +55,7 @@ function emptyForm() {
 
 // Flat parent picker (PARENT + SECTION saja)
 const parentOptions = computed(() => {
-  const out = [{ id: null, label: '— Top level (no parent) —' }]
+  const out = [{ id: null, label: t('menus.topLevel') }]
   const walk = (nodes, depth) => {
     for (const n of nodes || []) {
       if (n.type === 'SECTION' || n.type === 'PARENT') {
@@ -78,7 +80,7 @@ async function load() {
     const res = await api.get('/menus')
     tree.value = res.data?.data?.tree || []
   } catch (e) {
-    error.value = e?.response?.data?.message || e?.message || 'Gagal memuat menu'
+    error.value = e?.response?.data?.message || e?.message || t('menus.loadFailed')
   } finally {
     loading.value = false
   }
@@ -135,20 +137,20 @@ async function submit() {
     // Refresh sidebar user supaya perubahan tampak tanpa reload halaman.
     await menuStore.refresh()
   } catch (e) {
-    error.value = e?.response?.data?.message || 'Gagal menyimpan menu'
+    error.value = e?.response?.data?.message || t('menus.saveFailed')
   } finally {
     saving.value = false
   }
 }
 
 async function remove(node) {
-  if (! confirm(`Hapus menu "${node.label}" beserta semua sub-menunya?`)) return
+  if (! confirm(t('menus.confirmDelete', { label: node.label }))) return
   try {
     await api.delete(`/menus/${node.id}`)
     await load()
     await menuStore.refresh()
   } catch (e) {
-    alert(e?.response?.data?.message || 'Gagal menghapus menu')
+    alert(e?.response?.data?.message || t('menus.deleteFailed'))
   }
 }
 
@@ -158,7 +160,7 @@ async function toggleActive(node) {
     await load()
     await menuStore.refresh()
   } catch (e) {
-    alert(e?.response?.data?.message || 'Gagal mengubah status menu')
+    alert(e?.response?.data?.message || t('menus.statusChangeFailed'))
   }
 }
 
@@ -185,7 +187,7 @@ async function move(node, direction, siblings) {
     await load()
     await menuStore.refresh()
   } catch (e) {
-    alert(e?.response?.data?.message || 'Gagal mengubah urutan')
+    alert(e?.response?.data?.message || t('menus.reorderFailed'))
   }
 }
 
@@ -197,10 +199,9 @@ onMounted(load)
     <!-- Header -->
     <div class="flex items-start justify-between gap-3">
       <div>
-        <h1 class="text-xl font-semibold text-gray-800">Menu Manager</h1>
+        <h1 class="text-xl font-semibold text-gray-800">{{ t('menus.title') }}</h1>
         <p class="text-sm text-gray-500 mt-0.5">
-          Atur menu sidebar (urutan, parent dropdown, label, ikon). Perubahan
-          langsung tampak setelah Simpan tanpa rebuild frontend.
+          {{ t('menus.subtitle') }}
         </p>
       </div>
       <div class="flex gap-2">
@@ -209,14 +210,14 @@ onMounted(load)
           class="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50"
         >
           <ArrowPathIcon class="w-4 h-4" />
-          <span>Refresh</span>
+          <span>{{ t('common.refresh') }}</span>
         </button>
         <button
           @click="openCreate(null)"
           class="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-md bg-primary-600 text-white hover:bg-primary-700"
         >
           <PlusIcon class="w-4 h-4" />
-          <span>Tambah Menu</span>
+          <span>{{ t('menus.addMenu') }}</span>
         </button>
       </div>
     </div>
@@ -229,10 +230,10 @@ onMounted(load)
     <!-- Tree -->
     <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
       <div v-if="loading" class="p-6 text-center text-sm text-gray-500">
-        Memuat...
+        {{ t('common.loading') }}
       </div>
       <div v-else-if="tree.length === 0" class="p-6 text-center text-sm text-gray-500">
-        Belum ada menu. Klik "Tambah Menu" untuk membuat baru.
+        {{ t('menus.noMenus') }}
       </div>
       <ul v-else class="divide-y divide-gray-100">
         <MenuRow
@@ -258,7 +259,7 @@ onMounted(load)
       <div class="bg-white w-full max-w-2xl rounded-lg shadow-xl my-8">
         <div class="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
           <h2 class="text-base font-semibold text-gray-800">
-            {{ formMode === 'create' ? 'Tambah Menu' : 'Ubah Menu' }}
+            {{ formMode === 'create' ? t('menus.addMenu') : t('menus.editMenu') }}
           </h2>
           <button @click="showForm = false"
             class="text-gray-400 hover:text-gray-600">
@@ -269,7 +270,7 @@ onMounted(load)
         <form @submit.prevent="submit" class="px-5 py-4 space-y-4">
           <div class="grid grid-cols-2 gap-4">
             <label class="block text-sm">
-              <span class="text-gray-700">Tipe</span>
+              <span class="text-gray-700">{{ t('menus.form.type') }}</span>
               <select v-model="form.type"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500">
                 <option value="SECTION">SECTION (header grup)</option>
@@ -279,7 +280,7 @@ onMounted(load)
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Parent</span>
+              <span class="text-gray-700">{{ t('menus.form.parent') }}</span>
               <select v-model="form.parent_id"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500">
                 <option v-for="p in parentOptions" :key="p.id ?? 'root'"
@@ -288,31 +289,31 @@ onMounted(load)
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Kode (unik) <span class="text-red-500">*</span></span>
+              <span class="text-gray-700">{{ t('menus.form.code') }} <span class="text-red-500">*</span></span>
               <input v-model="form.code" required maxlength="100"
                 placeholder="mis. hr.employees"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500" />
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Label <span class="text-red-500">*</span></span>
+              <span class="text-gray-700">{{ t('menus.form.label') }} <span class="text-red-500">*</span></span>
               <input v-model="form.label" required maxlength="150"
                 placeholder="mis. Karyawan"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500" />
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Translation key</span>
+              <span class="text-gray-700">{{ t('menus.form.translationKey') }}</span>
               <input v-model="form.translation_key" maxlength="150"
                 placeholder="mis. nav.items.employees"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500" />
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Icon</span>
+              <span class="text-gray-700">{{ t('menus.form.icon') }}</span>
               <select v-model="form.icon"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500">
-                <option value="">— Tanpa icon —</option>
+                <option value="">— {{ t('menus.form.noIcon') }} —</option>
                 <option v-for="n in iconNames" :key="n" :value="n">{{ n }}</option>
               </select>
               <span v-if="form.icon" class="mt-1 inline-flex items-center gap-1 text-xs text-gray-500">
@@ -322,38 +323,38 @@ onMounted(load)
             </label>
 
             <label class="block text-sm col-span-2">
-              <span class="text-gray-700">Route path (untuk ITEM)</span>
+              <span class="text-gray-700">{{ t('menus.form.routePath') }}</span>
               <input v-model="form.route_path" maxlength="255"
                 placeholder="mis. /employees"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500" />
               <span class="text-xs text-gray-400 mt-0.5 block">
-                Kosongkan untuk SECTION / PARENT.
+                {{ t('menus.form.routePathHelp') }}
               </span>
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Permission slug</span>
+              <span class="text-gray-700">{{ t('menus.form.permission') }}</span>
               <input v-model="form.permission" maxlength="100"
                 placeholder="mis. employee.view"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500" />
               <span class="text-xs text-gray-400 mt-0.5 block">
-                Kosong = selalu visible.
+                {{ t('menus.form.permissionHelp') }}
               </span>
             </label>
 
             <label class="block text-sm">
-              <span class="text-gray-700">Urutan (sort_order)</span>
+              <span class="text-gray-700">{{ t('menus.form.sortOrder') }}</span>
               <input v-model.number="form.sort_order" type="number"
                 class="mt-1 w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-primary-500 focus:ring-primary-500" />
             </label>
 
             <label class="inline-flex items-center gap-2 text-sm">
               <input v-model="form.is_active" type="checkbox" class="rounded text-primary-600" />
-              <span class="text-gray-700">Aktif</span>
+              <span class="text-gray-700">{{ t('common.active') }}</span>
             </label>
             <label class="inline-flex items-center gap-2 text-sm">
               <input v-model="form.super_admin_only" type="checkbox" class="rounded text-primary-600" />
-              <span class="text-gray-700">Khusus super admin</span>
+              <span class="text-gray-700">{{ t('menus.form.superAdminOnly') }}</span>
             </label>
           </div>
 
@@ -362,11 +363,11 @@ onMounted(load)
           <div class="flex justify-end gap-2 pt-2 border-t border-gray-100">
             <button type="button" @click="showForm = false"
               class="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50">
-              Batal
+              {{ t('common.cancel') }}
             </button>
             <button type="submit" :disabled="saving"
               class="px-3 py-2 text-sm rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60">
-              {{ saving ? 'Menyimpan...' : 'Simpan' }}
+              {{ saving ? t('common.saving') : t('common.save') }}
             </button>
           </div>
         </form>

@@ -14,6 +14,7 @@ const { t } = useI18n()
 
 const items = ref([])
 const meta = ref({ total: 0, page: 1, per_page: 30, pages: 1 })
+const perPage = ref(30)
 const branches = ref([])
 const departments = ref([])
 const loading = ref(false)
@@ -45,7 +46,7 @@ async function loadMasters() {
 async function fetchData(page = 1) {
   loading.value = true
   try {
-    const params = { page, per_page: 30, ...filters.value }
+    const params = { page, per_page: perPage.value, ...filters.value }
     Object.keys(params).forEach(k => {
       if (params[k] === '' || params[k] === null) delete params[k]
     })
@@ -184,9 +185,17 @@ onMounted(async () => {
         </table>
       </div>
 
-      <div v-if="meta.pages > 1" class="px-4 py-3 flex items-center justify-between border-t border-gray-100 text-sm">
+      <div class="px-4 py-3 flex items-center justify-between border-t border-gray-100 text-sm">
         <span class="text-gray-500">{{ t('attendance.list.total', { n: meta.total }) }}</span>
-        <div class="flex gap-1">
+        <div class="flex items-center gap-2">
+          <label class="text-gray-500">{{ t('common.per_page') }}:</label>
+          <select v-model.number="perPage" class="input py-1 w-20 text-sm" @change="fetchData(1)">
+            <option :value="10">10</option>
+            <option :value="20">20</option>
+            <option :value="30">30</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
           <button class="btn-secondary" :disabled="meta.page <= 1" @click="fetchData(meta.page - 1)">‹</button>
           <span class="px-3 py-1">{{ t('attendance.list.page_of', { page: meta.page, pages: meta.pages }) }}</span>
           <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="fetchData(meta.page + 1)">›</button>

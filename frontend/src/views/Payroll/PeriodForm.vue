@@ -3,15 +3,21 @@ import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
+import { useI18n } from '@/locales'
 
 const router = useRouter()
 const toast = useToast()
+const { t, locale } = useI18n()
 const saving = ref(false)
 const now = new Date()
 
 const MONTH_NAMES_ID = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+]
+const MONTH_NAMES_EN = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
 function pad(n) { return String(n).padStart(2, '0') }
@@ -20,7 +26,7 @@ function ymd(d) {
 }
 function buildName(year, month, type) {
   const monthIdx = Math.min(12, Math.max(1, Number(month) || 1)) - 1
-  const monthName = MONTH_NAMES_ID[monthIdx]
+  const monthName = locale.value === 'id' ? MONTH_NAMES_ID[monthIdx] : MONTH_NAMES_EN[monthIdx]
   if (type === 'THR') return `THR ${year}`
   if (type === 'BONUS') return `Bonus ${monthName} ${year}`
   return `${monthName} ${year}`
@@ -68,15 +74,15 @@ async function submit() {
   saving.value = true
   try {
     const res = await api.post('/payroll-periods', form.value)
-    toast.success('Periode dibuat')
+    toast.success(t('payroll.period_form.created'))
     router.push(`/payroll/periods/${res.data.data.id}`)
   } catch (e) {
     const resp = e.response?.data
     // Backend kirim code=PERIOD_DUPLICATE → tampilkan pesan konkret.
     if (resp?.code === 'PERIOD_DUPLICATE') {
-      toast.error(resp.message || 'Periode untuk bulan ini sudah ada')
+      toast.error(resp.message || t('payroll.period_form.duplicate'))
     } else {
-      toast.error(resp?.message || 'Gagal membuat periode')
+      toast.error(resp?.message || t('payroll.period_form.failed'))
     }
   } finally {
     saving.value = false
@@ -86,28 +92,30 @@ async function submit() {
 
 <template>
   <div class="max-w-2xl">
-    <h1 class="text-2xl font-bold mb-4">Buat Periode Payroll</h1>
+    <h1 class="text-2xl font-bold mb-4">{{ t('payroll.period_form.title') }}</h1>
     <form @submit.prevent="submit" class="card">
       <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="md:col-span-2">
-          <label class="label">Nama Periode</label>
+          <label class="label">{{ t('payroll.period_form.name') }}</label>
           <input v-model="form.name" class="input" required @input="onNameInput" />
         </div>
-        <div><label class="label">Tipe</label>
+        <div><label class="label">{{ t('payroll.period_form.type') }}</label>
           <select v-model="form.type" class="input">
-            <option value="MONTHLY">Bulanan</option><option value="THR">THR</option><option value="BONUS">Bonus</option>
+            <option value="MONTHLY">{{ t('payroll.period_form.monthly') }}</option>
+            <option value="THR">{{ t('payroll.period_form.thr') }}</option>
+            <option value="BONUS">{{ t('payroll.period_form.bonus') }}</option>
           </select>
         </div>
-        <div><label class="label">Tahun</label><input v-model.number="form.period_year" type="number" class="input" required /></div>
-        <div><label class="label">Bulan</label><input v-model.number="form.period_month" type="number" min="1" max="12" class="input" required /></div>
-        <div><label class="label">Cutoff Absensi</label><input v-model="form.cutoff_attendance_date" type="date" class="input" /></div>
-        <div><label class="label">Tanggal Mulai</label><input v-model="form.start_date" type="date" class="input" required /></div>
-        <div><label class="label">Tanggal Akhir</label><input v-model="form.end_date" type="date" class="input" required /></div>
-        <div class="md:col-span-2"><label class="label">Tanggal Bayar</label><input v-model="form.pay_date" type="date" class="input" required /></div>
+        <div><label class="label">{{ t('payroll.period_form.year') }}</label><input v-model.number="form.period_year" type="number" class="input" required /></div>
+        <div><label class="label">{{ t('payroll.period_form.month') }}</label><input v-model.number="form.period_month" type="number" min="1" max="12" class="input" required /></div>
+        <div><label class="label">{{ t('payroll.period_form.cutoff') }}</label><input v-model="form.cutoff_attendance_date" type="date" class="input" /></div>
+        <div><label class="label">{{ t('payroll.period_form.start_date') }}</label><input v-model="form.start_date" type="date" class="input" required /></div>
+        <div><label class="label">{{ t('payroll.period_form.end_date') }}</label><input v-model="form.end_date" type="date" class="input" required /></div>
+        <div class="md:col-span-2"><label class="label">{{ t('payroll.period_form.pay_date') }}</label><input v-model="form.pay_date" type="date" class="input" required /></div>
       </div>
       <div class="card-body border-t flex justify-end gap-2">
-        <button type="button" class="btn-secondary" @click="$router.back()">Batal</button>
-        <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? 'Menyimpan...' : 'Buat Periode' }}</button>
+        <button type="button" class="btn-secondary" @click="$router.back()">{{ t('payroll.period_form.cancel') }}</button>
+        <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? t('payroll.period_form.saving') : t('payroll.period_form.submit') }}</button>
       </div>
     </form>
   </div>

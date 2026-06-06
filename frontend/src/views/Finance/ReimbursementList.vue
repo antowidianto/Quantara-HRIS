@@ -3,8 +3,10 @@ import { ref, onMounted } from 'vue'
 import api from '@/api/client'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import { useToast } from 'vue-toastification'
+import { useI18n } from '@/locales'
 
 const toast = useToast()
+const { t } = useI18n()
 const items = ref([])
 const balances = ref([])
 const showForm = ref(false)
@@ -28,17 +30,17 @@ onMounted(fetchData)
 async function submit() {
   try {
     await api.post('/reimbursements', form.value)
-    toast.success('Pengajuan reimbursement dikirim')
+    toast.success(t('reimbursement.submit_success'))
     showForm.value = false
     fetchData()
-  } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+  } catch (e) { toast.error(e.response?.data?.message || t('reimbursement.submit_failed')) }
 }
 </script>
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
-      <h1 class="text-2xl font-bold">Reimbursement</h1>
-      <button class="btn-primary" @click="showForm = true">+ Ajukan</button>
+      <h1 class="text-2xl font-bold">{{ t('reimbursement.title') }}</h1>
+      <button class="btn-primary" @click="showForm = true">+ {{ t('reimbursement.apply') }}</button>
     </div>
 
     <!-- Sisa Plafon Widget -->
@@ -52,9 +54,9 @@ async function submit() {
 
     <div class="card">
       <table class="table">
-        <thead><tr><th>No</th><th>Tanggal</th><th>Kategori</th><th>Jumlah</th><th>Deskripsi</th><th>Status</th></tr></thead>
+        <thead><tr><th>{{ t('reimbursement.col_number') }}</th><th>{{ t('reimbursement.col_date') }}</th><th>{{ t('reimbursement.col_category') }}</th><th>{{ t('reimbursement.col_amount') }}</th><th>{{ t('reimbursement.col_description') }}</th><th>{{ t('reimbursement.col_status') }}</th></tr></thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-if="items.length === 0"><td colspan="6" class="text-center py-8 text-gray-400">Belum ada data</td></tr>
+          <tr v-if="items.length === 0"><td colspan="6" class="text-center py-8 text-gray-400">{{ t('reimbursement.no_data') }}</td></tr>
           <tr v-for="r in items" :key="r.id">
             <td class="font-mono text-xs">{{ r.request_number }}</td>
             <td>{{ fmtDate(r.expense_date) }}</td>
@@ -73,8 +75,8 @@ async function submit() {
 
     <div v-if="showForm" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40" @click.self="showForm = false">
       <form @submit.prevent="submit" class="bg-white rounded-lg shadow-xl w-full max-w-md p-6 space-y-4">
-        <h2 class="font-semibold">Ajukan Reimbursement</h2>
-        <div><label class="label">Kategori</label>
+        <h2 class="font-semibold">{{ t('reimbursement.apply_title') }}</h2>
+        <div><label class="label">{{ t('reimbursement.category') }}</label>
           <select v-model="form.category" class="input">
             <template v-if="balances.length > 0">
               <option v-for="b in balances" :key="b.id" :value="b.name">{{ b.name }}</option>
@@ -84,12 +86,12 @@ async function submit() {
             </template>
           </select>
         </div>
-        <div><label class="label">Tanggal Pengeluaran</label><input v-model="form.expense_date" type="date" class="input" required /></div>
-        <div><label class="label">Jumlah (Rp)</label><input v-model.number="form.amount" type="number" min="1" class="input" required /></div>
-        <div><label class="label">Deskripsi</label><textarea v-model="form.description" rows="3" class="input" required></textarea></div>
+        <div><label class="label">{{ t('reimbursement.expense_date') }}</label><input v-model="form.expense_date" type="date" class="input" required /></div>
+        <div><label class="label">{{ t('reimbursement.amount_label') }}</label><input v-model.number="form.amount" type="number" min="1" class="input" required /></div>
+        <div><label class="label">{{ t('reimbursement.description') }}</label><textarea v-model="form.description" rows="3" class="input" required></textarea></div>
         <div class="flex justify-end gap-2">
-          <button type="button" class="btn-secondary" @click="showForm = false">Batal</button>
-          <button type="submit" class="btn-primary">Kirim</button>
+          <button type="button" class="btn-secondary" @click="showForm = false">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn-primary">{{ t('common.submit') }}</button>
         </div>
       </form>
     </div>

@@ -3,7 +3,9 @@ import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import api from '@/api/client'
 import { fmtDateTime } from '@/composables/useResource'
+import { useI18n } from '@/locales'
 
+const { t } = useI18n()
 const items = ref([])
 async function fetchData() {
   const res = await api.get('/notifications', { params: { per_page: 50 } })
@@ -23,12 +25,12 @@ async function markAllRead() {
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
-      <h1 class="text-2xl font-bold">Notifikasi</h1>
-      <button class="btn-secondary" @click="markAllRead">Tandai semua dibaca</button>
+      <h1 class="text-2xl font-bold">{{ t('nav.notifications') }}</h1>
+      <button class="btn-secondary" @click="markAllRead">{{ t('nav.mark_all_read') }}</button>
     </div>
     <div class="card">
       <div class="card-body">
-        <div v-if="items.length === 0" class="text-center text-gray-400 py-8">Belum ada notifikasi</div>
+        <div v-if="items.length === 0" class="text-center text-gray-400 py-8">{{ t('nav.no_notifications') }}</div>
         <ul class="divide-y divide-gray-100">
           <li v-for="n in items" :key="n.id" class="py-3 flex items-start justify-between gap-4"
               :class="{ 'opacity-60': n.is_read }">
@@ -38,8 +40,8 @@ async function markAllRead() {
               <div class="text-xs text-gray-400 mt-1">{{ fmtDateTime(n.created_at) }} · {{ n.type }}</div>
             </div>
             <div class="flex flex-col items-end gap-1">
-              <RouterLink v-if="n.link_url" :to="n.link_url" class="text-primary-600 text-sm hover:underline">Buka</RouterLink>
-              <button v-if="!n.is_read" @click="markRead(n.id)" class="text-xs text-gray-500 hover:text-primary-600">Tandai dibaca</button>
+              <RouterLink v-if="n.link_url" :to="n.link_url" class="text-primary-600 text-sm hover:underline">{{ t('common.open_link') }}</RouterLink>
+              <button v-if="!n.is_read" @click="markRead(n.id)" class="text-xs text-gray-500 hover:text-primary-600">{{ t('common.mark_read') }}</button>
             </div>
           </li>
         </ul>

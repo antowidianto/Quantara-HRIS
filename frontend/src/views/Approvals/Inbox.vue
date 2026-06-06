@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import {
@@ -17,25 +18,26 @@ import {
  */
 
 const toast = useToast()
+const { t } = useI18n()
 
-const moduleOptions = [
-  { value: '', label: 'Semua Modul' },
-  { value: 'LEAVE', label: 'Cuti' },
-  { value: 'OVERTIME', label: 'Lembur' },
-  { value: 'ATTENDANCE_CHANGE', label: 'Perubahan Absensi' },
-  { value: 'REIMBURSEMENT', label: 'Reimbursement' },
-  { value: 'LOAN', label: 'Pinjaman' },
+const moduleOptions = computed(() => [
+  { value: '', label: t('approval_inbox.all_modules') },
+  { value: 'LEAVE', label: t('delegation.modules.leave') },
+  { value: 'OVERTIME', label: t('delegation.modules.overtime') },
+  { value: 'ATTENDANCE_CHANGE', label: t('delegation.modules.attendance_change') },
+  { value: 'REIMBURSEMENT', label: t('delegation.modules.reimbursement') },
+  { value: 'LOAN', label: t('delegation.modules.loan') },
   { value: 'GENERIC', label: 'Generic' },
-]
+])
 
-const moduleLabel = {
-  LEAVE: 'Cuti',
-  OVERTIME: 'Lembur',
-  ATTENDANCE_CHANGE: 'Perubahan Absensi',
-  REIMBURSEMENT: 'Reimbursement',
-  LOAN: 'Pinjaman',
+const moduleLabel = computed(() => ({
+  LEAVE: t('delegation.modules.leave'),
+  OVERTIME: t('delegation.modules.overtime'),
+  ATTENDANCE_CHANGE: t('delegation.modules.attendance_change'),
+  REIMBURSEMENT: t('delegation.modules.reimbursement'),
+  LOAN: t('delegation.modules.loan'),
   GENERIC: 'Generic',
-}
+}))
 
 const items = ref([])
 const loading = ref(false)
@@ -89,7 +91,7 @@ async function fetchData() {
       if (items.value.length > 0) selectItem(items.value[0])
     }
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat inbox')
+    toast.error(e.response?.data?.message || t('approval_inbox.load_failed'))
   } finally {
     loading.value = false
   }
@@ -104,7 +106,7 @@ async function selectItem(item) {
     const res = await api.get(`/approval-requests/${item.id}`)
     detail.value = res.data.data
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat detail')
+    toast.error(e.response?.data?.message || t('approval_inbox.load_failed'))
   } finally {
     detailLoading.value = false
   }
@@ -113,17 +115,17 @@ async function selectItem(item) {
 async function decide(action) {
   if (! selected.value) return
   if (action === 'reject' && ! note.value.trim()) {
-    toast.warning('Alasan penolakan wajib diisi')
+    toast.warning(t('approval_inbox.note_required_reject'))
     return
   }
   submitting.value = true
   try {
     await api.post(`/approval-requests/${selected.value}/${action}`, { note: note.value })
-    toast.success(action === 'approve' ? 'Permintaan disetujui' : 'Permintaan ditolak')
+    toast.success(action === 'approve' ? t('approval_inbox.approved') : t('approval_inbox.rejected'))
     note.value = ''
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memproses keputusan')
+    toast.error(e.response?.data?.message || t('approval_inbox.process_failed'))
   } finally {
     submitting.value = false
   }
@@ -143,19 +145,19 @@ const BULK_MAX = 50
 async function bulkDecide(action) {
   if (bulkSelected.value.size === 0) return
   if (bulkSelected.value.size > BULK_MAX) {
-    toast.warning(`Maksimal ${BULK_MAX} approval per bulk action. Saat ini dipilih ${bulkSelected.value.size}.`)
+    toast.warning(t('approval_inbox.bulk_max_warning', { max: BULK_MAX, count: bulkSelected.value.size }))
     return
   }
   let bulkNote = ''
   if (action === 'reject') {
-    const promptResult = window.prompt('Alasan penolakan (akan dipakai untuk semua):', '')
+    const promptResult = window.prompt(t('approval_inbox.bulk_reject_prompt'), '')
     if (! promptResult || ! promptResult.trim()) {
-      toast.warning('Alasan penolakan wajib diisi untuk bulk reject')
+      toast.warning(t('approval_inbox.bulk_reject_required'))
       return
     }
     bulkNote = promptResult.trim()
   } else {
-    if (! window.confirm(`Setujui ${bulkSelected.value.size} permintaan sekaligus?`)) return
+    if (! window.confirm(t('approval_inbox.bulk_approve_confirm', { count: bulkSelected.value.size }))) return
   }
   bulkProcessing.value = true
   const ids = Array.from(bulkSelected.value)
@@ -165,17 +167,27 @@ async function bulkDecide(action) {
     const summary = res.data?.data?.summary || { success: 0, failed: 0 }
     const failed = res.data?.data?.failed || []
     if (summary.failed === 0) {
-      toast.success(`${summary.success} permintaan ${action === 'approve' ? 'disetujui' : 'ditolak'}`)
+      toast.success(t('approval_inbox.bulk_success', {
+        count: summary.success,
+        action: action === 'approve' ? t('approval_inbox.action_approved') : t('approval_inbox.action_rejected')
+      }))
     } else if (summary.success > 0) {
       // Tampilkan reason gagal pertama supaya user dapat petunjuk konkrit.
       const firstReason = failed[0]?.reason ? ` (contoh: ${failed[0].reason})` : ''
-      toast.warning(`${summary.success} berhasil, ${summary.failed} gagal${firstReason}`)
+      toast.warning(t('approval_inbox.bulk_partial', {
+        success: summary.success,
+        failed: summary.failed,
+        reason: firstReason
+      }))
     } else {
       const firstReason = failed[0]?.reason ? `: ${failed[0].reason}` : ''
-      toast.error(`Semua ${summary.failed} permintaan gagal diproses${firstReason}`)
+      toast.error(t('approval_inbox.bulk_all_failed', {
+        failed: summary.failed,
+        reason: firstReason
+      }))
     }
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memproses bulk action')
+    toast.error(e.response?.data?.message || t('approval_inbox.bulk_failed_process'))
   } finally {
     bulkProcessing.value = false
     bulkSelected.value = new Set()
@@ -221,7 +233,7 @@ function isDelegateRole(role) {
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <InboxArrowDownIcon class="w-6 h-6" /> Inbox Approval
+        <InboxArrowDownIcon class="w-6 h-6" /> {{ t('approval_inbox.title') }}
       </h1>
       <select v-model="filterModule" class="input w-64">
         <option v-for="m in moduleOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -236,30 +248,30 @@ function isDelegateRole(role) {
           <div v-if="bulkSelected.size === 0" class="flex items-center gap-2 text-sm text-gray-500">
             <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected"
                    @change="toggleAll" class="rounded border-gray-300"
-                   :disabled="items.length === 0" :title="`Pilih ${items.length}`">
-            <span>{{ items.length }} permintaan menunggu</span>
+                   :disabled="items.length === 0" :title="t('common.select_all')">
+            <span>{{ t('approval_inbox.pending_requests', { count: items.length }) }}</span>
           </div>
           <div v-else class="flex items-center justify-between text-sm bg-primary-50 -mx-4 -my-3 px-4 py-3 border-b border-primary-200">
             <div class="flex items-center gap-2">
               <input type="checkbox" :checked="allSelected" :indeterminate.prop="someSelected"
                      @change="toggleAll" class="rounded border-gray-300">
-              <span class="font-medium text-primary-900">{{ bulkSelected.size }} dipilih</span>
+              <span class="font-medium text-primary-900">{{ t('approval_inbox.selected_count', { count: bulkSelected.size }) }}</span>
             </div>
             <div class="flex gap-2">
               <button class="btn btn-sm btn-success" :disabled="bulkProcessing" @click="bulkDecide('approve')">
-                <CheckCircleIcon class="w-4 h-4" /> Setujui Semua
+                <CheckCircleIcon class="w-4 h-4" /> {{ t('approval_inbox.btn_approve_all') }}
               </button>
               <button class="btn btn-sm btn-danger" :disabled="bulkProcessing" @click="bulkDecide('reject')">
-                <XCircleIcon class="w-4 h-4" /> Tolak Semua
+                <XCircleIcon class="w-4 h-4" /> {{ t('approval_inbox.btn_reject_all') }}
               </button>
             </div>
           </div>
         </div>
         <div class="divide-y divide-gray-100 max-h-[70vh] overflow-y-auto">
-          <div v-if="loading" class="px-4 py-8 text-center text-sm text-gray-400">Memuat...</div>
+          <div v-if="loading" class="px-4 py-8 text-center text-sm text-gray-400">{{ t('common.loading') }}</div>
           <div v-else-if="items.length === 0" class="px-4 py-12 text-center text-sm text-gray-400">
             <CheckCircleIcon class="w-10 h-10 mx-auto mb-2 text-gray-300" />
-            Tidak ada yang perlu disetujui
+            {{ t('approval_inbox.no_pending') }}
           </div>
           <div v-for="item in items" :key="item.id"
             class="flex w-full items-start gap-2 px-4 py-3 hover:bg-gray-50 transition cursor-pointer"
@@ -270,7 +282,7 @@ function isDelegateRole(role) {
               :checked="bulkSelected.has(item.id)"
               @click.stop="toggleOne(item.id)"
               class="mt-1 rounded border-gray-300"
-              :title="`Centang untuk bulk action`"
+              :title="t('approval_inbox.checkbox_bulk_title')"
             >
             <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between mb-1">
@@ -288,10 +300,10 @@ function isDelegateRole(role) {
 
       <!-- DETAIL -->
       <div class="lg:col-span-2 card">
-        <div v-if="detailLoading" class="px-6 py-12 text-center text-sm text-gray-400">Memuat detail...</div>
+        <div v-if="detailLoading" class="px-6 py-12 text-center text-sm text-gray-400">{{ t('approval_inbox.detail_loading') }}</div>
 
         <div v-else-if="! detail" class="px-6 py-16 text-center text-sm text-gray-400">
-          Pilih permintaan di sebelah kiri untuk melihat detail.
+          {{ t('approval_inbox.select_left') }}
         </div>
 
         <div v-else>
@@ -301,13 +313,13 @@ function isDelegateRole(role) {
                 <div class="text-xs text-gray-500">{{ moduleLabel[detail.module] || detail.module }} · #{{ detail.id }}</div>
                 <div class="text-lg font-semibold">{{ detail.subject }}</div>
                 <div class="text-sm text-gray-500">
-                  Dari: <span class="font-medium">{{ detail.employee_name }}</span> ·
-                  Diajukan {{ fmtDate(detail.created_at) }}
+                  {{ t('common.from') }}: <span class="font-medium">{{ detail.employee_name }}</span> ·
+                  {{ t('common.created_at') }} {{ fmtDate(detail.created_at) }}
                 </div>
               </div>
               <div>
                 <span class="px-2 py-1 rounded-full text-xs"
-                  :class="detail.status === 'PENDING' ? 'bg-amber-50 text-amber-700' : detail.status === 'APPROVED' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
+                   :class="detail.status === 'PENDING' ? 'bg-amber-50 text-amber-700' : detail.status === 'APPROVED' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
                   {{ detail.status }}
                 </span>
               </div>
@@ -317,13 +329,13 @@ function isDelegateRole(role) {
           <div class="card-body space-y-4">
             <!-- Detail entitas asal (meta dari source row) -->
             <div v-if="detail.meta" class="bg-gray-50 border border-gray-200 rounded-md p-4">
-              <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Detail Permintaan</div>
+              <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">{{ t('approval_inbox.detail_title') }}</div>
               <pre class="text-xs whitespace-pre-wrap font-mono text-gray-700">{{ metaPretty(detail.meta) }}</pre>
             </div>
 
             <!-- Timeline keputusan -->
             <div>
-              <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Riwayat Step</div>
+              <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">{{ t('approval_inbox.step_history') }}</div>
               <div class="space-y-2">
                 <div v-for="d in detail.decisions || []" :key="d.id"
                   class="flex items-start gap-3 border border-gray-200 rounded-md p-3 bg-white">
@@ -339,7 +351,7 @@ function isDelegateRole(role) {
                         <span v-if="isDelegateRole(d.approver_role)"
                           class="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-200"
                           :title="`Diputuskan sebagai pengganti (${d.approver_role})`">
-                          🤝 Delegasi
+                          {{ t('approval_inbox.delegate_badge') }}
                         </span>
                         <span :class="['px-2 py-0.5 rounded-full text-xs', decisionBadge[d.decision]?.class]">
                           {{ decisionBadge[d.decision]?.label || d.decision }}
@@ -347,9 +359,9 @@ function isDelegateRole(role) {
                       </div>
                     </div>
                     <div v-if="d.approver_user_name" class="text-xs text-gray-500 mt-1">
-                      Oleh: {{ d.approver_user_name }} · {{ fmtDate(d.decided_at || d.created_at) }}
+                      {{ t('approval_inbox.by_prefix') }}{{ d.approver_user_name }} · {{ fmtDate(d.decided_at || d.created_at) }}
                       <span v-if="isDelegateRole(d.approver_role)" class="text-indigo-600">
-                        — bertindak sebagai delegasi
+                        {{ t('approval_inbox.acting_as_delegate') }}
                       </span>
                     </div>
                     <div v-if="d.note" class="text-xs text-gray-600 mt-1 italic">"{{ d.note }}"</div>
@@ -360,15 +372,15 @@ function isDelegateRole(role) {
 
             <!-- Form keputusan -->
             <div v-if="detail.status === 'PENDING'" class="border-t border-gray-200 pt-4">
-              <label class="label">Catatan / Alasan</label>
+              <label class="label">{{ t('approval_inbox.label_note') }}</label>
               <textarea v-model="note" class="input" rows="3"
-                placeholder="Catatan untuk pemohon. Wajib jika menolak."></textarea>
+                :placeholder="t('approval_inbox.note_ph')"></textarea>
               <div class="flex justify-end gap-2 mt-3">
                 <button class="btn-secondary" :disabled="submitting" @click="decide('reject')">
-                  <XCircleIcon class="w-4 h-4" /> Tolak
+                  <XCircleIcon class="w-4 h-4" /> {{ t('common.reject') }}
                 </button>
                 <button class="btn-primary" :disabled="submitting" @click="decide('approve')">
-                  <CheckCircleIcon class="w-4 h-4" /> Setujui
+                  <CheckCircleIcon class="w-4 h-4" /> {{ t('common.approve') }}
                 </button>
               </div>
             </div>

@@ -7,9 +7,12 @@
  * #064, `job_title_id` jadi label terstandarisasi yang reusable lintas
  * tim — pakai picker dropdown supaya konsisten.
  */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import SimpleMaster from '@/components/SimpleMaster.vue'
+import { useI18n } from '@/locales'
+
+const { t } = useI18n()
 
 const jobTitles = ref([])
 const departments = ref([])
@@ -30,95 +33,62 @@ async function loadOptions() {
 
 onMounted(loadOptions)
 
-const columns = [
-  { key: 'code', label: 'Kode' },
-  { key: 'name', label: 'Nama Posisi' },
-  { key: 'job_title_name', label: 'Master Jabatan', formatter: v => v || '—' },
-  { key: 'department_name', label: 'Department', formatter: v => v || '—' },
-  { key: 'tier', label: 'Tier', formatter: v => v || 'STAFF' },
-  { key: 'is_active', label: 'Status', formatter: v => v ? 'Aktif' : 'Non-aktif' },
-]
+const columns = computed(() => [
+  { key: 'code', label: t('master.common.code') },
+  { key: 'name', label: t('master.positions.position_name') },
+  { key: 'job_title_name', label: t('master.common.job_title'), formatter: v => v || '—' },
+  { key: 'department_name', label: t('master.common.department'), formatter: v => v || '—' },
+  { key: 'tier', label: t('master.positions.tier'), formatter: v => v || 'STAFF' },
+  { key: 'is_active', label: t('master.common.status'), formatter: v => v ? t('master.common.active') : t('master.common.inactive') },
+])
 
 // Ref-based fields supaya options reaktif setelah loadOptions selesai
-const fields = ref([
-  { key: 'code', label: 'Kode', required: true },
-  { key: 'name', label: 'Nama Posisi', required: true },
+const fields = computed(() => [
+  { key: 'code', label: t('master.common.code'), required: true },
+  { key: 'name', label: t('master.positions.position_name'), required: true },
   {
     key: 'job_title_id',
-    label: 'Master Jabatan',
+    label: t('master.common.job_title'),
     type: 'select',
-    options: [],
+    options: jobTitles.value.map(j => ({
+      value: j.id,
+      label: j.family ? `${j.family} — ${j.name} (${j.level})` : `${j.name} (${j.level})`,
+    })),
   },
   {
     key: 'department_id',
-    label: 'Department',
+    label: t('master.common.department'),
     type: 'select',
-    options: [],
+    options: departments.value.map(d => ({ value: d.id, label: d.name })),
   },
   {
     key: 'job_grade_id',
-    label: 'Job Grade',
+    label: t('master.common.job_grade'),
     type: 'select',
-    options: [],
+    options: jobGrades.value.map(g => ({
+      value: g.id,
+      label: g.code ? `${g.code} — ${g.name}` : g.name,
+    })),
   },
   {
     key: 'tier',
-    label: 'Tier',
+    label: t('master.positions.tier'),
     type: 'select',
     options: [
-      { value: 'MANAGER',      label: 'Manager' },
-      { value: 'ASST_MANAGER', label: 'Asisten Manager' },
-      { value: 'SUPERVISOR',   label: 'Supervisor' },
-      { value: 'STAFF',        label: 'Staff' },
+      { value: 'MANAGER',      label: t('master.positions.manager') },
+      { value: 'ASST_MANAGER', label: t('master.positions.asst_manager') },
+      { value: 'SUPERVISOR',   label: t('master.positions.supervisor') },
+      { value: 'STAFF',        label: t('master.positions.staff') },
     ],
   },
-  { key: 'description', label: 'Deskripsi', type: 'textarea' },
+  { key: 'description', label: t('master.common.description'), type: 'textarea' },
 ])
-
-// Re-compute options setiap kali master data refresh selesai.
-function syncFieldOptions() {
-  fields.value = fields.value.map(f => {
-    if (f.key === 'job_title_id') {
-      return {
-        ...f,
-        options: jobTitles.value.map(j => ({
-          value: j.id,
-          label: j.family ? `${j.family} — ${j.name} (${j.level})` : `${j.name} (${j.level})`,
-        })),
-      }
-    }
-    if (f.key === 'department_id') {
-      return {
-        ...f,
-        options: departments.value.map(d => ({ value: d.id, label: d.name })),
-      }
-    }
-    if (f.key === 'job_grade_id') {
-      return {
-        ...f,
-        options: jobGrades.value.map(g => ({
-          value: g.id,
-          label: g.code ? `${g.code} — ${g.name}` : g.name,
-        })),
-      }
-    }
-    return f
-  })
-}
-
-// Watch sederhana via setTimeout setelah onMounted: pastikan dropdown
-// terisi saat user buka modal. Hook callback dari onMounted lebih clean
-// dengan watcher; pakai ini untuk kesederhanaan.
-onMounted(async () => {
-  await loadOptions()
-  syncFieldOptions()
-})
 </script>
 
 <template>
   <SimpleMaster
     endpoint="/positions"
-    title="Posisi"
+    :title="t('master.positions.title')"
     :columns="columns"
     :fields="fields"
     :defaults="{ is_active: 1, tier: 'STAFF' }"

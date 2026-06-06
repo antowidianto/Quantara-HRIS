@@ -12,6 +12,9 @@ import {
   PlusIcon, PencilSquareIcon, TrashIcon, ChevronUpIcon, ChevronDownIcon,
   EyeIcon, EyeSlashIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from '@/locales'
+
+const { t } = useI18n()
 
 defineOptions({ name: 'MenuRow' })
 
@@ -67,7 +70,7 @@ const TYPE_BADGE = {
           type="button"
           class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
           :disabled="index === 0"
-          title="Naik"
+          :title="t('menus.row.moveUp')"
           @click="emit('move', node, 'up', siblings)"
         >
           <ChevronUpIcon class="w-4 h-4" />
@@ -76,7 +79,7 @@ const TYPE_BADGE = {
           type="button"
           class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"
           :disabled="index === siblings.length - 1"
-          title="Turun"
+          :title="t('menus.row.moveDown')"
           @click="emit('move', node, 'down', siblings)"
         >
           <ChevronDownIcon class="w-4 h-4" />
@@ -85,7 +88,7 @@ const TYPE_BADGE = {
           v-if="node.type === 'SECTION' || node.type === 'PARENT'"
           type="button"
           class="p-1 text-gray-400 hover:text-primary-700"
-          title="Tambah anak"
+          :title="t('menus.row.addChild')"
           @click="emit('add-child', node)"
         >
           <PlusIcon class="w-4 h-4" />
@@ -93,7 +96,7 @@ const TYPE_BADGE = {
         <button
           type="button"
           class="p-1 text-gray-400 hover:text-amber-700"
-          :title="Number(node.is_active) === 0 ? 'Aktifkan' : 'Non-aktifkan'"
+          :title="Number(node.is_active) === 0 ? t('common.activate') : t('common.deactivate')"
           @click="emit('toggle', node)"
         >
           <EyeSlashIcon v-if="Number(node.is_active) === 0" class="w-4 h-4" />
@@ -102,7 +105,7 @@ const TYPE_BADGE = {
         <button
           type="button"
           class="p-1 text-gray-400 hover:text-blue-700"
-          title="Edit"
+          :title="t('common.edit')"
           @click="emit('edit', node)"
         >
           <PencilSquareIcon class="w-4 h-4" />
@@ -110,7 +113,7 @@ const TYPE_BADGE = {
         <button
           type="button"
           class="p-1 text-gray-400 hover:text-red-700"
-          title="Hapus"
+          :title="t('common.delete')"
           @click="emit('remove', node)"
         >
           <TrashIcon class="w-4 h-4" />

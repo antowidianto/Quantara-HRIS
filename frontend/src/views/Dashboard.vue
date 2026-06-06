@@ -2,10 +2,12 @@
 import { ref, onMounted, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api/client'
-import { UsersIcon, ClockIcon, CalendarDaysIcon, CurrencyDollarIcon, GiftIcon, CakeIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from '@/locales'
+import { ClockIcon, CalendarDaysIcon, CurrencyDollarIcon, GiftIcon, CakeIcon } from '@heroicons/vue/24/outline'
 import AttendanceHeatmap from '@/components/AttendanceHeatmap.vue'
 
 const auth = useAuthStore()
+const { t } = useI18n()
 const headcount = ref(null)
 const myAttendance = ref([])
 const myLeaves = ref([])
@@ -40,10 +42,11 @@ function fmtEventDate(d) {
 function eventLabel(e) {
   // Backend event item bentuk: {type: 'birthday'|'anniversary', employee_name,
   // next_occurrence (YYYY-MM-DD), days_until, years (anniversary), is_milestone}
-  if (e.type === 'birthday') return 'Ulang tahun'
+  if (e.type === 'birthday') return t('dashboard.birthday')
   if (e.type === 'anniversary') {
-    const y = e.years ? `${e.years} tahun` : ''
-    return e.is_milestone ? `🏆 Milestone ${y}` : `Anniversary ${y}`
+    return e.is_milestone
+      ? t('dashboard.milestone', { n: e.years || '' })
+      : t('dashboard.anniversary', { n: e.years || '' })
   }
   return e.label || '-'
 }
@@ -65,36 +68,36 @@ function fmtCurrency(v) {
 
 <template>
   <div>
-    <h1 class="text-2xl font-bold text-gray-900">Halo, {{ auth.user?.name?.split(' ')[0] }} 👋</h1>
-    <p class="text-gray-500 mb-6">Berikut ringkasan aktivitas Anda hari ini.</p>
+    <h1 class="text-2xl font-bold text-gray-900">{{ t('dashboard.greeting', { name: auth.user?.name?.split(' ')[0] }) }}</h1>
+    <p class="text-gray-500 mb-6">{{ t('dashboard.subtitle') }}</p>
 
     <!-- Personal stats -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div class="card card-body flex items-start gap-3">
         <div class="p-2 bg-green-100 rounded text-green-600"><ClockIcon class="w-5 h-5" /></div>
         <div>
-          <div class="text-xs text-gray-500">Hadir bulan ini</div>
+          <div class="text-xs text-gray-500">{{ t('dashboard.stat_present') }}</div>
           <div class="text-2xl font-bold">{{ stats.present }}</div>
         </div>
       </div>
       <div class="card card-body flex items-start gap-3">
         <div class="p-2 bg-red-100 rounded text-red-600"><ClockIcon class="w-5 h-5" /></div>
         <div>
-          <div class="text-xs text-gray-500">Tidak Hadir</div>
+          <div class="text-xs text-gray-500">{{ t('dashboard.stat_absent') }}</div>
           <div class="text-2xl font-bold">{{ stats.absent }}</div>
         </div>
       </div>
       <div class="card card-body flex items-start gap-3">
         <div class="p-2 bg-blue-100 rounded text-blue-600"><CalendarDaysIcon class="w-5 h-5" /></div>
         <div>
-          <div class="text-xs text-gray-500">Cuti Disetujui</div>
+          <div class="text-xs text-gray-500">{{ t('dashboard.stat_approved_leave') }}</div>
           <div class="text-2xl font-bold">{{ stats.onLeave }}</div>
         </div>
       </div>
       <div class="card card-body flex items-start gap-3">
         <div class="p-2 bg-yellow-100 rounded text-yellow-600"><CurrencyDollarIcon class="w-5 h-5" /></div>
         <div>
-          <div class="text-xs text-gray-500">Slip Gaji Terakhir</div>
+          <div class="text-xs text-gray-500">{{ t('dashboard.stat_last_payslip') }}</div>
           <div class="text-lg font-bold">{{ stats.lastSlip ? fmtCurrency(stats.lastSlip.take_home_pay) : '-' }}</div>
         </div>
       </div>
@@ -103,16 +106,16 @@ function fmtCurrency(v) {
     <!-- Company stats -->
     <div v-if="headcount" class="card mb-6">
       <div class="card-header">
-        <span class="font-semibold">Headcount Perusahaan</span>
+        <span class="font-semibold">{{ t('dashboard.headcount_title') }}</span>
       </div>
       <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-6">
         <div>
-          <div class="text-sm text-gray-500 mb-2">Total Karyawan</div>
+          <div class="text-sm text-gray-500 mb-2">{{ t('dashboard.total_employees') }}</div>
           <div class="text-3xl font-bold text-primary-600">{{ headcount.totals?.active || 0 }}</div>
-          <div class="text-xs text-gray-400">{{ headcount.totals?.inactive || 0 }} non-aktif</div>
+          <div class="text-xs text-gray-400">{{ headcount.totals?.inactive || 0 }} {{ t('dashboard.inactive') }}</div>
         </div>
         <div>
-          <div class="text-sm text-gray-500 mb-2">Per Departemen</div>
+          <div class="text-sm text-gray-500 mb-2">{{ t('dashboard.by_department') }}</div>
           <ul class="text-sm space-y-1">
             <li v-for="d in (headcount.by_department || []).slice(0, 5)" :key="d.id" class="flex justify-between">
               <span>{{ d.name || '-' }}</span>
@@ -121,7 +124,7 @@ function fmtCurrency(v) {
           </ul>
         </div>
         <div>
-          <div class="text-sm text-gray-500 mb-2">Per Status</div>
+          <div class="text-sm text-gray-500 mb-2">{{ t('dashboard.by_status') }}</div>
           <ul class="text-sm space-y-1">
             <li v-for="s in (headcount.by_status || [])" :key="s.employment_status" class="flex justify-between">
               <span>{{ s.employment_status }}</span>
@@ -136,7 +139,7 @@ function fmtCurrency(v) {
     <div v-if="upcomingEvents.length" class="card mb-6">
       <div class="card-header flex items-center gap-2">
         <GiftIcon class="w-5 h-5 text-pink-500" />
-        <span class="font-semibold">Ulang Tahun & Anniversary 30 Hari ke Depan</span>
+        <span class="font-semibold">{{ t('dashboard.events_title') }}</span>
         <span class="text-xs text-gray-400">({{ upcomingEvents.length }})</span>
       </div>
       <div class="card-body">
@@ -152,9 +155,9 @@ function fmtCurrency(v) {
               <div class="text-xs text-gray-600">{{ eventLabel(e) }}</div>
               <div class="text-xs text-gray-500">
                 {{ fmtEventDate(e.next_occurrence || e.date) }}
-                <span v-if="e.days_until === 0" class="text-pink-600 font-semibold">· Hari ini!</span>
-                <span v-else-if="e.days_until === 1" class="text-amber-700">· Besok</span>
-                <span v-else-if="e.days_until !== undefined" class="text-gray-400">· {{ e.days_until }} hari lagi</span>
+                <span v-if="e.days_until === 0" class="text-pink-600 font-semibold">· {{ t('dashboard.today') }}</span>
+                <span v-else-if="e.days_until === 1" class="text-amber-700">· {{ t('dashboard.tomorrow') }}</span>
+                <span v-else-if="e.days_until !== undefined" class="text-gray-400">· {{ t('dashboard.days_left', { n: e.days_until }) }}</span>
               </div>
             </div>
           </div>
@@ -165,9 +168,9 @@ function fmtCurrency(v) {
     <!-- Recent activities -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Cuti Terbaru</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('dashboard.recent_leaves') }}</span></div>
         <div class="card-body">
-          <div v-if="myLeaves.length === 0" class="text-sm text-gray-400 text-center py-4">Belum ada pengajuan cuti</div>
+          <div v-if="myLeaves.length === 0" class="text-sm text-gray-400 text-center py-4">{{ t('dashboard.no_leaves') }}</div>
           <ul v-else class="divide-y divide-gray-100">
             <li v-for="l in myLeaves.slice(0, 5)" :key="l.id" class="py-3">
               <div class="flex items-center justify-between">
@@ -188,9 +191,9 @@ function fmtCurrency(v) {
       </div>
 
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Absensi Terakhir</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('dashboard.recent_attendance') }}</span></div>
         <div class="card-body">
-          <div v-if="myAttendance.length === 0" class="text-sm text-gray-400 text-center py-4">Belum ada data absensi</div>
+          <div v-if="myAttendance.length === 0" class="text-sm text-gray-400 text-center py-4">{{ t('dashboard.no_attendance') }}</div>
           <ul v-else class="divide-y divide-gray-100">
             <li v-for="a in myAttendance.slice(0, 5)" :key="a.id" class="py-3 flex items-center justify-between">
               <div>

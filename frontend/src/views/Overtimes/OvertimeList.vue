@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
+import { useI18n } from '@/locales'
 import { fmtDate, fmtCurrency } from '@/composables/useResource'
 import { confirm as confirmDialog, promptDialog } from '@/composables/useConfirm'
 import { PlusIcon, CheckIcon, XMarkIcon } from '@heroicons/vue/24/outline'
@@ -11,6 +12,7 @@ import { PlusIcon, CheckIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 const auth = useAuthStore()
 const route = useRoute()
 const toast = useToast()
+const { t } = useI18n()
 const items = ref([])
 const filterStatus = ref(route.query.status || '')
 
@@ -23,37 +25,37 @@ onMounted(fetchData)
 
 async function approve(id) {
   const ok = await confirmDialog({
-    title: 'Setujui pengajuan lembur?',
-    message: 'Pengajuan lembur ini akan dimasukkan ke perhitungan payroll periode terkait.',
-    okText: 'Setujui',
+    title: t('overtime.approve_confirm_title'),
+    message: t('overtime.approve_confirm_msg'),
+    okText: t('overtime.approve_confirm_ok'),
     variant: 'success',
   })
   if (! ok) return
   try {
     await api.post(`/overtimes/${id}/approve`)
-    toast.success('Lembur disetujui')
+    toast.success(t('overtime.approve_success'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyetujui')
+    toast.error(e.response?.data?.message || t('overtime.approve_failed'))
   }
 }
 
 async function reject(id) {
   const reason = await promptDialog({
-    title: 'Tolak pengajuan lembur',
-    inputLabel: 'Alasan penolakan',
+    title: t('overtime.reject_prompt_title'),
+    inputLabel: t('overtime.reject_prompt_label'),
     inputType: 'textarea',
     inputRequired: true,
-    okText: 'Tolak',
+    okText: t('overtime.reject_prompt_ok'),
     variant: 'danger',
   })
   if (reason === null) return
   try {
     await api.post(`/overtimes/${id}/reject`, { reason })
-    toast.success('Lembur ditolak')
+    toast.success(t('overtime.reject_success'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menolak')
+    toast.error(e.response?.data?.message || t('overtime.reject_failed'))
   }
 }
 </script>
@@ -61,39 +63,39 @@ async function reject(id) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
-      <h1 class="text-2xl font-bold">Lembur</h1>
-      <RouterLink to="/overtimes/new" class="btn-primary"><PlusIcon class="w-4 h-4" /> Ajukan Lembur</RouterLink>
+      <h1 class="text-2xl font-bold">{{ t('overtime.title') }}</h1>
+      <RouterLink to="/overtimes/new" class="btn-primary"><PlusIcon class="w-4 h-4" /> {{ t('overtime.apply') }}</RouterLink>
     </div>
 
     <div class="card">
       <div class="card-header">
         <select v-model="filterStatus" @change="fetchData" class="input w-40">
-          <option value="">Semua Status</option>
-          <option value="PENDING">Pending</option>
-          <option value="APPROVED">Disetujui</option>
-          <option value="REJECTED">Ditolak</option>
+          <option value="">{{ t('overtime.all_status') }}</option>
+          <option value="PENDING">{{ t('overtime.pending') }}</option>
+          <option value="APPROVED">{{ t('overtime.approved') }}</option>
+          <option value="REJECTED">{{ t('overtime.rejected') }}</option>
         </select>
       </div>
       <table class="table">
         <thead>
           <tr>
-            <th>No</th>
-            <th>Karyawan</th>
-            <th>Tanggal</th>
-            <th>Jam</th>
-            <th>Tipe Hari</th>
-            <th>Estimasi</th>
-            <th>Status</th>
-            <th class="text-right">Aksi</th>
+            <th>{{ t('overtime.col_no') }}</th>
+            <th>{{ t('overtime.col_employee') }}</th>
+            <th>{{ t('overtime.col_date') }}</th>
+            <th>{{ t('overtime.col_hours') }}</th>
+            <th>{{ t('overtime.col_day_type') }}</th>
+            <th>{{ t('overtime.col_estimate') }}</th>
+            <th>{{ t('overtime.col_status') }}</th>
+            <th class="text-right">{{ t('overtime.col_actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-if="items.length === 0"><td colspan="8" class="text-center py-8 text-gray-400">Belum ada data</td></tr>
+          <tr v-if="items.length === 0"><td colspan="8" class="text-center py-8 text-gray-400">{{ t('overtime.no_data') }}</td></tr>
           <tr v-for="o in items" :key="o.id">
             <td class="font-mono text-xs">{{ o.request_number }}</td>
             <td>{{ o.employee_name }}</td>
             <td>{{ fmtDate(o.work_date) }}</td>
-            <td>{{ o.hours }} jam</td>
+            <td>{{ t('overtime.hours_suffix', { n: o.hours }) }}</td>
             <td><span class="badge-blue">{{ o.day_type }}</span></td>
             <td>{{ fmtCurrency(o.computed_amount) }}</td>
             <td>
