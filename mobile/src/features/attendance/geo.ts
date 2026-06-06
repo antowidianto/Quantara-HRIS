@@ -19,6 +19,7 @@ export interface GeoPosition {
   longitude: number;
   accuracy: number;
   timestamp: number;
+  isMocked: boolean;
 }
 
 export const requestLocationPermission = async (): Promise<boolean> => {
@@ -40,12 +41,19 @@ export const requestLocationPermission = async (): Promise<boolean> => {
 export const getCurrentPosition = (): Promise<GeoPosition> =>
   new Promise((resolve, reject) => {
     Geolocation.getCurrentPosition(
-      (pos) => resolve({
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? 0,
-        timestamp: pos.timestamp,
-      }),
+      (pos) => {
+        if (pos.mocked) {
+          reject(new Error('Aplikasi Fake GPS terdeteksi. Harap matikan Fake GPS untuk melakukan absen.'));
+          return;
+        }
+        resolve({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? 0,
+          timestamp: pos.timestamp,
+          isMocked: !!pos.mocked,
+        });
+      },
       (err) => reject(new Error(err.message || 'Gagal mengambil lokasi')),
       { enableHighAccuracy: true, timeout: 12_000, maximumAge: 5_000 },
     );

@@ -120,6 +120,50 @@ async function finalize() {
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
 }
 
+async function disburseSalary() {
+  const ok = await confirmDialog({
+    title: 'Mulai Transfer Gaji via Midtrans?',
+    message: 'Ini akan mengirimkan instruksi transfer ke bank masing-masing karyawan secara otomatis via Midtrans IRIS.',
+    okText: 'Transfer Sekarang',
+    variant: 'warning',
+  })
+  if (! ok) return
+  try {
+    await api.post(`/payroll-periods/${route.params.id}/disburse`)
+    toast.success('Disbursement batch berhasil dibuat')
+    fetchData()
+  } catch (e) { toast.error(e.response?.data?.message || 'Gagal memulai disbursement') }
+}
+
+async function checkDisbursementStatus() {
+  try {
+    await api.get(`/payroll-periods/${route.params.id}/disburse-status`)
+    toast.info('Status transfer dicek.')
+    fetchData()
+  } catch (e) { toast.error('Gagal mengecek status') }
+}
+
+async function syncEbupot() {
+  const ok = await confirmDialog({
+    title: 'Lapor e-Bupot via API?',
+    message: 'Data PPh 21 dari slip gaji akan dikirim langsung ke server DJP melalui PJAP.',
+    okText: 'Lapor Sekarang',
+    variant: 'warning',
+  })
+  if (! ok) return
+  exportLoading.value = true
+  try {
+    const res = await api.post(`/payroll-periods/${route.params.id}/ebupot-sync`)
+    toast.success('Batch e-Bupot berhasil dibuat: ' + res.data.data.batch_id)
+    fetchData()
+  } catch (e) { 
+    toast.error(e.response?.data?.message || 'Gagal memulai sinkronisasi e-Bupot') 
+  } finally {
+    exportLoading.value = false
+    showExportDialog.value = false
+  }
+}
+
 async function openExport() {
   exportLoading.value = true
   showExportDialog.value = true
@@ -186,18 +230,25 @@ function downloadBpjs(type) {
       <div class="flex gap-2 flex-wrap">
         <button v-if="['DRAFT','CALCULATED'].includes(period.status)" class="btn-secondary" @click="calculate">Hitung Ulang</button>
         <button v-if="period.status === 'CALCULATED'" class="btn-success" @click="finalize">Finalisasi</button>
-        <button v-if="['CALCULATED','APPROVED','PAID','CLOSED'].includes(period.status)"
+        <button v-if="period.status === 'FINALIZED' && period.disbursement_status !== 'COMPLETED' && period.disbursement_status !== 'IN_PROGRESS'" class="btn-primary bg-indigo-600 hover:bg-indigo-700 text-white" @click="disburseSalary">
+          Disburse Salary
+        </button>
+        <button v-if="period.disbursement_status === 'IN_PROGRESS'" class="btn-secondary" @click="checkDisbursementStatus">
+          Cek Status Transfer
+        </button>
+        <button v-if="['CALCULATED','FINALIZED','APPROVED','PAID','CLOSED'].includes(period.status)"
           class="btn-primary" @click="openExport">
           <ArrowDownTrayIcon class="w-4 h-4" /> Export & Setor
         </button>
       </div>
     </div>
 
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
       <div class="card card-body"><div class="text-xs text-gray-500">Status</div><div class="text-lg font-bold">{{ period.status }}</div></div>
       <div class="card card-body"><div class="text-xs text-gray-500">Total Gross</div><div class="text-lg font-bold">{{ fmtCurrency(period.total_gross) }}</div></div>
       <div class="card card-body"><div class="text-xs text-gray-500">Total Potongan</div><div class="text-lg font-bold">{{ fmtCurrency(period.total_deduction) }}</div></div>
       <div class="card card-body"><div class="text-xs text-gray-500">Take Home Pay</div><div class="text-lg font-bold text-primary-600">{{ fmtCurrency(period.total_net) }}</div></div>
+      <div class="card card-body"><div class="text-xs text-gray-500">Transfer via API</div><div class="text-lg font-bold" :class="{'text-amber-500': period.disbursement_status === 'IN_PROGRESS', 'text-emerald-500': period.disbursement_status === 'COMPLETED', 'text-rose-500': period.disbursement_status === 'FAILED'}">{{ period.disbursement_status || 'PENDING' }}</div></div>
     </div>
 
     <!-- Pending approval warning panel — muncul kalau ada pengajuan
@@ -281,7 +332,11 @@ function downloadBpjs(type) {
               <td>{{ fmtCurrency(s.gross_earning) }}</td>
               <td>{{ fmtCurrency(s.pph21_amount) }}</td>
               <td>{{ fmtCurrency(Number(s.bpjs_kes_employee) + Number(s.bpjs_jht_employee) + Number(s.bpjs_jp_employee)) }}</td>
-              <td class="font-semibold">{{ fmtCurrency(s.take_home_pay) }}</td>
+              <td class="font-semibold flex flex-col">
+                {{ fmtCurrency(s.take_home_pay) }}
+                <span v-if="s.disbursement_status === 'COMPLETED'" class="text-[10px] text-emerald-500 font-normal">Sent</span>
+                <span v-if="s.disbursement_status === 'FAILED'" class="text-[10px] text-rose-500 font-normal">Failed</span>
+              </td>
               <td><RouterLink :to="`/payslips/${s.id}`" class="text-primary-600 hover:underline text-sm">Detail</RouterLink></td>
             </tr>
           </tbody>
@@ -374,11 +429,16 @@ function downloadBpjs(type) {
 
           <!-- e-SPT PPh21 -->
           <div class="border border-gray-200 rounded">
-            <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium flex items-center gap-2">
-              <DocumentTextIcon class="w-5 h-5 text-amber-600" /> e-SPT PPh21 (DJP)
+            <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <DocumentTextIcon class="w-5 h-5 text-amber-600" /> e-Bupot PPh21 (DJP)
+              </div>
+              <span v-if="period.ebupot_status" class="text-xs px-2 py-1 rounded bg-amber-100 text-amber-800">
+                Status: {{ period.ebupot_status }}
+              </span>
             </div>
-            <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-              <div class="md:col-span-2">
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+              <div>
                 <label class="flex items-center gap-2 text-sm">
                   <input type="checkbox" v-model="isFinalForm" class="w-4 h-4" />
                   Bukti Potong Tahunan (1721-A1) — centang untuk masa Desember
@@ -387,9 +447,14 @@ function downloadBpjs(type) {
                   Default: 1721-VI (tidak final, untuk masa bulanan).
                 </div>
               </div>
-              <button class="btn-primary w-full" @click="downloadPph21">
-                <ArrowDownTrayIcon class="w-4 h-4" /> Download CSV
-              </button>
+              <div class="flex gap-2 justify-end">
+                <button class="btn-secondary" @click="downloadPph21">
+                  <ArrowDownTrayIcon class="w-4 h-4" /> Download CSV
+                </button>
+                <button v-if="period.status === 'PAID'" class="btn-primary" @click="syncEbupot">
+                  Lapor via API
+                </button>
+              </div>
             </div>
           </div>
 

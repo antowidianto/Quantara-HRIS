@@ -44,6 +44,15 @@ class LoanController extends ApiController
         if (! $this->privacy()->canAccessRow($row, 'loan')) {
             return $this->fail('Forbidden', 403);
         }
+        
+        $installments = $db->table('loan_installments')
+            ->where('loan_id', (int) $id)
+            ->orderBy('installment_number', 'ASC')
+            ->get()
+            ->getResultArray();
+            
+        $row['installments_list'] = $installments;
+        
         return $this->ok($row);
     }
 
@@ -64,43 +73,28 @@ class LoanController extends ApiController
         $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
 
-        $loanNumber = 'LN-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
         $principal = (float) $data['principal'];
         $installments = (int) $data['installments'];
-        $instAmount = round($principal / $installments);
+        $reason = $data['reason'];
 
-        $insert = [
-            'company_id'      => $emp['company_id'],
-            'employee_id'     => $employeeId,
-            'loan_number'     => $loanNumber,
-            'principal'       => $principal,
-            'installment_amount' => $instAmount,
-            'installments'    => $installments,
-            'paid_installments' => 0,
-            'remaining'       => $principal,
-            'reason'          => $data['reason'],
-            'status'          => 'PENDING',
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
-        ];
+        $interestRate = 10.0; // Flat 10%
 
-        // Sprint 6 — Cost Center: tag pinjaman ke cost center karyawan
-        // (asset finance perspective). Resolve via chain.
-        if (in_array('cost_center_id', $db->getFieldNames('loans'), true)) {
-            try {
-                $insert['cost_center_id'] = Services::costCenter()->resolveForEmployee(
-                    $employeeId,
-                    ['cost_center_id' => $data['cost_center_id'] ?? null]
-                );
-            } catch (\Throwable $e) {
-                log_message('warning', 'Loan cost_center resolve failed: ' . $e->getMessage());
-            }
+        try {
+            $loanService = new \App\Libraries\Payroll\LoanService();
+            $loan = $loanService->applyLoan(
+                (int) $emp['company_id'],
+                $employeeId,
+                $principal,
+                $interestRate,
+                $installments,
+                $reason
+            );
+
+            Services::audit()->log('loan.create', 'loan', $loan['id']);
+            return $this->ok(['id' => $loan['id'], 'loan_number' => $loan['loan_number'], 'installment_amount' => $loan['installment_amount']], 'Loan requested', 201);
+        } catch (\Exception $e) {
+            return $this->fail('Failed to apply loan: ' . $e->getMessage(), 500);
         }
-
-        $db->table('loans')->insert($insert);
-        $id = (int) $db->insertID();
-        Services::audit()->log('loan.create', 'loan', $id);
-        return $this->ok(['id' => $id, 'loan_number' => $loanNumber, 'installment_amount' => $instAmount], 'Loan requested', 201);
     }
 
     public function update($id = null)
@@ -133,30 +127,41 @@ class LoanController extends ApiController
 
         if ($action === 'approve') {
             if ($loan['status'] !== 'PENDING') return $this->fail('Not pending', 422);
-            $db->table('loans')->where('id', $id)->update([
-                'status' => 'RUNNING',
-                'approved_by' => $this->userId(),
-                'approved_at' => date('Y-m-d H:i:s'),
-                'updated_at'  => date('Y-m-d H:i:s'),
-            ]);
-            Services::audit()->forModule('FINANCE')->log(
-                action: 'loan.approve', entity: 'loans', entityId: $id,
-                description: "Loan #{$loan['loan_number']} disetujui (akan dipotong otomatis di payroll)",
-                severity: 'NOTICE',
-            );
-            return $this->ok(null, 'Loan approved & running');
+            
+            // first_installment_date is required for generating installments
+            if (empty($data['first_installment_date'])) {
+                return $this->fail('first_installment_date is required', 400);
+            }
+            
+            try {
+                $loanService = new \App\Libraries\Payroll\LoanService();
+                $loanService->approveLoan($id, $this->userId(), $data['first_installment_date']);
+                
+                Services::audit()->forModule('FINANCE')->log(
+                    action: 'loan.approve', entity: 'loans', entityId: $id,
+                    description: "Loan #{$loan['loan_number']} disetujui (akan dipotong otomatis di payroll)",
+                    severity: 'NOTICE',
+                );
+                return $this->ok(null, 'Loan approved & running');
+            } catch (\Exception $e) {
+                return $this->fail('Failed to approve loan: ' . $e->getMessage(), 500);
+            }
         }
         if ($action === 'reject') {
             if ($loan['status'] !== 'PENDING') return $this->fail('Not pending', 422);
-            $db->table('loans')->where('id', $id)->update([
-                'status' => 'REJECTED', 'approved_by' => $this->userId(), 'approved_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
-            Services::audit()->forModule('FINANCE')->log(
-                action: 'loan.reject', entity: 'loans', entityId: $id,
-                description: "Loan #{$loan['loan_number']} ditolak",
-            );
-            return $this->ok(null, 'Rejected');
+            
+            try {
+                $loanService = new \App\Libraries\Payroll\LoanService();
+                $loanService->rejectLoan($id, $this->userId());
+                
+                Services::audit()->forModule('FINANCE')->log(
+                    action: 'loan.reject', entity: 'loans', entityId: $id,
+                    description: "Loan #{$loan['loan_number']} ditolak",
+                );
+                return $this->ok(null, 'Rejected');
+            } catch (\Exception $e) {
+                return $this->fail('Failed to reject loan: ' . $e->getMessage(), 500);
+            }
         }
         return $this->fail('Unknown action', 400);
     }

@@ -223,6 +223,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
             ['filter' => 'sameorigin']);
         $routes->get('attendance/my', 'Attendance\AttendanceController::my');
         $routes->get('attendance/calendar/(:num)', 'Attendance\AttendanceController::calendar/$1');
+        
+        // ADMS Machine Sync (from Node.js middleware)
+        $routes->post('attendance/machine-sync', 'Attendance\MachineSyncController::sync');
+        $routes->resource('physical-devices', ['controller' => 'Attendance\AttendanceDeviceController']);
 
         // ─── WFH Requests (Sprint 8 / H1.5) ─────────────────────────
         // Pengajuan WFH dengan flow PENDING → APPROVED/REJECTED yang
@@ -301,6 +305,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
 
         // Payroll
         $routes->resource('payroll-components', ['controller' => 'Payroll\PayrollComponentController']);
+        $routes->resource('benefit-policies', ['controller' => 'Payroll\BenefitPolicyController']);
 
         // Payroll periods — endpoint khusus harus didefinisikan SEBELUM
         // resource() supaya path multi-segment seperti
@@ -309,6 +314,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // export). Pola sama dengan leaves & goals di atas.
         $routes->post('payroll-periods/(:num)/calculate',     'Payroll\PayrollPeriodController::calculate/$1');
         $routes->post('payroll-periods/(:num)/finalize',      'Payroll\PayrollPeriodController::finalize/$1');
+        $routes->post('payroll-periods/(:num)/disburse',      'Payroll\DisbursementController::disburse/$1');
+        $routes->get('payroll-periods/(:num)/disburse-status', 'Payroll\DisbursementController::checkStatus/$1');
         // Pre-check sebelum calculate: deteksi pengajuan transaksi yang
         // memengaruhi payroll & masih PENDING approval. UI bisa show
         // warning supaya HR aware sebelum hitung.
@@ -328,9 +335,37 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Sprint 9 / H1.8 — THR Planning Dashboard
         $routes->get('thr/projection', 'Payroll\PayrollController::thrProjection');
 
-        // Reimbursement & Loans
+        // Payroll (Reimbursements, dll)
+        $routes->get('my-benefit-balances', 'Payroll\ReimbursementController::myBalances');
         $routes->resource('reimbursements', ['controller' => 'Payroll\ReimbursementController']);
         $routes->resource('loans', ['controller' => 'Payroll\LoanController']);
+
+        // ─── Fase 4: Talent Management ──────────────────────────
+
+        // 360-Degree Feedback Review
+        $routes->get('review-360/cycles',                       'HR\Review360Controller::cycles');
+        $routes->get('review-360/cycles/(:num)',                'HR\Review360Controller::showCycle/$1');
+        $routes->post('review-360/cycles',                     'HR\Review360Controller::createCycle');
+        $routes->put('review-360/cycles/(:num)',               'HR\Review360Controller::updateCycle/$1');
+        $routes->post('review-360/nominations',                'HR\Review360Controller::addNomination');
+        $routes->delete('review-360/nominations/(:num)',       'HR\Review360Controller::removeNomination/$1');
+        $routes->post('review-360/nominations/(:num)/feedback','HR\Review360Controller::submitFeedback/$1');
+        $routes->get('review-360/cycles/(:num)/aggregate',     'HR\Review360Controller::aggregateScores/$1');
+
+        // Nine-Box Matrix (Talent Assessment)
+        $routes->get('talent-assessments',                     'HR\TalentAssessmentController::index');
+        $routes->post('talent-assessments',                    'HR\TalentAssessmentController::upsert');
+        $routes->delete('talent-assessments/(:num)',           'HR\TalentAssessmentController::delete/$1');
+
+        // Succession Planning
+        $routes->get('succession/positions',                   'HR\SuccessionPlanController::positions');
+        $routes->get('succession/positions/(:num)',            'HR\SuccessionPlanController::showPosition/$1');
+        $routes->post('succession/positions',                  'HR\SuccessionPlanController::createPosition');
+        $routes->put('succession/positions/(:num)',            'HR\SuccessionPlanController::updatePosition/$1');
+        $routes->delete('succession/positions/(:num)',         'HR\SuccessionPlanController::deletePosition/$1');
+        $routes->post('succession/candidates',                'HR\SuccessionPlanController::addCandidate');
+        $routes->put('succession/candidates/(:num)',          'HR\SuccessionPlanController::updateCandidate/$1');
+        $routes->delete('succession/candidates/(:num)',       'HR\SuccessionPlanController::removeCandidate/$1');
 
         // Notifications
         $routes->get('notifications', 'Notification\NotificationController::index');

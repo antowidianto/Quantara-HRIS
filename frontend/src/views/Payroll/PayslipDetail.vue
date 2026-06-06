@@ -182,6 +182,7 @@ async function downloadBlob(url, filename, expectedMime) {
           <div class="flex justify-between"><span class="text-gray-500">BPJS Kesehatan</span><span>{{ fmtCurrency(slip.bpjs_kes_employee) }}</span></div>
           <div class="flex justify-between"><span class="text-gray-500">BPJS JHT</span><span>{{ fmtCurrency(slip.bpjs_jht_employee) }}</span></div>
           <div class="flex justify-between"><span class="text-gray-500">BPJS JP</span><span>{{ fmtCurrency(slip.bpjs_jp_employee) }}</span></div>
+          <div v-if="slip.loan_deduction > 0" class="flex justify-between"><span class="text-rose-500 font-medium">Potongan Kasbon</span><span class="text-rose-500 font-medium">-{{ fmtCurrency(slip.loan_deduction) }}</span></div>
         </div>
       </div>
     </div>
