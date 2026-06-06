@@ -3,10 +3,13 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
+import { useI18n } from '@/locales'
 import {
   EnvelopeIcon, ServerIcon, ShieldCheckIcon, PaperAirplaneIcon,
   KeyIcon, CheckCircleIcon, XCircleIcon, ClockIcon, ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
+
+const { t } = useI18n()
 
 // Halaman Admin → Email Settings
 //
@@ -63,16 +66,16 @@ async function load() {
     Object.assign(source, data.data?.source || {})
     queueStats.value = data.data?.queue_stats || { queued: 0, sent: 0, failed: 0 }
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat email settings')
+    toast.error(e.response?.data?.message || t('email_settings.loadFailed'))
   } finally {
     loading.value = false
   }
 }
 
 async function save() {
-  if (! canManage.value) { toast.error('Tidak punya permission'); return }
-  if (! form.host) { toast.error('Host SMTP wajib diisi'); return }
-  if (! form.from_address) { toast.error('From address wajib diisi'); return }
+  if (! canManage.value) { toast.error(t('common.no_permission')); return }
+  if (! form.host) { toast.error(t('email_settings.hostRequired')); return }
+  if (! form.from_address) { toast.error(t('email_settings.fromAddressRequired')); return }
 
   saving.value = true
   try {
@@ -83,32 +86,32 @@ async function save() {
       delete payload.password
     }
     await api.put('/email-settings', payload)
-    toast.success('Setting email tersimpan')
+    toast.success(t('email_settings.saved'))
     form.password = ''
     await load()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal simpan')
+    toast.error(e.response?.data?.message || t('common.error'))
   } finally {
     saving.value = false
   }
 }
 
 async function clearPassword() {
-  if (! confirm('Hapus password tersimpan? Email akan pakai password dari .env (kalau ada).')) return
+  if (! confirm(t('email_settings.confirmDeletePassword'))) return
   saving.value = true
   try {
     await api.put('/email-settings', { password: '' })
-    toast.success('Password dihapus dari DB; fallback ke .env')
+    toast.success(t('email_settings.passwordDeleted'))
     form.password = ''
     await load()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal')
+    toast.error(e.response?.data?.message || t('common.error'))
   } finally { saving.value = false }
 }
 
 async function sendTest() {
   if (! testTo.value || ! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testTo.value)) {
-    toast.error('Masukkan alamat email tujuan yang valid')
+    toast.error(t('email_settings.invalidEmail'))
     return
   }
   testing.value = true
@@ -122,9 +125,9 @@ async function sendTest() {
       to: testTo.value,
       override,
     })
-    toast.success(data.message || 'Test email berhasil dikirim — cek inbox tujuan')
+    toast.success(data.message || t('email_settings.testSent'))
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal kirim test email')
+    toast.error(e.response?.data?.message || t('email_settings.testFailed'))
   } finally { testing.value = false }
 }
 
@@ -132,20 +135,20 @@ function presetGmail() {
   form.host = 'smtp.gmail.com'
   form.port = 587
   form.encryption = 'tls'
-  toast.info('Untuk Gmail, username = email lengkap, password = "App Password" (bukan password Google biasa). Aktifkan 2FA dulu untuk bisa generate App Password.')
+  toast.info(t('email_settings.gmailPresetInfo'))
 }
 function presetMailtrap() {
   form.host = 'sandbox.smtp.mailtrap.io'
   form.port = 587
   form.encryption = 'tls'
-  toast.info('Mailtrap: ambil credential dari dashboard Mailtrap → Inboxes → SMTP Settings.')
+  toast.info(t('email_settings.mailtrapPresetInfo'))
 }
 function presetSendGrid() {
   form.host = 'smtp.sendgrid.net'
   form.port = 587
   form.encryption = 'tls'
   form.username = 'apikey'
-  toast.info('SendGrid: username = literal "apikey", password = SG.xxx... API key.')
+  toast.info(t('email_settings.sendgridPresetInfo'))
 }
 
 onMounted(load)
@@ -157,32 +160,31 @@ onMounted(load)
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2">
           <EnvelopeIcon class="w-6 h-6 text-primary-600" />
-          Pengaturan Email (SMTP)
+          {{ t('email_settings.title') }}
         </h1>
         <p class="text-sm text-gray-500 mt-1">
-          Konfigurasi server SMTP untuk kirim email otomatis: notifikasi approval,
-          welcome credential karyawan baru, payslip, dst.
+          {{ t('email_settings.subtitle') }}
         </p>
       </div>
       <div class="flex items-center gap-3 text-xs">
         <div class="flex items-center gap-1.5">
           <ClockIcon class="w-4 h-4 text-amber-600" />
-          <span class="text-gray-600">Antrian: <strong class="text-amber-700">{{ queueStats.queued }}</strong></span>
+          <span class="text-gray-600">{{ t('email_settings.queue.queued') }}: <strong class="text-amber-700">{{ queueStats.queued }}</strong></span>
         </div>
         <div class="flex items-center gap-1.5">
           <CheckCircleIcon class="w-4 h-4 text-emerald-600" />
-          <span class="text-gray-600">Terkirim: <strong class="text-emerald-700">{{ queueStats.sent }}</strong></span>
+          <span class="text-gray-600">{{ t('email_settings.queue.sent') }}: <strong class="text-emerald-700">{{ queueStats.sent }}</strong></span>
         </div>
         <div class="flex items-center gap-1.5">
           <XCircleIcon class="w-4 h-4 text-red-600" />
-          <span class="text-gray-600">Gagal: <strong class="text-red-700">{{ queueStats.failed }}</strong></span>
+          <span class="text-gray-600">{{ t('email_settings.queue.failed') }}: <strong class="text-red-700">{{ queueStats.failed }}</strong></span>
         </div>
       </div>
     </div>
 
-    <div v-if="loading" class="text-center py-12 text-gray-400">Memuat…</div>
+    <div v-if="loading" class="text-center py-12 text-gray-400">{{ t('common.loading') }}</div>
     <div v-else-if="! canManage" class="bg-amber-50 border border-amber-200 rounded p-4 text-sm text-amber-900">
-      Anda tidak punya permission <code>settings.manage</code> untuk mengubah pengaturan email.
+      {{ t('email_settings.noPermission') }}
     </div>
 
     <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -190,7 +192,7 @@ onMounted(load)
       <div class="lg:col-span-2 space-y-4">
         <div class="card p-6">
           <h2 class="font-semibold mb-4 flex items-center gap-2">
-            <ServerIcon class="w-5 h-5" /> Server SMTP
+            <ServerIcon class="w-5 h-5" /> {{ t('email_settings.server.title') }}
           </h2>
 
           <!-- Quick presets -->
@@ -203,52 +205,52 @@ onMounted(load)
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="md:col-span-2">
-              <label class="label">Host SMTP *
+              <label class="label">{{ t('email_settings.server.host') }} *
                 <span class="text-xs text-gray-400 ml-1">({{ source.host }})</span>
               </label>
               <input v-model="form.host" class="input" placeholder="smtp.gmail.com" />
             </div>
             <div>
-              <label class="label">Port *
+              <label class="label">{{ t('email_settings.server.port') }} *
                 <span class="text-xs text-gray-400 ml-1">({{ source.port }})</span>
               </label>
               <input v-model.number="form.port" type="number" class="input" placeholder="587" />
-              <p class="text-xs text-gray-500 mt-1">587 (TLS) atau 465 (SSL)</p>
+              <p class="text-xs text-gray-500 mt-1">{{ t('email_settings.server.portHelp') }}</p>
             </div>
             <div>
-              <label class="label">Enkripsi
+              <label class="label">{{ t('email_settings.server.encryption') }}
                 <span class="text-xs text-gray-400 ml-1">({{ source.encryption }})</span>
               </label>
               <select v-model="form.encryption" class="input">
                 <option value="tls">TLS (STARTTLS)</option>
                 <option value="ssl">SSL (SMTPS)</option>
-                <option value="none">Tidak ada (plain)</option>
+                <option value="none">{{ t('email_settings.server.none') }} (plain)</option>
               </select>
             </div>
             <div class="md:col-span-2">
-              <label class="label">Username
+              <label class="label">{{ t('email_settings.server.username') }}
                 <span class="text-xs text-gray-400 ml-1">({{ source.username }})</span>
               </label>
               <input v-model="form.username" class="input" placeholder="noreply@perusahaan.id" autocomplete="off" />
             </div>
             <div class="md:col-span-2">
               <label class="label flex items-center justify-between">
-                <span>Password
+                <span>{{ t('email_settings.server.password') }}
                   <span class="text-xs text-gray-400 ml-1">({{ source.password }})</span>
                 </span>
                 <button v-if="hasPassword" type="button" @click="clearPassword"
                   class="text-xs text-red-600 hover:underline font-normal">
-                  Hapus password tersimpan
+                  {{ t('email_settings.server.clearPassword') }}
                 </button>
               </label>
               <input v-model="form.password" type="password" class="input"
-                :placeholder="hasPassword ? '•••••••• (kosongkan untuk pertahankan)' : 'Password SMTP / App Password'"
+                :placeholder="hasPassword ? '•••••••• ' + t('email_settings.server.placeholderKeep') : t('email_settings.server.placeholderDefault')"
                 autocomplete="new-password" />
               <p class="text-xs text-gray-500 mt-1 flex items-start gap-1">
                 <KeyIcon class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                <span>Password disimpan ter-enkripsi (AES-256-GCM). Untuk Gmail, gunakan
+                <span>{{ t('email_settings.server.passwordHelp') }}
                 <a class="text-primary-600 hover:underline" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App Password</a>,
-                bukan password Google biasa.</span>
+                {{ t('email_settings.server.passwordHelpSuffix') }}</span>
               </p>
             </div>
           </div>
@@ -256,17 +258,17 @@ onMounted(load)
 
         <div class="card p-6">
           <h2 class="font-semibold mb-4 flex items-center gap-2">
-            <PaperAirplaneIcon class="w-5 h-5" /> Identitas Pengirim
+            <PaperAirplaneIcon class="w-5 h-5" /> {{ t('email_settings.identity.title') }}
           </h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label class="label">From Address *
+              <label class="label">{{ t('email_settings.identity.fromAddress') }} *
                 <span class="text-xs text-gray-400 ml-1">({{ source.from_address }})</span>
               </label>
               <input v-model="form.from_address" class="input" placeholder="noreply@perusahaan.id" />
             </div>
             <div>
-              <label class="label">From Name
+              <label class="label">{{ t('email_settings.identity.fromName') }}
                 <span class="text-xs text-gray-400 ml-1">({{ source.from_name }})</span>
               </label>
               <input v-model="form.from_name" class="input" placeholder="HRIS Perusahaan" />
@@ -274,16 +276,15 @@ onMounted(load)
           </div>
           <p class="text-xs text-gray-500 mt-3 flex items-start gap-1">
             <ExclamationTriangleIcon class="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" />
-            <span>From address sebaiknya domain perusahaan dengan SPF/DKIM/DMARC sudah ter-konfigurasi
-            supaya tidak masuk spam. Gmail/free SMTP bisa pakai alamat sendiri tapi rate-limit lebih ketat.</span>
+            <span>{{ t('email_settings.identity.help') }}</span>
           </p>
         </div>
 
         <div class="flex items-center justify-between gap-3">
-          <button class="btn-secondary" @click="load" :disabled="saving">Reset</button>
+          <button class="btn-secondary" @click="load" :disabled="saving">{{ t('common.reset') }}</button>
           <button class="btn-primary" @click="save" :disabled="saving">
             <CheckCircleIcon class="w-4 h-4" />
-            {{ saving ? 'Menyimpan…' : 'Simpan Pengaturan' }}
+            {{ saving ? t('common.saving') : t('email_settings.saveSettings') }}
           </button>
         </div>
       </div>
@@ -292,48 +293,45 @@ onMounted(load)
       <div class="space-y-4">
         <div class="card p-6 sticky top-4">
           <h2 class="font-semibold mb-3 flex items-center gap-2">
-            <ShieldCheckIcon class="w-5 h-5 text-emerald-600" /> Test Konfigurasi
+            <ShieldCheckIcon class="w-5 h-5 text-emerald-600" /> {{ t('email_settings.test.title') }}
           </h2>
           <p class="text-xs text-gray-600 mb-3">
-            Kirim email test ke alamat Anda untuk verify SMTP berfungsi
-            <strong>sebelum</strong> menyimpan permanent. Field yang Anda isi
-            di kiri akan dipakai saat test (override DB).
+            {{ t('email_settings.test.help') }}
           </p>
-          <label class="label">Email tujuan</label>
+          <label class="label">{{ t('email_settings.test.targetEmail') }}</label>
           <input v-model="testTo" type="email" class="input" placeholder="email.anda@example.com" />
           <button class="btn-primary w-full mt-3" @click="sendTest" :disabled="testing">
             <PaperAirplaneIcon class="w-4 h-4" />
-            {{ testing ? 'Mengirim…' : 'Kirim Test Email' }}
+            {{ testing ? t('common.sending') : t('email_settings.test.sendButton') }}
           </button>
 
           <div class="mt-5 pt-4 border-t border-gray-200">
-            <h3 class="text-sm font-semibold mb-2">Tips troubleshooting</h3>
+            <h3 class="text-sm font-semibold mb-2">{{ t('email_settings.troubleshoot.title') }}</h3>
             <ul class="text-xs text-gray-600 space-y-1.5 list-disc pl-4">
-              <li><strong>Connection timeout</strong> — port salah / firewall block. Coba 587 (TLS) atau 465 (SSL).</li>
-              <li><strong>Could not authenticate</strong> — username/password salah. Untuk Gmail, pakai App Password.</li>
-              <li><strong>Email tidak masuk</strong> — cek folder spam. Setup SPF/DKIM/DMARC untuk domain Anda.</li>
-              <li><strong>Rate limit exceeded</strong> — Gmail batasi ~500 email/hari. Untuk volume besar pakai SendGrid/Mailgun/SES.</li>
+              <li><strong>Connection timeout</strong> — {{ t('email_settings.troubleshoot.timeout') }}</li>
+              <li><strong>Could not authenticate</strong> — {{ t('email_settings.troubleshoot.auth') }}</li>
+              <li><strong>Email tidak masuk</strong> — {{ t('email_settings.troubleshoot.spam') }}</li>
+              <li><strong>Rate limit exceeded</strong> — {{ t('email_settings.troubleshoot.rateLimit') }}</li>
             </ul>
           </div>
         </div>
 
         <div class="card p-6">
-          <h3 class="text-sm font-semibold mb-2">Antrian Email</h3>
+          <h3 class="text-sm font-semibold mb-2">{{ t('email_settings.queue.title') }}</h3>
           <p class="text-xs text-gray-600 mb-3">
-            Email dikirim oleh worker <code class="text-[11px]">php spark email:process</code>
-            yang harus dijadwalkan via cron tiap 1-2 menit.
+            {{ t('email_settings.queue.help') }}
           </p>
           <div class="space-y-1.5 text-xs">
             <div class="flex items-center justify-between">
-              <span class="text-amber-700">⏳ Menunggu</span>
+              <span class="text-amber-700">⏳ {{ t('email_settings.queue.statusQueued') }}</span>
               <strong>{{ queueStats.queued }}</strong>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-emerald-700">✅ Terkirim</span>
+              <span class="text-emerald-700">✅ {{ t('email_settings.queue.statusSent') }}</span>
               <strong>{{ queueStats.sent }}</strong>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-red-700">❌ Gagal</span>
+              <span class="text-red-700">❌ {{ t('email_settings.queue.statusFailed') }}</span>
               <strong>{{ queueStats.failed }}</strong>
             </div>
           </div>

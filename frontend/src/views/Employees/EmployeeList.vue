@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
+import { useI18n } from '@/locales'
 import {
   PlusIcon, MagnifyingGlassIcon, PencilIcon, EyeIcon, TrashIcon,
   FunnelIcon, XMarkIcon, ArrowPathIcon, GiftIcon,
@@ -18,6 +19,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 
 // ──────────────────────────────────────────────────────────────────────────
 // State — list + filters
@@ -134,7 +136,7 @@ async function fetch() {
     items.value = res.data.data || []
     meta.value = res.data.meta || meta.value
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat data karyawan')
+    toast.error(e.response?.data?.message || t('employees.list.failed_load'))
   } finally {
     loading.value = false
   }
@@ -154,18 +156,18 @@ async function loadFilterOptions() {
 
 async function removeEmployee(emp) {
   const ok = await confirmDialog({
-    title: 'Nonaktifkan karyawan?',
-    message: `${emp.full_name} (${emp.employee_number}) akan ditandai non-aktif.`,
-    okText: 'Nonaktifkan',
+    title: t('employees.list.deactivate_title'),
+    message: t('employees.list.deactivate_message', { name: emp.full_name, nip: emp.employee_number }),
+    okText: t('employees.list.deactivate_btn'),
     variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete('/employees/' + emp.id)
-    toast.success('Karyawan dinonaktifkan')
+    toast.success(t('employees.list.deactivated_success'))
     fetch()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menonaktifkan')
+    toast.error(e.response?.data?.message || t('employees.list.deactivate_failed'))
   }
 }
 
@@ -251,19 +253,19 @@ function getInitials(name) {
     <!-- Header -->
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
       <div>
-        <h1 class="text-2xl font-bold">Karyawan</h1>
-        <p class="text-gray-500 text-sm">Kelola data karyawan perusahaan</p>
+        <h1 class="text-2xl font-bold">{{ t('employees.list.title') }}</h1>
+        <p class="text-gray-500 text-sm">{{ t('employees.list.subtitle') }}</p>
       </div>
       <div class="flex items-center gap-2 self-start md:self-auto flex-wrap">
         <!-- Migration #067 — bulk import dari xlsx -->
         <ExcelImporter
           v-if="auth.can('employees.bulk_import')"
           resource="employees"
-          button-label="Import Excel"
+          :button-label="t('employees.list.import_excel')"
           @committed="fetch()"
         />
         <button v-if="auth.can('employee.create')" class="btn-primary" @click="openCreate">
-          <PlusIcon class="w-4 h-4" /> Tambah Karyawan
+          <PlusIcon class="w-4 h-4" /> {{ t('employees.list.add_employee') }}
         </button>
       </div>
     </div>
@@ -274,7 +276,7 @@ function getInitials(name) {
         <div class="relative w-full md:w-96">
           <MagnifyingGlassIcon class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input v-model="filters.search"
-            placeholder="Cari nama, NIP, atau email..."
+            :placeholder="t('employees.list.search_placeholder')"
             class="input pl-9 pr-9 w-full" />
           <button v-if="filters.search" @click="filters.search = ''"
             class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100 text-gray-400">
@@ -290,7 +292,7 @@ function getInitials(name) {
             :class="showFilters ? 'ring-1 ring-primary-300 bg-primary-50 text-primary-700' : ''"
           >
             <FunnelIcon class="w-4 h-4" />
-            <span>Filter</span>
+            <span>{{ t('employees.list.filter') }}</span>
             <span v-if="activeFilterCount > 0"
               class="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-semibold rounded-full bg-primary-600 text-white">
               {{ activeFilterCount }}
@@ -300,7 +302,7 @@ function getInitials(name) {
             type="button"
             @click="resetFilters"
             class="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1">
-            <ArrowPathIcon class="w-4 h-4" /> Reset
+            <ArrowPathIcon class="w-4 h-4" /> {{ t('employees.list.reset') }}
           </button>
         </div>
       </div>
@@ -309,31 +311,31 @@ function getInitials(name) {
       <div v-if="showFilters" class="px-4 pb-4 pt-2 border-b border-gray-100 bg-gray-50/40">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
-            <label class="text-xs font-medium text-gray-600">Departemen</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.department') }}</label>
             <SearchableSelect
               v-model="filters.department_id"
               :items="departments"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="Semua departemen"
+              :placeholder="t('employees.list.all_departments')"
               class="mt-1"
             />
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Cabang</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.branch') }}</label>
             <SearchableSelect
               v-model="filters.branch_id"
               :items="branches"
               value-key="id"
               label-key="name"
               :search-keys="['name','code','city']"
-              placeholder="Semua cabang"
+              :placeholder="t('employees.list.all_branches')"
               class="mt-1"
             />
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Jabatan</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.position') }}</label>
             <SearchableSelect
               v-model="filters.position_id"
               :items="filteredPositions"
@@ -341,19 +343,19 @@ function getInitials(name) {
               label-key="name"
               sub-label-key="department_name"
               :search-keys="['name','code','tier','department_name']"
-              placeholder="Semua jabatan"
+              :placeholder="t('employees.list.all_positions')"
               class="mt-1"
             />
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Job Grade</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.job_grade') }}</label>
             <SearchableSelect
               v-model="filters.job_grade_id"
               :items="jobGrades"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="Semua grade"
+              :placeholder="t('employees.list.all_grades')"
               class="mt-1"
             >
               <template #item="{ item }">
@@ -369,9 +371,9 @@ function getInitials(name) {
             </SearchableSelect>
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Tipe Karyawan</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.employee_type') }}</label>
             <select v-model="filters.employment_type" class="input mt-1">
-              <option value="">Semua tipe</option>
+              <option value="">{{ t('employees.list.all_types') }}</option>
               <option value="FULL_TIME">Full Time</option>
               <option value="PART_TIME">Part Time</option>
               <option value="CONTRACT">Contract</option>
@@ -379,9 +381,9 @@ function getInitials(name) {
             </select>
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Status Kepegawaian</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.employment_status') }}</label>
             <select v-model="filters.employment_status" class="input mt-1">
-              <option value="">Semua status</option>
+              <option value="">{{ t('employees.list.all_status') }}</option>
               <option value="PKWTT">PKWTT (Tetap)</option>
               <option value="PKWT">PKWT (Kontrak)</option>
               <option value="PROBATION">Probation</option>
@@ -391,19 +393,19 @@ function getInitials(name) {
             </select>
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Aktif / Non-aktif</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.status_active_inactive') }}</label>
             <select v-model="filters.status" class="input mt-1">
-              <option value="">Semua</option>
-              <option value="active">Aktif</option>
-              <option value="inactive">Non-aktif</option>
+              <option value="">{{ t('employees.list.all') }}</option>
+              <option value="active">{{ t('employees.list.active') }}</option>
+              <option value="inactive">{{ t('employees.list.inactive') }}</option>
             </select>
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-600">Gender</label>
+            <label class="text-xs font-medium text-gray-600">{{ t('employees.list.gender') }}</label>
             <select v-model="filters.gender" class="input mt-1">
-              <option value="">Semua</option>
-              <option value="M">Laki-laki</option>
-              <option value="F">Perempuan</option>
+              <option value="">{{ t('employees.list.all') }}</option>
+              <option value="M">{{ t('employees.list.male') }}</option>
+              <option value="F">{{ t('employees.list.female') }}</option>
             </select>
           </div>
         </div>
@@ -414,26 +416,26 @@ function getInitials(name) {
         <table class="table">
           <thead>
             <tr>
-              <th>NIP</th>
-              <th>Nama</th>
-              <th>Cabang</th>
-              <th>Departemen</th>
-              <th>Jabatan</th>
-              <th>Grade</th>
-              <th>Status</th>
-              <th>Bergabung</th>
-              <th class="text-right">Aksi</th>
+              <th>{{ t('employees.list.col_nip') }}</th>
+              <th>{{ t('employees.list.col_name') }}</th>
+              <th>{{ t('employees.list.col_branch') }}</th>
+              <th>{{ t('employees.list.col_department') }}</th>
+              <th>{{ t('employees.list.col_position') }}</th>
+              <th>{{ t('employees.list.col_grade') }}</th>
+              <th>{{ t('employees.list.col_status') }}</th>
+              <th>{{ t('employees.list.col_joined') }}</th>
+              <th class="text-right">{{ t('employees.list.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td colspan="9" class="text-center py-8 text-gray-400">Memuat...</td></tr>
+            <tr v-if="loading"><td colspan="9" class="text-center py-8 text-gray-400">{{ t('employees.list.loading') }}</td></tr>
             <tr v-else-if="items.length === 0">
               <td colspan="9" class="text-center py-10 text-gray-400">
                 <div class="flex flex-col items-center gap-2">
-                  <span>Tidak ada karyawan yang cocok dengan filter.</span>
+                  <span>{{ t('employees.list.no_employees') }}</span>
                   <button v-if="activeFilterCount > 0 || filters.search"
                     class="text-sm text-primary-600 hover:underline"
-                    @click="resetFilters">Hapus semua filter</button>
+                    @click="resetFilters">{{ t('employees.list.clear_filters') }}</button>
                 </div>
               </td>
             </tr>
@@ -470,7 +472,7 @@ function getInitials(name) {
                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                    : 'bg-gray-100 text-gray-500 border-gray-200']">
                     <span :class="e.is_active ? 'w-1.5 h-1.5 rounded-full bg-emerald-500' : 'w-1.5 h-1.5 rounded-full bg-gray-400'"></span>
-                    {{ e.is_active ? 'Aktif' : 'Non-aktif' }}
+                    {{ e.is_active ? t('employees.list.active') : t('employees.list.inactive') }}
                   </span>
                   <span :class="['text-xs px-2 py-0.5 rounded-full border font-medium w-fit',
                                  statusBadgeClass(e.employment_status)]">
@@ -510,15 +512,23 @@ function getInitials(name) {
       <!-- Pagination -->
       <div class="card-body flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <div class="text-sm text-gray-500">
-          Total: <strong>{{ meta.total }}</strong> karyawan
+          {{ t('employees.list.total') }}: <strong>{{ meta.total }}</strong> {{ t('employees.list.employees') }}
           <span v-if="activeFilterCount > 0 || filters.search" class="text-gray-400">
-            (filter aktif: {{ activeFilterCount + (filters.search ? 1 : 0) }})
+            ({{ t('employees.list.active_filters') }}: {{ activeFilterCount + (filters.search ? 1 : 0) }})
           </span>
         </div>
         <div class="flex items-center gap-2">
-          <button class="btn-secondary" :disabled="meta.page <= 1" @click="go(meta.page - 1)">Sebelumnya</button>
-          <span class="px-3 py-2 text-sm">Halaman {{ meta.page }} / {{ meta.pages || 1 }}</span>
-          <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="go(meta.page + 1)">Berikutnya</button>
+          <label class="text-sm text-gray-500">{{ t('common.per_page') }}:</label>
+          <select v-model.number="perPage" class="input py-1 w-20 text-sm"
+            @change="page = 1; fetch()">
+            <option :value="10">10</option>
+            <option :value="20">20</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+          <button class="btn-secondary" :disabled="meta.page <= 1" @click="go(meta.page - 1)">{{ t('employees.list.prev') }}</button>
+          <span class="px-3 py-2 text-sm">{{ t('employees.list.page_of', { current: meta.page, total: meta.pages || 1 }) }}</span>
+          <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="go(meta.page + 1)">{{ t('employees.list.next') }}</button>
         </div>
       </div>
     </div>

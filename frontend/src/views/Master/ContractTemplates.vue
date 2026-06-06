@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
@@ -18,17 +19,18 @@ import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
  * dari endpoint /contract-templates/variables.
  */
 
+const { t } = useI18n()
 const toast = useToast()
 
-const types = [
-  { value: 'PKWT', label: 'PKWT — Kontrak Waktu Tertentu' },
-  { value: 'PKWTT', label: 'PKWTT — Kontrak Tetap' },
-  { value: 'PROBATION', label: 'Masa Percobaan' },
-  { value: 'PKHL', label: 'PKHL — Harian Lepas' },
-  { value: 'MAGANG', label: 'Magang / Internship' },
-  { value: 'OUTSOURCING', label: 'Outsourcing' },
-  { value: 'GENERIC', label: 'Generic / Lainnya' },
-]
+const types = computed(() => [
+  { value: 'PKWT', label: t('master.contract_templates.type_pkwt') },
+  { value: 'PKWTT', label: t('master.contract_templates.type_pkwtt') },
+  { value: 'PROBATION', label: t('master.contract_templates.type_probation') },
+  { value: 'PKHL', label: t('master.contract_templates.type_pkhl') },
+  { value: 'MAGANG', label: t('master.contract_templates.type_magang') },
+  { value: 'OUTSOURCING', label: t('master.contract_templates.type_outsourcing') },
+  { value: 'GENERIC', label: t('master.contract_templates.type_generic') },
+])
 
 const items = ref([])
 const loading = ref(false)
@@ -81,7 +83,7 @@ async function fetchData() {
     const res = await api.get('/contract-templates', { params })
     items.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat template')
+    toast.error(e.response?.data?.message || t('master.contract_templates.load_failed'))
   } finally {
     loading.value = false
   }
@@ -126,7 +128,7 @@ async function openEdit(item) {
     showEditor.value = true
     if (employees.value.length === 0) loadEmployeesForPreview()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat template')
+    toast.error(e.response?.data?.message || t('master.contract_templates.load_one_failed'))
   }
 }
 
@@ -135,42 +137,43 @@ async function save() {
     const payload = { ...form.value }
     if (editing.value) {
       await api.put(`/contract-templates/${payload.id}`, payload)
-      toast.success('Template diperbarui')
+      toast.success(t('master.contract_templates.saved_update'))
     } else {
       const res = await api.post('/contract-templates', payload)
       form.value.id = res.data.data?.id
       editing.value = true
-      toast.success('Template dibuat')
+      toast.success(t('master.contract_templates.saved_create'))
     }
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('master.contract_templates.save_failed'))
   }
 }
 
 async function remove(item) {
   const ok = await confirmDialog({
-    title: 'Hapus Template',
-    message: `Hapus template "${item.name}"?`,
-    okText: 'Hapus', variant: 'danger',
+    title: t('master.contract_templates.delete_title'),
+    message: t('master.contract_templates.delete_msg', { name: item.name }),
+    okText: t('master.contract_templates.delete_ok'),
+    variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/contract-templates/${item.id}`)
-    toast.success('Berhasil dihapus')
+    toast.success(t('master.contract_templates.deleted'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('master.contract_templates.delete_failed'))
   }
 }
 
 async function doPreview() {
   if (! previewEmpId.value) {
-    toast.warning('Pilih karyawan untuk preview')
+    toast.warning(t('master.contract_templates.pick_employee_preview'))
     return
   }
   if (! form.value.id) {
-    toast.warning('Simpan template dulu sebelum preview')
+    toast.warning(t('master.contract_templates.save_first_preview'))
     return
   }
   previewLoading.value = true
@@ -180,7 +183,7 @@ async function doPreview() {
     })
     previewHtml.value = res.data.data.html
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal preview')
+    toast.error(e.response?.data?.message || t('master.contract_templates.preview_failed'))
   } finally {
     previewLoading.value = false
   }
@@ -188,11 +191,11 @@ async function doPreview() {
 
 async function doGenerate() {
   if (! previewEmpId.value) {
-    toast.warning('Pilih karyawan terlebih dulu')
+    toast.warning(t('master.contract_templates.pick_employee_first'))
     return
   }
   if (! form.value.id) {
-    toast.warning('Simpan template dulu sebelum generate')
+    toast.warning(t('master.contract_templates.save_first_generate'))
     return
   }
   try {
@@ -200,10 +203,10 @@ async function doGenerate() {
       employee_id: Number(previewEmpId.value),
       subject: generateSubject.value || form.value.name,
     })
-    toast.success(`Kontrak digenerate: ${res.data.data.contract_number}`)
+    toast.success(t('master.contract_templates.generated', { number: res.data.data.contract_number }))
     generateMode.value = false
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal generate')
+    toast.error(e.response?.data?.message || t('master.contract_templates.generate_failed'))
   }
 }
 
@@ -223,7 +226,7 @@ function insertVariable(key) {
 }
 
 function typeLabel(v) {
-  return types.find(t => t.value === v)?.label || v
+  return types.value.find(tt => tt.value === v)?.label || v
 }
 
 // Disimpan sebagai string biasa supaya Vue compiler tidak salah parse
@@ -231,7 +234,7 @@ function typeLabel(v) {
 const placeholderHints = {
   fullName: '{{employee.full_name}}',
   salary:   '{{salary.basic|currency}}',
-  body:     'HTML kontrak. Gunakan placeholder seperti {{employee.full_name}} dst.',
+  body:     '{{employee.full_name}}',
   regs:     '{{regulations}}',
 }
 </script>
@@ -240,44 +243,44 @@ const placeholderHints = {
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <DocumentTextIcon class="w-6 h-6" /> Template Kontrak
+        <DocumentTextIcon class="w-6 h-6" /> {{ t('master.contract_templates.title') }}
       </h1>
       <button class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Tambah Template
+        <PlusIcon class="w-4 h-4" /> {{ t('master.contract_templates.add') }}
       </button>
     </div>
 
     <div class="card">
       <div class="card-header">
         <select v-model="filterType" class="input w-full md:w-72">
-          <option value="">— Semua Tipe Kontrak —</option>
-          <option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option>
+          <option value="">{{ t('master.contract_templates.all_types') }}</option>
+          <option v-for="ty in types" :key="ty.value" :value="ty.value">{{ ty.label }}</option>
         </select>
       </div>
       <div class="overflow-x-auto">
         <table class="table">
           <thead>
             <tr>
-              <th>Kode</th>
-              <th>Nama</th>
-              <th>Tipe</th>
-              <th>Bahasa</th>
-              <th>Default</th>
-              <th>Status</th>
-              <th class="text-right w-32">Aksi</th>
+              <th>{{ t('master.contract_templates.col_code') }}</th>
+              <th>{{ t('master.contract_templates.col_name') }}</th>
+              <th>{{ t('master.contract_templates.col_type') }}</th>
+              <th>{{ t('master.contract_templates.col_language') }}</th>
+              <th>{{ t('master.contract_templates.col_default') }}</th>
+              <th>{{ t('master.contract_templates.col_status') }}</th>
+              <th class="text-right w-32">{{ t('master.contract_templates.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td colspan="7" class="text-center py-8 text-gray-400">Memuat...</td></tr>
-            <tr v-else-if="items.length === 0"><td colspan="7" class="text-center py-8 text-gray-400">Belum ada template</td></tr>
+            <tr v-if="loading"><td colspan="7" class="text-center py-8 text-gray-400">{{ t('master.contract_templates.loading') }}</td></tr>
+            <tr v-else-if="items.length === 0"><td colspan="7" class="text-center py-8 text-gray-400">{{ t('master.contract_templates.no_templates') }}</td></tr>
             <tr v-for="item in items" :key="item.id">
               <td class="font-mono text-sm">{{ item.code }}</td>
               <td class="font-medium">{{ item.name }}</td>
               <td>{{ typeLabel(item.contract_type) }}</td>
-              <td class="text-sm text-gray-500">{{ item.language === 'id' ? 'Indonesia' : 'English' }}</td>
+              <td class="text-sm text-gray-500">{{ item.language === 'id' ? t('master.contract_templates.lang_id') : t('master.contract_templates.lang_en') }}</td>
               <td>
                 <span v-if="item.is_default" class="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700">
-                  Default
+                  {{ t('master.contract_templates.default_badge') }}
                 </span>
               </td>
               <td>
@@ -285,13 +288,13 @@ const placeholderHints = {
                   'px-2 py-0.5 rounded-full text-xs',
                   item.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
                 ]">
-                  {{ item.is_active ? 'Aktif' : 'Non-aktif' }}
+                  {{ item.is_active ? t('master.contract_templates.active') : t('master.contract_templates.inactive') }}
                 </span>
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" title="Edit"><PencilIcon class="w-4 h-4" /></button>
-                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" title="Hapus"><TrashIcon class="w-4 h-4" /></button>
+                  <button class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" :title="t('master.contract_templates.edit')"><PencilIcon class="w-4 h-4" /></button>
+                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" :title="t('master.contract_templates.delete')"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
@@ -305,9 +308,9 @@ const placeholderHints = {
       <div class="bg-white w-full m-4 rounded-lg shadow-xl flex flex-col overflow-hidden">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
           <div>
-            <h2 class="font-semibold">{{ editing ? 'Edit' : 'Tambah' }} Template Kontrak</h2>
+            <h2 class="font-semibold">{{ editing ? t('master.contract_templates.modal_edit') : t('master.contract_templates.modal_add') }}</h2>
             <div class="text-xs text-gray-500">
-              Gunakan placeholder seperti <code>{{ placeholderHints.fullName }}</code> atau <code>{{ placeholderHints.salary }}</code>.
+              {{ t('master.contract_templates.placeholder_hint', { fullName: placeholderHints.fullName, salary: placeholderHints.salary }) }}
             </div>
           </div>
           <button class="text-gray-500" @click="showEditor = false"><XMarkIcon class="w-5 h-5" /></button>
@@ -316,43 +319,43 @@ const placeholderHints = {
         <!-- Metadata bar -->
         <div class="grid grid-cols-1 md:grid-cols-6 gap-3 px-6 py-3 border-b border-gray-100 bg-gray-50">
           <div class="md:col-span-1">
-            <label class="label">Kode</label>
+            <label class="label">{{ t('master.contract_templates.f_code') }}</label>
             <input v-model="form.code" class="input" required :disabled="editing" />
           </div>
           <div class="md:col-span-2">
-            <label class="label">Nama</label>
+            <label class="label">{{ t('master.contract_templates.f_name') }}</label>
             <input v-model="form.name" class="input" required />
           </div>
           <div class="md:col-span-1">
-            <label class="label">Tipe</label>
+            <label class="label">{{ t('master.contract_templates.f_type') }}</label>
             <select v-model="form.contract_type" class="input" required>
-              <option v-for="t in types" :key="t.value" :value="t.value">{{ t.value }}</option>
+              <option v-for="ty in types" :key="ty.value" :value="ty.value">{{ ty.value }}</option>
             </select>
           </div>
           <div class="md:col-span-1">
-            <label class="label">Bahasa</label>
+            <label class="label">{{ t('master.contract_templates.f_language') }}</label>
             <select v-model="form.language" class="input">
-              <option value="id">Indonesia</option>
-              <option value="en">English</option>
+              <option value="id">{{ t('master.contract_templates.lang_id') }}</option>
+              <option value="en">{{ t('master.contract_templates.lang_en') }}</option>
             </select>
           </div>
           <div class="md:col-span-1 flex items-end gap-3">
             <label class="flex items-center gap-1 text-sm">
-              <input type="checkbox" v-model="form.is_active" :true-value="1" :false-value="0" class="w-4 h-4" /> Aktif
+              <input type="checkbox" v-model="form.is_active" :true-value="1" :false-value="0" class="w-4 h-4" /> {{ t('master.contract_templates.f_active') }}
             </label>
             <label class="flex items-center gap-1 text-sm">
-              <input type="checkbox" v-model="form.is_default" :true-value="1" :false-value="0" class="w-4 h-4" /> Default
+              <input type="checkbox" v-model="form.is_default" :true-value="1" :false-value="0" class="w-4 h-4" /> {{ t('master.contract_templates.f_default') }}
             </label>
           </div>
         </div>
 
         <!-- Tabs -->
         <div class="flex border-b border-gray-200 px-6 bg-white">
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'body' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'body'">Body</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'header' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'header'">Header</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'footer' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'footer'">Footer</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'settings' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'settings'">Pengaturan</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'preview' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'preview'">Preview / Generate</button>
+          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'body' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'body'">{{ t('master.contract_templates.tab_body') }}</button>
+          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'header' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'header'">{{ t('master.contract_templates.tab_header') }}</button>
+          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'footer' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'footer'">{{ t('master.contract_templates.tab_footer') }}</button>
+          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'settings' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'settings'">{{ t('master.contract_templates.tab_settings') }}</button>
+          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'preview' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'preview'">{{ t('master.contract_templates.tab_preview') }}</button>
         </div>
 
         <!-- Body content area -->
@@ -360,60 +363,60 @@ const placeholderHints = {
           <div class="lg:col-span-3 p-6 overflow-y-auto">
             <div v-if="activeTab === 'body'">
               <textarea v-model="form.body_html" class="input font-mono text-sm w-full h-[55vh]"
-                :placeholder="placeholderHints.body"></textarea>
+                :placeholder="t('master.contract_templates.ph_body', { var: placeholderHints.body })"></textarea>
             </div>
             <div v-else-if="activeTab === 'header'">
               <textarea v-model="form.header_html" class="input font-mono text-sm w-full h-[55vh]"
-                placeholder="Header — biasanya logo, kop surat, atau nomor kontrak."></textarea>
+                :placeholder="t('master.contract_templates.ph_header')"></textarea>
             </div>
             <div v-else-if="activeTab === 'footer'">
               <textarea v-model="form.footer_html" class="input font-mono text-sm w-full h-[55vh]"
-                placeholder="Footer — biasanya tanda tangan kedua belah pihak."></textarea>
+                :placeholder="t('master.contract_templates.ph_footer')"></textarea>
             </div>
             <div v-else-if="activeTab === 'settings'" class="space-y-4 max-w-2xl">
               <div>
-                <label class="label">Deskripsi</label>
+                <label class="label">{{ t('master.contract_templates.f_description') }}</label>
                 <textarea v-model="form.description" class="input" rows="3"></textarea>
               </div>
               <div>
                 <label class="flex items-center gap-2">
                   <input type="checkbox" v-model="form.include_regulations" :true-value="1" :false-value="0" class="w-4 h-4" />
-                  <span>Sertakan peraturan perusahaan otomatis (placeholder <code>{{ placeholderHints.regs }}</code>)</span>
+                  <span>{{ t('master.contract_templates.include_regs', { tag: placeholderHints.regs }) }}</span>
                 </label>
               </div>
             </div>
             <div v-else-if="activeTab === 'preview'" class="space-y-4">
               <div class="flex flex-wrap gap-3 items-end">
                 <div class="flex-1 min-w-[260px]">
-                  <label class="label">Karyawan untuk preview</label>
+                  <label class="label">{{ t('master.contract_templates.preview_employee') }}</label>
                   <EmployeeSearchSelect
                     v-model="previewEmpId"
-                    placeholder="— Pilih Karyawan —"
+                    :placeholder="t('master.contract_templates.preview_pick_ph')"
                     :only-active="true"
                   />
                 </div>
                 <button class="btn-secondary" @click="doPreview" :disabled="previewLoading">
-                  <EyeIcon class="w-4 h-4" /> {{ previewLoading ? 'Memuat...' : 'Preview' }}
+                  <EyeIcon class="w-4 h-4" /> {{ previewLoading ? t('master.contract_templates.preview_loading') : t('master.contract_templates.preview_btn') }}
                 </button>
                 <button class="btn-primary" @click="generateMode = ! generateMode">
-                  <BoltIcon class="w-4 h-4" /> Generate Kontrak
+                  <BoltIcon class="w-4 h-4" /> {{ t('master.contract_templates.generate_btn') }}
                 </button>
               </div>
 
               <div v-if="generateMode" class="card-body bg-amber-50 border border-amber-200 rounded-md">
-                <div class="text-sm font-medium text-amber-900 mb-2">Generate kontrak final</div>
+                <div class="text-sm font-medium text-amber-900 mb-2">{{ t('master.contract_templates.generate_panel_title') }}</div>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <input v-model="generateSubject" class="input md:col-span-2" placeholder="Subjek (kosongkan = nama template)" />
-                  <button class="btn-primary" @click="doGenerate">Buat Kontrak</button>
+                  <input v-model="generateSubject" class="input md:col-span-2" :placeholder="t('master.contract_templates.generate_subject_ph')" />
+                  <button class="btn-primary" @click="doGenerate">{{ t('master.contract_templates.generate_create') }}</button>
                 </div>
                 <div class="text-xs text-amber-800 mt-2">
-                  Snapshot HTML disimpan di <code>generated_contracts</code>; perubahan template selanjutnya tidak mengubah dokumen yang sudah dirilis.
+                  {{ t('master.contract_templates.generate_panel_note') }}
                 </div>
               </div>
 
               <div class="border border-gray-200 rounded-md bg-white p-6 max-h-[55vh] overflow-y-auto">
                 <div v-if="!previewHtml" class="text-gray-400 text-sm text-center py-12">
-                  Pilih karyawan dan klik Preview untuk melihat hasil rendering.
+                  {{ t('master.contract_templates.preview_empty') }}
                 </div>
                 <div v-else class="prose max-w-none" v-html="previewHtml"></div>
               </div>
@@ -422,8 +425,8 @@ const placeholderHints = {
 
           <!-- Sidebar variabel -->
           <aside class="border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto" v-if="activeTab !== 'settings' && activeTab !== 'preview'">
-            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Variabel</div>
-            <input v-model="filteredVariables" placeholder="Cari variabel..." class="input mb-3 text-sm" />
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">{{ t('master.contract_templates.sidebar_variables') }}</div>
+            <input v-model="filteredVariables" :placeholder="t('master.contract_templates.sidebar_search_var')" class="input mb-3 text-sm" />
             <div class="space-y-1 mb-4">
               <button v-for="v in visibleVariables" :key="v.key"
                 class="w-full text-left px-2 py-1 text-xs rounded hover:bg-primary-50 hover:text-primary-700 group"
@@ -431,10 +434,10 @@ const placeholderHints = {
                 <code class="font-mono">{{ wrapVar(v.key) }}</code>
                 <div class="text-[11px] text-gray-500 group-hover:text-primary-600">{{ v.description }}</div>
               </button>
-              <div v-if="visibleVariables.length === 0" class="text-xs text-gray-400 px-2">Tidak ada variabel cocok</div>
+              <div v-if="visibleVariables.length === 0" class="text-xs text-gray-400 px-2">{{ t('master.contract_templates.no_var_match') }}</div>
             </div>
 
-            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Filter</div>
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">{{ t('master.contract_templates.sidebar_filters') }}</div>
             <div class="space-y-1">
               <div v-for="f in (variables.filters || [])" :key="f.key"
                 class="px-2 py-1 text-xs">
@@ -447,8 +450,8 @@ const placeholderHints = {
 
         <!-- Footer -->
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end gap-2 bg-white">
-          <button class="btn-secondary" @click="showEditor = false">Tutup</button>
-          <button class="btn-primary" @click="save">{{ editing ? 'Simpan Perubahan' : 'Simpan' }}</button>
+          <button class="btn-secondary" @click="showEditor = false">{{ t('master.contract_templates.btn_close') }}</button>
+          <button class="btn-primary" @click="save">{{ editing ? t('master.contract_templates.btn_save_changes') : t('master.contract_templates.btn_save') }}</button>
         </div>
       </div>
     </div>

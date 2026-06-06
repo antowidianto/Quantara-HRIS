@@ -4,6 +4,7 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
+import { useI18n } from '@/locales'
 import {
   PlusIcon, PencilIcon, EyeIcon, ShieldCheckIcon, LockClosedIcon, TrashIcon,
 } from '@heroicons/vue/24/outline'
@@ -21,6 +22,7 @@ import {
  */
 
 const toast = useToast()
+const { t } = useI18n()
 const auth = useAuthStore()
 const isSuperAdmin = computed(() => auth.isSuperAdmin)
 
@@ -39,7 +41,7 @@ async function fetchData() {
     roles.value = r.data.data
     grouped.value = p.data.data.grouped
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat')
+    toast.error(e.response?.data?.message || t('roles.failed_load'))
   } finally {
     loading.value = false
   }
@@ -65,13 +67,13 @@ async function open(role, modeView = false) {
     }
     showForm.value = true
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat detail role')
+    toast.error(e.response?.data?.message || t('roles.failed_load_detail'))
   }
 }
 
 function openCreate() {
   if (! isSuperAdmin.value) {
-    toast.warning('Hanya Super Admin yang dapat menambah role')
+    toast.warning(t('roles.only_superadmin_add'))
     return
   }
   editing.value = null
@@ -82,7 +84,7 @@ function openCreate() {
 
 async function save() {
   if (! isSuperAdmin.value) {
-    toast.error('Hanya Super Admin yang dapat menyimpan')
+    toast.error(t('roles.only_superadmin_save'))
     return
   }
   try {
@@ -91,7 +93,7 @@ async function save() {
     } else {
       await api.post('/roles', form.value)
     }
-    toast.success('Tersimpan')
+    toast.success(t('roles.saved'))
     showForm.value = false
     fetchData()
   } catch (e) {
@@ -102,22 +104,22 @@ async function save() {
 async function remove(role) {
   if (! isSuperAdmin.value) return
   if (role.is_system) {
-    toast.warning('Role bawaan sistem tidak bisa dihapus')
+    toast.warning(t('roles.system_role_no_delete'))
     return
   }
   const ok = await confirmDialog({
-    title: 'Hapus role?',
-    message: `Hapus role "${role.name}"? User yang masih memakai role ini akan ditolak server (lebih aman dipindahkan dulu ke role lain).`,
-    okText: 'Hapus',
+    title: t('roles.delete_title'),
+    message: t('roles.delete_message', { name: role.name }),
+    okText: t('roles.delete_btn'),
     variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/roles/${role.id}`)
-    toast.success('Role dihapus')
+    toast.success(t('roles.deleted_success'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('roles.delete_failed'))
   }
 }
 
@@ -146,14 +148,14 @@ function groupSelectedCount(perms) {
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2">
           <ShieldCheckIcon class="w-7 h-7 text-primary-600" />
-          Role & Permission
+          {{ t('roles.title') }}
         </h1>
         <p class="text-sm text-gray-500">
-          Atur kewenangan setiap role di seluruh modul HRIS.
+          {{ t('nav.items.roles') }}
         </p>
       </div>
       <button v-if="isSuperAdmin" class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Tambah Role
+        <PlusIcon class="w-4 h-4" /> {{ t('roles.add_role') }}
       </button>
     </div>
 
@@ -162,10 +164,9 @@ function groupSelectedCount(perms) {
       class="mb-4 rounded-md p-3 flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-900 text-sm">
       <LockClosedIcon class="w-5 h-5 mt-0.5 flex-shrink-0" />
       <div>
-        <div class="font-medium">Mode Lihat Saja</div>
+        <div class="font-medium">{{ t('role.read_only_banner') }}</div>
         <div class="text-xs">
-          Hanya Super Admin yang dapat menambah, mengubah, atau menghapus role & permission.
-          Anda tetap dapat melihat susunan permission setiap role.
+          {{ t('role.read_only_note') }}
         </div>
       </div>
     </div>
@@ -174,18 +175,18 @@ function groupSelectedCount(perms) {
       <table class="table">
         <thead>
           <tr>
-            <th>Slug</th>
-            <th>Nama</th>
-            <th>Tipe</th>
-            <th class="text-right">Aksi</th>
+            <th>{{ t('roles.slug') }}</th>
+            <th>{{ t('roles.name') }}</th>
+            <th>{{ t('users.role') }}</th>
+            <th class="text-right">{{ t('roles.col_actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-if="loading">
-            <td colspan="4" class="text-center py-8 text-gray-400">Memuat...</td>
+            <td colspan="4" class="text-center py-8 text-gray-400">{{ t('roles.loading') }}</td>
           </tr>
           <tr v-else-if="roles.length === 0">
-            <td colspan="4" class="text-center py-8 text-gray-400">Belum ada role</td>
+            <td colspan="4" class="text-center py-8 text-gray-400">{{ t('common.no_data') }}</td>
           </tr>
           <tr v-for="r in roles" :key="r.id" class="hover:bg-gray-50">
             <td class="font-mono text-xs">{{ r.slug }}</td>
@@ -193,13 +194,13 @@ function groupSelectedCount(perms) {
             <td>
               <span class="px-2 py-0.5 rounded text-xs"
                 :class="r.is_system ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'">
-                {{ r.is_system ? 'System' : 'Custom' }}
+                {{ r.is_system ? t('role.system_role') : t('role.custom_role') }}
               </span>
             </td>
             <td class="text-right">
               <div class="inline-flex gap-2">
                 <!-- Lihat tersedia untuk semua user terautentikasi -->
-                <button class="text-gray-600 hover:text-primary-600" title="Lihat permission"
+                <button class="text-gray-600 hover:text-primary-600" :title="t('roles.view')"
                   @click="open(r, true)">
                   <EyeIcon class="w-4 h-4" />
                 </button>
@@ -207,13 +208,13 @@ function groupSelectedCount(perms) {
                      hanya mencegah pengosongan permission super_admin) -->
                 <button v-if="isSuperAdmin"
                   class="text-primary-600 hover:text-primary-800"
-                  :title="r.is_system ? 'Edit role sistem' : 'Edit role'"
+                  :title="t('roles.edit')"
                   @click="open(r)">
                   <PencilIcon class="w-4 h-4" />
                 </button>
                 <!-- Delete: super admin saja, dan TIDAK untuk role sistem -->
                 <button v-if="isSuperAdmin && ! r.is_system"
-                  class="text-red-600 hover:text-red-800" title="Hapus role"
+                  class="text-red-600 hover:text-red-800" :title="t('roles.delete')"
                   @click="remove(r)">
                   <TrashIcon class="w-4 h-4" />
                 </button>
@@ -231,8 +232,8 @@ function groupSelectedCount(perms) {
         <div class="px-6 py-4 border-b font-semibold flex items-center justify-between">
           <span class="flex items-center gap-2">
             <ShieldCheckIcon class="w-5 h-5 text-primary-600" />
-            <span v-if="viewMode">Detail Role</span>
-            <span v-else>{{ editing ? 'Edit Role' : 'Tambah Role' }}</span>
+            <span v-if="viewMode">{{ t('role.detail') }}</span>
+            <span v-else>{{ editing ? t('roles.edit_title') : t('roles.create_title') }}</span>
             <span v-if="viewMode"
               class="ml-2 inline-flex items-center gap-1 text-xs font-normal text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
               <LockClosedIcon class="w-3 h-3" /> Read-only
@@ -258,7 +259,7 @@ function groupSelectedCount(perms) {
 
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="label">Slug</label>
+              <label class="label">{{ t('roles.slug') }}</label>
               <input v-model="form.slug" class="input" required
                 :disabled="!!editing || viewMode" />
               <p v-if="editing" class="text-xs text-gray-500 mt-1">
@@ -266,20 +267,20 @@ function groupSelectedCount(perms) {
               </p>
             </div>
             <div>
-              <label class="label">Nama</label>
+              <label class="label">{{ t('roles.name') }}</label>
               <input v-model="form.name" class="input" required :disabled="viewMode" />
             </div>
           </div>
           <div>
-            <label class="label">Deskripsi</label>
+            <label class="label">{{ t('roles.description') }}</label>
             <textarea v-model="form.description" rows="2" class="input" :disabled="viewMode"></textarea>
           </div>
 
           <div>
             <div class="flex items-center justify-between mb-1">
-              <label class="label mb-0">Permission</label>
+              <label class="label mb-0">{{ t('roles.permissions') }}</label>
               <span class="text-xs text-gray-500">
-                {{ totalSelected }} / {{ totalAvailable }} dipilih
+                {{ t('roles.permissions_selected', { selected: totalSelected, total: totalAvailable }) }}
               </span>
             </div>
 
@@ -292,7 +293,7 @@ function groupSelectedCount(perms) {
                   </span>
                   <button v-if="!viewMode" type="button" class="text-primary-600 hover:underline"
                     @click="toggleGroup(perms)">
-                    Toggle Semua
+                    {{ t('role.toggle_all') }}
                   </button>
                 </div>
               </div>
@@ -312,9 +313,9 @@ function groupSelectedCount(perms) {
 
         <div class="px-6 py-4 border-t flex justify-end gap-2">
           <button type="button" class="btn-secondary" @click="showForm = false">
-            {{ viewMode ? 'Tutup' : 'Batal' }}
+            {{ viewMode ? t('common.close') : t('common.cancel') }}
           </button>
-          <button v-if="!viewMode" type="submit" class="btn-primary">Simpan</button>
+          <button v-if="!viewMode" type="submit" class="btn-primary">{{ t('common.save') }}</button>
         </div>
       </form>
     </div>

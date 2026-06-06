@@ -1,5 +1,6 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
@@ -7,15 +8,7 @@ import { PlusIcon, TrashIcon, ClockIcon, BeakerIcon } from '@heroicons/vue/24/ou
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
-/**
- * Aturan Shift per Scope.
- *
- * Setiap rule memetakan satu shift ke kombinasi scope (branch / department /
- * work_location / job_grade). Saat sistem perlu menentukan shift karyawan
- * (mis. clock-in atau roster), `ShiftResolver` di backend memilih rule paling
- * spesifik yang cocok.
- */
-
+const { t } = useI18n()
 const toast = useToast()
 
 const items = ref([])
@@ -31,8 +24,6 @@ const jobGrades = ref([])
 const showCreate = ref(false)
 const form = reactive(emptyForm())
 
-// Preview tester — cek shift yang akan digunakan untuk employee+date.
-const employees = ref([])
 const preview = reactive({ employee_id: '', date: new Date().toISOString().slice(0, 10) })
 const previewResult = ref(null)
 const previewLoading = ref(false)
@@ -60,7 +51,7 @@ async function fetchData() {
     const res = await api.get('/shift-assignments', { params })
     items.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat data')
+    toast.error(e.response?.data?.message || t('master.shift_assignments.load_failed'))
   } finally {
     loading.value = false
   }
@@ -68,8 +59,6 @@ async function fetchData() {
 
 async function loadMasters() {
   try {
-    // Karyawan TIDAK lagi di-load semua sekaligus — picker preview pakai
-    // EmployeeSearchSelect server-side untuk dataset besar.
     const [s, b, d, w, g] = await Promise.all([
       api.get('/shifts', { params: { per_page: 200 } }).catch(() => null),
       api.get('/branches', { params: { per_page: 200 } }).catch(() => null),
@@ -97,45 +86,46 @@ function openCreate() {
 
 async function save() {
   if (! form.shift_id) {
-    toast.warning('Pilih shift dulu')
+    toast.warning(t('master.shift_assignments.pick_shift_first'))
     return
   }
   const hasScope = form.branch_id || form.department_id || form.work_location_id || form.job_grade_id
   if (! hasScope) {
-    toast.warning('Pilih minimal satu scope (branch / department / work location / job grade).')
+    toast.warning(t('master.shift_assignments.need_scope'))
     return
   }
   try {
     const payload = { ...form }
     Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null })
     await api.post('/shift-assignments', payload)
-    toast.success('Aturan ditambahkan')
+    toast.success(t('master.shift_assignments.saved'))
     showCreate.value = false
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('master.shift_assignments.save_failed'))
   }
 }
 
 async function remove(item) {
   const ok = await confirmDialog({
-    title: 'Hapus Aturan',
-    message: `Hapus aturan untuk shift "${item.shift_name}"?`,
-    okText: 'Hapus', variant: 'danger',
+    title: t('master.shift_assignments.delete_title'),
+    message: t('master.shift_assignments.delete_msg', { name: item.shift_name }),
+    okText: t('master.shift_assignments.delete_ok'),
+    variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/shift-assignments/${item.id}`)
-    toast.success('Berhasil dihapus')
+    toast.success(t('master.shift_assignments.deleted'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('master.shift_assignments.delete_failed'))
   }
 }
 
 async function runPreview() {
   if (! preview.employee_id || ! preview.date) {
-    toast.warning('Pilih karyawan & tanggal')
+    toast.warning(t('master.shift_assignments.preview_required'))
     return
   }
   previewLoading.value = true
@@ -143,7 +133,7 @@ async function runPreview() {
     const res = await api.get('/shift-assignments/preview', { params: preview })
     previewResult.value = res.data.data
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal preview')
+    toast.error(e.response?.data?.message || t('master.shift_assignments.preview_failed'))
   } finally {
     previewLoading.value = false
   }
@@ -151,22 +141,22 @@ async function runPreview() {
 
 function scopeLabel(item) {
   const parts = []
-  if (item.branch_name) parts.push(`Cabang: ${item.branch_name}`)
-  if (item.work_location_name) parts.push(`Lokasi: ${item.work_location_name}`)
-  if (item.department_name) parts.push(`Dept: ${item.department_name}`)
-  if (item.grade_name) parts.push(`Grade: ${item.grade_name}`)
-  return parts.length ? parts.join(' · ') : 'Company-wide'
+  if (item.branch_name) parts.push(t('master.shift_assignments.scope_branch', { name: item.branch_name }))
+  if (item.work_location_name) parts.push(t('master.shift_assignments.scope_location', { name: item.work_location_name }))
+  if (item.department_name) parts.push(t('master.shift_assignments.scope_dept', { name: item.department_name }))
+  if (item.grade_name) parts.push(t('master.shift_assignments.scope_grade', { name: item.grade_name }))
+  return parts.length ? parts.join(t('master.shift_assignments.scope_separator')) : t('master.shift_assignments.scope_company_wide')
 }
 
 function sourceLabel(s) {
   const map = {
-    schedule: 'Jadwal harian (override)',
-    employee: 'Default karyawan',
-    pattern: 'Pola siklus',
-    assignment: 'Rule scope',
-    shift_default: 'Shift default',
-    fallback: 'Fallback',
-    none: 'Tidak ada shift',
+    schedule: t('master.shift_assignments.src_schedule'),
+    employee: t('master.shift_assignments.src_employee'),
+    pattern: t('master.shift_assignments.src_pattern'),
+    assignment: t('master.shift_assignments.src_assignment'),
+    shift_default: t('master.shift_assignments.src_shift_default'),
+    fallback: t('master.shift_assignments.src_fallback'),
+    none: t('master.shift_assignments.src_none'),
   }
   return map[s] || s
 }
@@ -176,36 +166,35 @@ function sourceLabel(s) {
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <ClockIcon class="w-6 h-6" /> Aturan Shift per Scope
+        <ClockIcon class="w-6 h-6" /> {{ t('master.shift_assignments.title') }}
       </h1>
       <button class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Tambah Aturan
+        <PlusIcon class="w-4 h-4" /> {{ t('master.shift_assignments.btn_create') }}
       </button>
     </div>
 
-    <!-- Preview tester -->
     <div class="card mb-4">
       <div class="card-header">
         <span class="font-medium flex items-center gap-2">
-          <BeakerIcon class="w-5 h-5 text-primary-600" /> Cek Shift Karyawan
+          <BeakerIcon class="w-5 h-5 text-primary-600" /> {{ t('master.shift_assignments.preview_title') }}
         </span>
       </div>
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3">
         <div>
-          <label class="label">Karyawan</label>
+          <label class="label">{{ t('master.shift_assignments.f_employee') }}</label>
           <EmployeeSearchSelect
             v-model="preview.employee_id"
-            placeholder="— Pilih karyawan —"
+            :placeholder="t('master.shift_assignments.f_employee_ph')"
             :only-active="true"
           />
         </div>
         <div>
-          <label class="label">Tanggal</label>
+          <label class="label">{{ t('master.shift_assignments.f_date') }}</label>
           <input v-model="preview.date" type="date" class="input" />
         </div>
         <div class="flex items-end">
           <button class="btn-primary w-full" :disabled="previewLoading" @click="runPreview">
-            {{ previewLoading ? 'Memproses…' : 'Cek' }}
+            {{ previewLoading ? t('master.shift_assignments.btn_processing') : t('master.shift_assignments.btn_check') }}
           </button>
         </div>
         <div v-if="previewResult" class="md:col-span-1 bg-gray-50 rounded p-3 text-sm">
@@ -214,18 +203,17 @@ function sourceLabel(s) {
               {{ previewResult.shift.name }} ({{ String(previewResult.shift.start_time).slice(0,5) }}–{{ String(previewResult.shift.end_time).slice(0,5) }})
             </div>
           </div>
-          <div v-else class="text-gray-500">Tidak ada shift</div>
+          <div v-else class="text-gray-500">{{ t('master.shift_assignments.no_shift') }}</div>
           <div class="text-xs text-gray-500 mt-1">
-            Sumber: <span class="font-medium">{{ sourceLabel(previewResult.source) }}</span>
-            <template v-if="previewResult.is_off"> · OFF</template>
-            <template v-if="previewResult.is_holiday"> · Libur</template>
+            {{ t('master.shift_assignments.source_label', { label: sourceLabel(previewResult.source) }) }}
+            <template v-if="previewResult.is_off">{{ t('master.shift_assignments.off_suffix') }}</template>
+            <template v-if="previewResult.is_holiday">{{ t('master.shift_assignments.holiday_suffix') }}</template>
           </div>
           <div class="text-xs text-gray-400 mt-1">{{ previewResult.reason }}</div>
         </div>
       </div>
     </div>
 
-    <!-- Filter + List -->
     <div class="card">
       <div class="card-header grid grid-cols-1 md:grid-cols-4 gap-3 w-full">
         <SearchableSelect
@@ -234,7 +222,7 @@ function sourceLabel(s) {
           value-key="id"
           label-key="name"
           :search-keys="['name','code']"
-          placeholder="— Semua Shift —"
+          :placeholder="t('master.shift_assignments.filter_all_shifts')"
           @change="fetchData"
         />
         <SearchableSelect
@@ -243,7 +231,7 @@ function sourceLabel(s) {
           value-key="id"
           label-key="name"
           :search-keys="['name','code','city']"
-          placeholder="— Semua Cabang —"
+          :placeholder="t('master.shift_assignments.filter_all_branches')"
           @change="fetchData"
         />
         <SearchableSelect
@@ -252,13 +240,13 @@ function sourceLabel(s) {
           value-key="id"
           label-key="name"
           :search-keys="['name','code']"
-          placeholder="— Semua Departemen —"
+          :placeholder="t('master.shift_assignments.filter_all_departments')"
           @change="fetchData"
         />
         <select v-model="filters.is_active" class="input" @change="fetchData">
-          <option value="">— Status —</option>
-          <option value="1">Aktif</option>
-          <option value="0">Non-aktif</option>
+          <option value="">{{ t('master.shift_assignments.filter_status') }}</option>
+          <option value="1">{{ t('master.shift_assignments.st_active') }}</option>
+          <option value="0">{{ t('master.shift_assignments.st_inactive') }}</option>
         </select>
       </div>
 
@@ -266,17 +254,17 @@ function sourceLabel(s) {
         <table class="table">
           <thead>
             <tr>
-              <th>Shift</th>
-              <th>Scope</th>
-              <th>Prioritas</th>
-              <th>Berlaku</th>
-              <th>Status</th>
-              <th class="text-right w-20">Aksi</th>
+              <th>{{ t('master.shift_assignments.col_shift') }}</th>
+              <th>{{ t('master.shift_assignments.col_scope') }}</th>
+              <th>{{ t('master.shift_assignments.col_priority') }}</th>
+              <th>{{ t('master.shift_assignments.col_effective') }}</th>
+              <th>{{ t('master.shift_assignments.col_status') }}</th>
+              <th class="text-right w-20">{{ t('master.shift_assignments.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td colspan="6" class="text-center py-8 text-gray-400">Memuat…</td></tr>
-            <tr v-else-if="items.length === 0"><td colspan="6" class="text-center py-8 text-gray-400">Belum ada aturan</td></tr>
+            <tr v-if="loading"><td colspan="6" class="text-center py-8 text-gray-400">{{ t('master.shift_assignments.loading') }}</td></tr>
+            <tr v-else-if="items.length === 0"><td colspan="6" class="text-center py-8 text-gray-400">{{ t('master.shift_assignments.no_rules') }}</td></tr>
             <tr v-for="item in items" :key="item.id">
               <td>
                 <div class="font-medium">{{ item.shift_name }}</div>
@@ -287,13 +275,13 @@ function sourceLabel(s) {
               <td class="text-sm">{{ scopeLabel(item) }}</td>
               <td class="text-center">{{ item.priority }}</td>
               <td class="text-sm text-gray-500">
-                {{ item.effective_from || '-' }}<span v-if="item.effective_from || item.effective_to"> s/d </span>{{ item.effective_to || (item.effective_from ? '∞' : '-') }}
+                {{ item.effective_from || t('master.shift_assignments.effective_dash') }}<span v-if="item.effective_from || item.effective_to">{{ t('master.shift_assignments.effective_to') }}</span>{{ item.effective_to || (item.effective_from ? t('master.shift_assignments.effective_inf') : t('master.shift_assignments.effective_dash')) }}
               </td>
               <td>
                 <span :class="['px-2 py-0.5 rounded-full text-xs',
                   Number(item.is_active) === 1 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
                 ]">
-                  {{ Number(item.is_active) === 1 ? 'Aktif' : 'Non-aktif' }}
+                  {{ Number(item.is_active) === 1 ? t('master.shift_assignments.st_active') : t('master.shift_assignments.st_inactive') }}
                 </span>
               </td>
               <td class="text-right">
@@ -307,23 +295,22 @@ function sourceLabel(s) {
       </div>
     </div>
 
-    <!-- Create modal -->
     <div v-if="showCreate" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
-          <h2 class="font-semibold">Tambah Aturan Shift</h2>
+          <h2 class="font-semibold">{{ t('master.shift_assignments.modal_title') }}</h2>
           <button class="text-gray-500" @click="showCreate = false">&times;</button>
         </div>
         <form @submit.prevent="save" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="md:col-span-2">
-            <label class="label">Shift *</label>
+            <label class="label">{{ t('master.shift_assignments.f_shift') }}</label>
             <SearchableSelect
               v-model="form.shift_id"
               :items="shifts"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="— Pilih shift —"
+              :placeholder="t('master.shift_assignments.f_shift_ph')"
             >
               <template #item="{ item }">
                 <span class="block text-sm truncate">
@@ -345,77 +332,77 @@ function sourceLabel(s) {
           </div>
 
           <div>
-            <label class="label">Cabang</label>
+            <label class="label">{{ t('master.shift_assignments.f_branch') }}</label>
             <SearchableSelect
               v-model="form.branch_id"
               :items="branches"
               value-key="id"
               label-key="name"
               :search-keys="['name','code','city']"
-              placeholder="— Tidak dibatasi —"
+              :placeholder="t('master.shift_assignments.f_branch_ph')"
             />
           </div>
           <div>
-            <label class="label">Lokasi Kerja</label>
+            <label class="label">{{ t('master.shift_assignments.f_work_location') }}</label>
             <SearchableSelect
               v-model="form.work_location_id"
               :items="workLocations"
               value-key="id"
               label-key="name"
               :search-keys="['name','code','address']"
-              placeholder="— Tidak dibatasi —"
+              :placeholder="t('master.shift_assignments.f_branch_ph')"
             />
           </div>
           <div>
-            <label class="label">Departemen</label>
+            <label class="label">{{ t('master.shift_assignments.f_department') }}</label>
             <SearchableSelect
               v-model="form.department_id"
               :items="departments"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="— Tidak dibatasi —"
+              :placeholder="t('master.shift_assignments.f_branch_ph')"
             />
           </div>
           <div>
-            <label class="label">Job Grade</label>
+            <label class="label">{{ t('master.shift_assignments.f_grade') }}</label>
             <SearchableSelect
               v-model="form.job_grade_id"
               :items="jobGrades"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="— Tidak dibatasi —"
+              :placeholder="t('master.shift_assignments.f_branch_ph')"
             />
           </div>
 
           <div>
-            <label class="label">Berlaku Mulai</label>
+            <label class="label">{{ t('master.shift_assignments.f_effective_from') }}</label>
             <input v-model="form.effective_from" type="date" class="input" />
           </div>
           <div>
-            <label class="label">Berlaku Sampai (opsional)</label>
+            <label class="label">{{ t('master.shift_assignments.f_effective_to') }}</label>
             <input v-model="form.effective_to" type="date" class="input" />
           </div>
           <div>
-            <label class="label">Prioritas (kecil = tinggi)</label>
+            <label class="label">{{ t('master.shift_assignments.f_priority') }}</label>
             <input v-model.number="form.priority" type="number" class="input" />
           </div>
           <div class="flex items-end">
             <label class="flex items-center gap-2 text-sm">
               <input v-model="form.is_active" type="checkbox" :true-value="1" :false-value="0" class="w-4 h-4" />
-              Aktif
+              {{ t('master.shift_assignments.f_active') }}
             </label>
           </div>
 
           <div class="md:col-span-2">
-            <label class="label">Catatan</label>
+            <label class="label">{{ t('master.shift_assignments.f_notes') }}</label>
             <textarea v-model="form.notes" class="input" rows="2"></textarea>
           </div>
 
           <div class="md:col-span-2 flex justify-end gap-2 pt-2">
-            <button type="button" class="btn-secondary" @click="showCreate = false">Batal</button>
-            <button type="submit" class="btn-primary">Simpan</button>
+            <button type="button" class="btn-secondary" @click="showCreate = false">{{ t('master.shift_assignments.f_cancel') }}</button>
+            <button type="submit" class="btn-primary">{{ t('master.shift_assignments.f_save') }}</button>
           </div>
         </form>
       </div>

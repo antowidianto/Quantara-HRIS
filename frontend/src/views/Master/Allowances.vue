@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
@@ -9,6 +10,7 @@ import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import ExcelImporter from '@/components/ExcelImporter.vue'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -67,7 +69,7 @@ async function fetchTypes() {
     const res = await api.get('/allowance-types')
     types.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat tipe allowance')
+    toast.error(e.response?.data?.message || t('master.allowances.load_failed_types'))
   }
 }
 async function fetchRates() {
@@ -77,7 +79,7 @@ async function fetchRates() {
     const res = await api.get('/allowance-rates', { params })
     rates.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat tarif')
+    toast.error(e.response?.data?.message || t('master.allowances.load_failed_rates'))
   }
 }
 async function fetchMasters() {
@@ -102,42 +104,42 @@ function openCreateType() {
   typeForm.value = blankType()
   showTypeModal.value = true
 }
-function openEditType(t) {
-  editingType.value = t
-  typeForm.value = { ...t }
+function openEditType(it) {
+  editingType.value = it
+  typeForm.value = { ...it }
   showTypeModal.value = true
 }
 async function saveType() {
   try {
     if (editingType.value) {
       await api.put(`/allowance-types/${editingType.value.id}`, typeForm.value)
-      toast.success('Tipe diperbarui')
+      toast.success(t('master.allowances.type_updated'))
     } else {
       await api.post('/allowance-types', typeForm.value)
-      toast.success('Tipe ditambahkan')
+      toast.success(t('master.allowances.type_added'))
     }
     showTypeModal.value = false
     fetchTypes()
     fetchRates()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('master.allowances.save_failed'))
   }
 }
-async function removeType(t) {
+async function removeType(it) {
   const ok = await confirmDialog({
-    title: 'Hapus tipe tunjangan?',
-    message: `Tipe "${t.name}" akan dinonaktifkan beserta semua tarifnya.`,
-    okText: 'Hapus',
+    title: t('master.allowances.type_delete_title'),
+    message: t('master.allowances.type_delete_msg', { name: it.name }),
+    okText: t('master.allowances.delete_ok'),
     variant: 'danger',
   })
   if (! ok) return
   try {
-    await api.delete(`/allowance-types/${t.id}`)
-    toast.success('Tipe dihapus')
+    await api.delete(`/allowance-types/${it.id}`)
+    toast.success(t('master.allowances.type_deleted'))
     fetchTypes()
     fetchRates()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('master.allowances.delete_failed'))
   }
 }
 
@@ -154,52 +156,52 @@ function openEditRate(r) {
 }
 async function saveRate() {
   if (! rateForm.value.allowance_type_id) {
-    toast.warning('Pilih tipe allowance terlebih dahulu')
+    toast.warning(t('master.allowances.pick_type_first'))
     return
   }
   try {
     if (editingRate.value) {
       await api.put(`/allowance-rates/${editingRate.value.id}`, rateForm.value)
-      toast.success('Tarif diperbarui')
+      toast.success(t('master.allowances.rate_updated'))
     } else {
       await api.post('/allowance-rates', rateForm.value)
-      toast.success('Tarif ditambahkan')
+      toast.success(t('master.allowances.rate_added'))
     }
     showRateModal.value = false
     fetchRates()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('master.allowances.save_failed'))
   }
 }
 async function removeRate(r) {
   const ok = await confirmDialog({
-    title: 'Hapus tarif?',
-    message: 'Tarif ini akan dihapus dari sistem.',
-    okText: 'Hapus',
+    title: t('master.allowances.rate_delete_title'),
+    message: t('master.allowances.rate_delete_msg'),
+    okText: t('master.allowances.delete_ok'),
     variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/allowance-rates/${r.id}`)
-    toast.success('Tarif dihapus')
+    toast.success(t('master.allowances.rate_deleted'))
     fetchRates()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('master.allowances.delete_failed'))
   }
 }
 
 async function recomputeAll() {
   const ok = await confirmDialog({
-    title: 'Hitung ulang seluruh karyawan?',
-    message: 'Snapshot tunjangan untuk seluruh karyawan dalam company akan diperbarui. Mungkin butuh beberapa detik.',
-    okText: 'Hitung Ulang',
+    title: t('master.allowances.recompute_title'),
+    message: t('master.allowances.recompute_msg'),
+    okText: t('master.allowances.recompute_ok'),
   })
   if (! ok) return
   try {
     const res = await api.post('/allowances/recompute-company')
-    toast.success(`Recompute selesai: ${res.data.data?.count || 0} entri`)
+    toast.success(t('master.allowances.recompute_done', { count: res.data.data?.count || 0 }))
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal recompute')
+    toast.error(e.response?.data?.message || t('master.allowances.recompute_failed'))
   }
 }
 </script>
@@ -208,20 +210,19 @@ async function recomputeAll() {
   <div>
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-2xl font-bold">Pemetaan Tunjangan</h1>
+        <h1 class="text-2xl font-bold">{{ t('master.allowances.title') }}</h1>
         <p class="text-sm text-gray-500">
-          Konfigurasi tunjangan berbasis cabang & grade. Default threshold 30 km:
-          karyawan dengan jarak rumah ↔ cabang ≥ 30 km akan mendapat tunjangan.
+          {{ t('master.allowances.subtitle') }}
         </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
         <ExcelImporter
           v-if="auth.can('allowance_types.bulk_import')"
           resource="allowance_types"
-          button-label="Import Excel"
+          :button-label="t('master.allowances.import_excel')"
           @committed="fetchTypes()"
         />
-        <button v-if="canManage" class="btn-secondary" @click="recomputeAll">Hitung Ulang Semua</button>
+        <button v-if="canManage" class="btn-secondary" @click="recomputeAll">{{ t('master.allowances.recompute_all') }}</button>
       </div>
     </div>
 
@@ -230,45 +231,50 @@ async function recomputeAll() {
         :class="['px-4 py-2 -mb-px border-b-2',
           tab === 'types' ? 'border-primary-600 text-primary-700 font-semibold' : 'border-transparent text-gray-600']"
         @click="tab = 'types'"
-      >Tipe Tunjangan</button>
+      >{{ t('master.allowances.tab_types') }}</button>
       <button
         :class="['px-4 py-2 -mb-px border-b-2',
           tab === 'rates' ? 'border-primary-600 text-primary-700 font-semibold' : 'border-transparent text-gray-600']"
         @click="tab = 'rates'"
-      >Tarif per Grade/Cabang</button>
+      >{{ t('master.allowances.tab_rates') }}</button>
     </div>
 
     <!-- ── TYPES ─────────────────────────────────────────── -->
     <div v-if="tab === 'types'" class="card">
       <div class="card-header justify-between">
-        <span class="text-sm text-gray-600">Definisi tipe tunjangan per perusahaan.</span>
+        <span class="text-sm text-gray-600">{{ t('master.allowances.types_subtitle') }}</span>
         <button v-if="canManage" class="btn-primary" @click="openCreateType">
-          <PlusIcon class="w-4 h-4" /> Tambah Tipe
+          <PlusIcon class="w-4 h-4" /> {{ t('master.allowances.add_type') }}
         </button>
       </div>
       <div class="overflow-x-auto">
         <table class="table">
           <thead><tr>
-            <th>Kode</th><th>Nama</th><th>Kategori</th><th>Threshold</th>
-            <th>Distance-based</th><th>Kena Pajak</th><th>Status</th>
-            <th class="text-right">Aksi</th>
+            <th>{{ t('master.allowances.col_code') }}</th>
+            <th>{{ t('master.allowances.col_name') }}</th>
+            <th>{{ t('master.allowances.col_category') }}</th>
+            <th>{{ t('master.allowances.col_threshold') }}</th>
+            <th>{{ t('master.allowances.col_distance_based') }}</th>
+            <th>{{ t('master.allowances.col_taxable') }}</th>
+            <th>{{ t('master.allowances.col_status') }}</th>
+            <th class="text-right">{{ t('master.allowances.col_actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="types.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">Belum ada tipe tunjangan</td></tr>
-            <tr v-for="t in types" :key="t.id">
-              <td class="font-mono">{{ t.code }}</td>
+            <tr v-if="types.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('master.allowances.no_types') }}</td></tr>
+            <tr v-for="it in types" :key="it.id">
+              <td class="font-mono">{{ it.code }}</td>
               <td>
-                <div class="font-medium">{{ t.name }}</div>
-                <div class="text-xs text-gray-500">{{ t.description }}</div>
+                <div class="font-medium">{{ it.name }}</div>
+                <div class="text-xs text-gray-500">{{ it.description }}</div>
               </td>
-              <td><span class="badge-blue">{{ t.category }}</span></td>
-              <td>{{ Number(t.default_threshold_km).toFixed(2) }} km</td>
-              <td>{{ t.is_distance_based ? 'Ya' : 'Flat' }}</td>
-              <td>{{ t.is_taxable ? 'Ya' : 'Tidak' }}</td>
-              <td><span :class="t.is_active ? 'badge-green' : 'badge-gray'">{{ t.is_active ? 'Aktif' : 'Non-aktif' }}</span></td>
+              <td><span class="badge-blue">{{ it.category }}</span></td>
+              <td>{{ t('master.allowances.km_unit', { n: Number(it.default_threshold_km).toFixed(2) }) }}</td>
+              <td>{{ it.is_distance_based ? t('master.allowances.yes') : t('master.allowances.flat') }}</td>
+              <td>{{ it.is_taxable ? t('master.allowances.yes') : t('master.allowances.no') }}</td>
+              <td><span :class="it.is_active ? 'badge-green' : 'badge-gray'">{{ it.is_active ? t('master.allowances.active') : t('master.allowances.inactive') }}</span></td>
               <td class="text-right">
-                <button v-if="canManage" class="text-gray-500 hover:text-primary-600 mr-2" @click="openEditType(t)"><PencilIcon class="w-4 h-4" /></button>
-                <button v-if="canManage" class="text-gray-500 hover:text-red-600" @click="removeType(t)"><TrashIcon class="w-4 h-4" /></button>
+                <button v-if="canManage" class="text-gray-500 hover:text-primary-600 mr-2" @click="openEditType(it)"><PencilIcon class="w-4 h-4" /></button>
+                <button v-if="canManage" class="text-gray-500 hover:text-red-600" @click="removeType(it)"><TrashIcon class="w-4 h-4" /></button>
               </td>
             </tr>
           </tbody>
@@ -286,39 +292,46 @@ async function recomputeAll() {
             value-key="id"
             label-key="name"
             :search-keys="['name','code','category']"
-            placeholder="Semua tipe"
+            :placeholder="t('master.allowances.all_types_filter')"
             @change="fetchRates"
           />
         </div>
         <button v-if="canManage" class="btn-primary" @click="openCreateRate" :disabled="types.length === 0">
-          <PlusIcon class="w-4 h-4" /> Tambah Tarif
+          <PlusIcon class="w-4 h-4" /> {{ t('master.allowances.add_rate') }}
         </button>
       </div>
       <div class="overflow-x-auto">
         <table class="table">
           <thead><tr>
-            <th>Tipe</th><th>Cabang</th><th>Grade</th>
-            <th>Threshold</th><th>Tarif < Threshold</th><th>Tarif ≥ Threshold</th>
-            <th>Periode</th>
-            <th class="text-right">Aksi</th>
+            <th>{{ t('master.allowances.col_type') }}</th>
+            <th>{{ t('master.allowances.col_branch') }}</th>
+            <th>{{ t('master.allowances.col_grade') }}</th>
+            <th>{{ t('master.allowances.col_threshold') }}</th>
+            <th>{{ t('master.allowances.col_rate_below') }}</th>
+            <th>{{ t('master.allowances.col_rate_above') }}</th>
+            <th>{{ t('master.allowances.col_period') }}</th>
+            <th class="text-right">{{ t('master.allowances.col_actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="rates.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">Belum ada tarif</td></tr>
+            <tr v-if="rates.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('master.allowances.no_rates') }}</td></tr>
             <tr v-for="r in rates" :key="r.id">
               <td>
                 <div class="font-medium">{{ r.type_name }}</div>
                 <div class="text-xs text-gray-500">{{ r.type_code }}</div>
               </td>
-              <td>{{ r.branch_name || '— Semua Cabang —' }}</td>
-              <td>{{ r.grade_name || '— Semua Grade —' }}</td>
-              <td>{{ Number(r.threshold_km).toFixed(2) }} km</td>
+              <td>{{ r.branch_name || t('master.allowances.all_branches') }}</td>
+              <td>{{ r.grade_name || t('master.allowances.all_grades') }}</td>
+              <td>{{ t('master.allowances.km_unit', { n: Number(r.threshold_km).toFixed(2) }) }}</td>
               <td>{{ fmtCurrency(r.rate_below) }}</td>
               <td class="font-semibold">{{ fmtCurrency(r.rate_above) }}</td>
               <td class="text-xs">
                 <div v-if="r.effective_from || r.effective_to">
-                  {{ r.effective_from || '—' }} s/d {{ r.effective_to || '—' }}
+                  {{ t('master.allowances.until_to', {
+                    from: r.effective_from || t('master.allowances.empty_dash'),
+                    to: r.effective_to || t('master.allowances.empty_dash'),
+                  }) }}
                 </div>
-                <div v-else class="text-gray-400">selalu aktif</div>
+                <div v-else class="text-gray-400">{{ t('master.allowances.always_active') }}</div>
               </td>
               <td class="text-right">
                 <button v-if="canManage" class="text-gray-500 hover:text-primary-600 mr-2" @click="openEditRate(r)"><PencilIcon class="w-4 h-4" /></button>
@@ -334,36 +347,36 @@ async function recomputeAll() {
     <div v-if="showTypeModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
         <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-          <h2 class="font-semibold">{{ editingType ? 'Edit Tipe' : 'Tambah Tipe' }} Tunjangan</h2>
+          <h2 class="font-semibold">{{ editingType ? t('master.allowances.modal_type_edit') : t('master.allowances.modal_type_add') }}</h2>
           <button class="text-gray-400 hover:text-gray-600 text-2xl leading-none" @click="showTypeModal = false">&times;</button>
         </div>
         <form @submit.prevent="saveType" class="p-5 space-y-3 text-sm">
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="label">Kode *</label><input v-model="typeForm.code" class="input" required :disabled="!!editingType" /></div>
-            <div><label class="label">Kategori</label>
+            <div><label class="label">{{ t('master.allowances.f_code_required') }}</label><input v-model="typeForm.code" class="input" required :disabled="!!editingType" /></div>
+            <div><label class="label">{{ t('master.allowances.f_category') }}</label>
               <select v-model="typeForm.category" class="input">
-                <option value="TRANSPORT">Transport</option>
-                <option value="MEAL">Makan</option>
-                <option value="HOUSING">Perumahan</option>
-                <option value="ALLOWANCE">Tunjangan Umum</option>
-                <option value="OTHER">Lainnya</option>
+                <option value="TRANSPORT">{{ t('master.allowances.cat_transport') }}</option>
+                <option value="MEAL">{{ t('master.allowances.cat_meal') }}</option>
+                <option value="HOUSING">{{ t('master.allowances.cat_housing') }}</option>
+                <option value="ALLOWANCE">{{ t('master.allowances.cat_allowance') }}</option>
+                <option value="OTHER">{{ t('master.allowances.cat_other') }}</option>
               </select>
             </div>
           </div>
-          <div><label class="label">Nama *</label><input v-model="typeForm.name" class="input" required /></div>
-          <div><label class="label">Deskripsi</label><textarea v-model="typeForm.description" class="input" rows="2"></textarea></div>
+          <div><label class="label">{{ t('master.allowances.f_name_required') }}</label><input v-model="typeForm.name" class="input" required /></div>
+          <div><label class="label">{{ t('master.allowances.f_description') }}</label><textarea v-model="typeForm.description" class="input" rows="2"></textarea></div>
           <div class="grid grid-cols-2 gap-3">
-            <label class="flex items-center gap-2"><input type="checkbox" v-model="typeForm.is_distance_based" :true-value="1" :false-value="0" /><span>Berbasis jarak</span></label>
-            <label class="flex items-center gap-2"><input type="checkbox" v-model="typeForm.is_taxable" :true-value="1" :false-value="0" /><span>Kena pajak</span></label>
+            <label class="flex items-center gap-2"><input type="checkbox" v-model="typeForm.is_distance_based" :true-value="1" :false-value="0" /><span>{{ t('master.allowances.f_distance_based') }}</span></label>
+            <label class="flex items-center gap-2"><input type="checkbox" v-model="typeForm.is_taxable" :true-value="1" :false-value="0" /><span>{{ t('master.allowances.f_taxable') }}</span></label>
           </div>
           <div v-if="typeForm.is_distance_based">
-            <label class="label">Default Threshold (km)</label>
+            <label class="label">{{ t('master.allowances.f_default_threshold') }}</label>
             <input v-model.number="typeForm.default_threshold_km" type="number" min="0" step="0.5" class="input" />
-            <p class="text-xs text-gray-500 mt-1">Karyawan dengan jarak ≥ angka ini akan dapat tunjangan.</p>
+            <p class="text-xs text-gray-500 mt-1">{{ t('master.allowances.f_default_threshold_hint') }}</p>
           </div>
           <div class="flex justify-end gap-2 pt-2">
-            <button type="button" class="btn-secondary" @click="showTypeModal = false">Batal</button>
-            <button type="submit" class="btn-primary">Simpan</button>
+            <button type="button" class="btn-secondary" @click="showTypeModal = false">{{ t('master.allowances.f_cancel') }}</button>
+            <button type="submit" class="btn-primary">{{ t('master.allowances.f_save') }}</button>
           </div>
         </form>
       </div>
@@ -373,12 +386,12 @@ async function recomputeAll() {
     <div v-if="showRateModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
         <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-          <h2 class="font-semibold">{{ editingRate ? 'Edit Tarif' : 'Tambah Tarif' }}</h2>
+          <h2 class="font-semibold">{{ editingRate ? t('master.allowances.modal_rate_edit') : t('master.allowances.modal_rate_add') }}</h2>
           <button class="text-gray-400 hover:text-gray-600 text-2xl leading-none" @click="showRateModal = false">&times;</button>
         </div>
         <form @submit.prevent="saveRate" class="p-5 space-y-3 text-sm">
           <div>
-            <label class="label">Tipe Tunjangan *</label>
+            <label class="label">{{ t('master.allowances.f_type_required') }}</label>
             <SearchableSelect
               v-model="rateForm.allowance_type_id"
               :items="types"
@@ -386,70 +399,70 @@ async function recomputeAll() {
               label-key="name"
               sub-label-key="category"
               :search-keys="['name','code','category']"
-              placeholder="— Pilih tipe —"
+              :placeholder="t('master.allowances.f_type_ph')"
               :clearable="false"
             />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label">Cabang</label>
+              <label class="label">{{ t('master.allowances.f_branch') }}</label>
               <SearchableSelect
                 v-model="rateForm.branch_id"
                 :items="branches"
                 value-key="id"
                 label-key="name"
                 :search-keys="['name','code','city']"
-                placeholder="— Semua cabang —"
+                :placeholder="t('master.allowances.f_branch_ph')"
               />
             </div>
             <div>
-              <label class="label">Job Grade</label>
+              <label class="label">{{ t('master.allowances.f_grade') }}</label>
               <SearchableSelect
                 v-model="rateForm.job_grade_id"
                 :items="grades"
                 value-key="id"
                 label-key="name"
                 :search-keys="['name','code']"
-                placeholder="— Semua grade —"
+                :placeholder="t('master.allowances.f_grade_ph')"
               >
                 <template #item="{ item }">
                   <span class="block text-sm truncate">
                     {{ item.name }}
-                    <span class="text-xs text-gray-500">(Lvl {{ item.level }})</span>
+                    <span class="text-xs text-gray-500">{{ t('master.allowances.f_grade_level', { level: item.level }) }}</span>
                   </span>
                 </template>
                 <template #selected="{ item }">
                   <span class="block truncate font-medium">
                     {{ item.name }}
-                    <span class="text-xs text-gray-500">(Lvl {{ item.level }})</span>
+                    <span class="text-xs text-gray-500">{{ t('master.allowances.f_grade_level', { level: item.level }) }}</span>
                   </span>
                 </template>
               </SearchableSelect>
             </div>
           </div>
           <div>
-            <label class="label">Threshold Jarak (km)</label>
+            <label class="label">{{ t('master.allowances.f_threshold') }}</label>
             <input v-model.number="rateForm.threshold_km" type="number" min="0" step="0.5" class="input" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label">Tarif jika < threshold</label>
+              <label class="label">{{ t('master.allowances.f_rate_below') }}</label>
               <input v-model.number="rateForm.rate_below" type="number" min="0" step="1000" class="input" />
-              <p class="text-xs text-gray-500">Default 0 (tidak dapat).</p>
+              <p class="text-xs text-gray-500">{{ t('master.allowances.f_rate_below_hint') }}</p>
             </div>
             <div>
-              <label class="label">Tarif jika ≥ threshold *</label>
+              <label class="label">{{ t('master.allowances.f_rate_above') }}</label>
               <input v-model.number="rateForm.rate_above" type="number" min="0" step="1000" class="input" required />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="label">Berlaku dari</label><input v-model="rateForm.effective_from" type="date" class="input" /></div>
-            <div><label class="label">Berlaku sampai</label><input v-model="rateForm.effective_to" type="date" class="input" /></div>
+            <div><label class="label">{{ t('master.allowances.f_effective_from') }}</label><input v-model="rateForm.effective_from" type="date" class="input" /></div>
+            <div><label class="label">{{ t('master.allowances.f_effective_to') }}</label><input v-model="rateForm.effective_to" type="date" class="input" /></div>
           </div>
-          <div><label class="label">Catatan</label><textarea v-model="rateForm.notes" class="input" rows="2"></textarea></div>
+          <div><label class="label">{{ t('master.allowances.f_notes') }}</label><textarea v-model="rateForm.notes" class="input" rows="2"></textarea></div>
           <div class="flex justify-end gap-2 pt-2">
-            <button type="button" class="btn-secondary" @click="showRateModal = false">Batal</button>
-            <button type="submit" class="btn-primary">Simpan</button>
+            <button type="button" class="btn-secondary" @click="showRateModal = false">{{ t('master.allowances.f_cancel') }}</button>
+            <button type="submit" class="btn-primary">{{ t('master.allowances.f_save') }}</button>
           </div>
         </form>
       </div>

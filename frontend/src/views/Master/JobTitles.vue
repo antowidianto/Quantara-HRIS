@@ -4,57 +4,55 @@
  *
  * Standar nama jabatan terstandarisasi untuk laporan compa-ratio,
  * salary benchmark, dan WLKP. Lihat backend migration #064.
- *
- * Tabel ini auto-backfill dari `positions` saat migrate, jadi semua
- * nama posisi yang sudah ada akan punya entri di sini.
  */
+import { computed } from 'vue'
 import SimpleMaster from '@/components/SimpleMaster.vue'
+import { useI18n } from '@/locales'
 
-const columns = [
-  { key: 'code',     label: 'Kode' },
-  { key: 'name',     label: 'Nama Jabatan' },
-  { key: 'family',   label: 'Job Family', formatter: v => v || '—' },
-  { key: 'level',    label: 'Level' },
-  { key: 'is_active', label: 'Status', formatter: v => v ? 'Aktif' : 'Non-aktif' },
-]
+const { t } = useI18n()
 
-const fields = [
-  { key: 'code',        label: 'Kode (unik per perusahaan)', required: true },
-  { key: 'name',        label: 'Nama Jabatan', required: true },
-  { key: 'family',      label: 'Job Family (Engineering, Sales, ...)' },
+const columns = computed(() => [
+  { key: 'code',     label: t('master.common.code') },
+  { key: 'name',     label: t('master.job_titles.job_title_name') },
+  { key: 'family',   label: t('master.job_titles.job_family'), formatter: v => v || '—' },
+  { key: 'level',    label: t('master.job_titles.level') },
+  { key: 'is_active', label: t('master.common.status'), formatter: v => v ? t('master.common.active') : t('master.common.inactive') },
+])
+
+const fields = computed(() => [
+  { key: 'code',        label: t('master.job_titles.code_unique'), required: true },
+  { key: 'name',        label: t('master.job_titles.job_title_name'), required: true },
+  { key: 'family',      label: t('master.job_titles.job_family_field') },
   {
     key: 'level',
-    label: 'Level',
+    label: t('master.job_titles.level'),
     type: 'select',
     options: [
-      { value: 'JUNIOR',    label: 'Junior' },
-      { value: 'MID',       label: 'Mid' },
-      { value: 'SENIOR',    label: 'Senior' },
-      { value: 'LEAD',      label: 'Lead' },
-      { value: 'MANAGER',   label: 'Manager' },
-      { value: 'DIRECTOR',  label: 'Director' },
-      { value: 'EXECUTIVE', label: 'Executive (C-Level)' },
+      { value: 'JUNIOR',    label: t('master.job_titles.level_junior') },
+      { value: 'MID',       label: t('master.job_titles.level_mid') },
+      { value: 'SENIOR',    label: t('master.job_titles.level_senior') },
+      { value: 'LEAD',      label: t('master.job_titles.level_lead') },
+      { value: 'MANAGER',   label: t('master.job_titles.level_manager') },
+      { value: 'DIRECTOR',  label: t('master.job_titles.level_director') },
+      { value: 'EXECUTIVE', label: t('master.job_titles.level_executive') },
     ],
   },
-  { key: 'description', label: 'Deskripsi', type: 'textarea' },
-]
+  { key: 'description', label: t('master.common.description'), type: 'textarea' },
+])
 </script>
 
 <template>
   <div>
     <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-4 text-sm text-blue-900">
-      <p class="font-semibold mb-1">Tentang Master Jabatan</p>
+      <p class="font-semibold mb-1">{{ t('master.job_titles.info_title') }}</p>
       <p>
-        Tabel ini menstandarisasi nama jabatan supaya laporan
-        <span class="font-medium">compa-ratio, salary benchmark, dan WLKP</span>
-        tidak terganggu varian penulisan ("Sr Backend Eng" vs "Senior Backend Engineer").
-        Satu jabatan bisa dipakai oleh banyak posisi di department berbeda.
+        {{ t('master.job_titles.info_desc', { bold: t('master.job_titles.info_bold') }) }}
       </p>
     </div>
 
     <SimpleMaster
       endpoint="/job-titles"
-      title="Master Jabatan"
+      :title="t('master.job_titles.title')"
       :columns="columns"
       :fields="fields"
       :defaults="{ is_active: 1, level: 'MID' }"

@@ -1,7 +1,10 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import SimpleMaster from '@/components/SimpleMaster.vue'
+import { useI18n } from '@/locales'
+
+const { t } = useI18n()
 
 // Sumber daftar branches untuk dropdown.
 const branches = ref([])
@@ -12,58 +15,57 @@ onMounted(async () => {
   } catch (_) { /* silent */ }
 })
 
-const typeOptions = [
-  { value: 'HEAD_OFFICE', label: 'Kantor Pusat' },
-  { value: 'BRANCH_OFFICE', label: 'Kantor Cabang' },
-  { value: 'SUB_OFFICE', label: 'Kantor Sub-Cabang' },
-  { value: 'PROJECT_SITE', label: 'Lokasi Proyek' },
-  { value: 'CLIENT_OFFICE', label: 'Kantor Klien' },
-  { value: 'WAREHOUSE', label: 'Gudang' },
-  { value: 'FACTORY', label: 'Pabrik' },
-  { value: 'REMOTE', label: 'Remote' },
-  { value: 'WFH', label: 'Work From Home' },
-  { value: 'OTHER', label: 'Lainnya' },
-]
+const typeOptions = computed(() => [
+  { value: 'HEAD_OFFICE',   label: t('master.work_locations.type_head_office') },
+  { value: 'BRANCH_OFFICE', label: t('master.work_locations.type_branch_office') },
+  { value: 'SUB_OFFICE',    label: t('master.work_locations.type_sub_office') },
+  { value: 'PROJECT_SITE',  label: t('master.work_locations.type_project_site') },
+  { value: 'CLIENT_OFFICE', label: t('master.work_locations.type_client_office') },
+  { value: 'WAREHOUSE',     label: t('master.work_locations.type_warehouse') },
+  { value: 'FACTORY',       label: t('master.work_locations.type_factory') },
+  { value: 'REMOTE',        label: t('master.work_locations.type_remote') },
+  { value: 'WFH',           label: t('master.work_locations.type_wfh') },
+  { value: 'OTHER',         label: t('master.work_locations.type_other') },
+])
 
-const columns = [
-  { key: 'code', label: 'Kode' },
-  { key: 'name', label: 'Nama Lokasi' },
-  { key: 'type', label: 'Tipe', formatter: v => typeOptions.find(t => t.value === v)?.label || v },
-  { key: 'branch_name', label: 'Cabang Induk' },
-  { key: 'city', label: 'Kota' },
-  { key: 'lat', label: 'Geofence', formatter: (_v, item) => {
+const columns = computed(() => [
+  { key: 'code', label: t('master.common.code') },
+  { key: 'name', label: t('master.work_locations.location_name') },
+  { key: 'type', label: t('master.common.type'), formatter: v => typeOptions.value.find(x => x.value === v)?.label || v },
+  { key: 'branch_name', label: t('master.work_locations.parent_branch') },
+  { key: 'city', label: t('master.common.city') },
+  { key: 'lat', label: t('master.work_locations.geofence'), formatter: (_v, item) => {
       if (item.lat && item.lng) {
-        const r = item.geofence_radius_m ? `${item.geofence_radius_m} m` : 'tanpa radius'
+        const r = item.geofence_radius_m ? `${item.geofence_radius_m} m` : t('master.work_locations.no_radius')
         return `✓ ${r}`
       }
-      return '— belum di-set'
+      return t('master.work_locations.not_set')
     } },
-  { key: 'allow_clock_here', label: 'Clock In/Out', formatter: v => v ? 'Ya' : 'Tidak' },
-  { key: 'is_active', label: 'Status', formatter: v => v ? 'Aktif' : 'Non-aktif' },
-]
+  { key: 'allow_clock_here', label: t('master.work_locations.allow_clock'), formatter: v => v ? t('master.work_locations.yes') : t('master.work_locations.no') },
+  { key: 'is_active', label: t('master.common.status'), formatter: v => v ? t('master.common.active') : t('master.common.inactive') },
+])
 
-const fields = [
-  { key: 'code', label: 'Kode', required: true },
-  { key: 'name', label: 'Nama Lokasi', required: true },
-  { key: 'type', label: 'Tipe Lokasi', type: 'select', options: typeOptions, required: true },
-  { key: 'branch_id', label: 'Cabang Induk', type: 'select', options: branches },
-  { key: 'address', label: 'Alamat', type: 'textarea' },
-  { key: 'province', label: 'Provinsi' },
-  { key: 'city', label: 'Kota' },
-  { key: 'postal_code', label: 'Kode Pos' },
-  { key: 'phone', label: 'Telepon' },
-  // Geofence picker (lat/lng + radius) — admin bisa "Ambil dari GPS sekarang"
-  // saat berdiri di lokasi, atau isi manual decimal kalau dari desktop.
+const fields = computed(() => [
+  { key: 'code', label: t('master.common.code'), required: true },
+  { key: 'name', label: t('master.work_locations.location_name'), required: true },
+  { key: 'type', label: t('master.work_locations.location_type'), type: 'select', options: typeOptions.value, required: true },
+  { key: 'branch_id', label: t('master.work_locations.parent_branch'), type: 'select', options: branches.value },
+  { key: 'address', label: t('master.common.address'), type: 'textarea' },
+  { key: 'province', label: t('master.common.province') },
+  { key: 'city', label: t('master.common.city') },
+  { key: 'postal_code', label: t('master.work_locations.postal_code') },
+  { key: 'phone', label: t('master.common.phone') },
+  // Geofence picker
   { key: 'location', type: 'location' },
-  { key: 'allow_clock_here', label: 'Izinkan Clock In/Out', type: 'checkbox' },
-  { key: 'notes', label: 'Catatan', type: 'textarea' },
-]
+  { key: 'allow_clock_here', label: t('master.work_locations.allow_clock_field'), type: 'checkbox' },
+  { key: 'notes', label: t('common.notes'), type: 'textarea' },
+])
 </script>
 
 <template>
   <SimpleMaster
     endpoint="/work-locations"
-    title="Lokasi Kerja"
+    :title="t('master.work_locations.title')"
     :columns="columns"
     :fields="fields"
     :defaults="{ is_active: 1, allow_clock_here: 1, type: 'BRANCH_OFFICE' }"

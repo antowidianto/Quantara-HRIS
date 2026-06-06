@@ -1,22 +1,16 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   PlusIcon, PencilIcon, TrashIcon, XMarkIcon,
-  ArrowPathIcon, BeakerIcon, CalendarDaysIcon,
+  CalendarDaysIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
-/**
- * Pola Shift (Shift Patterns).
- *
- * Pattern adalah array sepanjang `cycle_days`, indeks 0..(cycle_days-1).
- * Setiap slot { shift_id, is_off, is_holiday, label } akan diaplikasikan
- * berulang ke shift_schedules saat HR tekan "Generate Roster".
- */
-
+const { t } = useI18n()
 const toast = useToast()
 
 const items = ref([])
@@ -45,8 +39,6 @@ function defaultPattern(n) {
   return out
 }
 
-const dayLabels = ['Hari 1','Hari 2','Hari 3','Hari 4','Hari 5','Hari 6','Hari 7']
-
 const shiftOptionsMap = computed(() => {
   const m = new Map()
   shifts.value.forEach(s => m.set(s.id, s))
@@ -59,7 +51,7 @@ async function fetchData() {
     const res = await api.get('/shift-patterns', { params: { is_active: '' } })
     items.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat pola')
+    toast.error(e.response?.data?.message || t('master.shift_patterns.load_failed'))
   } finally {
     loading.value = false
   }
@@ -97,11 +89,10 @@ async function openEdit(item) {
     editing.value = true
     showEditor.value = true
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat pola')
+    toast.error(e.response?.data?.message || t('master.shift_patterns.load_one_failed'))
   }
 }
 
-// Resize pattern_data setiap kali cycle_days berubah
 watch(() => form.value.cycle_days, (n) => {
   const target = Math.max(1, Math.min(366, parseInt(n, 10) || 1))
   const cur = form.value.pattern_data || []
@@ -117,47 +108,47 @@ watch(() => form.value.cycle_days, (n) => {
 
 async function save() {
   if (! form.value.code || ! form.value.name) {
-    toast.warning('Kode & nama wajib diisi')
+    toast.warning(t('master.shift_patterns.code_name_required'))
     return
   }
   try {
     const payload = { ...form.value }
     if (editing.value) {
       await api.put(`/shift-patterns/${payload.id}`, payload)
-      toast.success('Pola diperbarui')
+      toast.success(t('master.shift_patterns.saved_update'))
     } else {
       await api.post('/shift-patterns', payload)
-      toast.success('Pola dibuat')
+      toast.success(t('master.shift_patterns.saved_create'))
     }
     showEditor.value = false
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('master.shift_patterns.save_failed'))
   }
 }
 
 async function remove(item) {
   const ok = await confirmDialog({
-    title: 'Hapus Pola',
-    message: `Hapus pola "${item.name}"?`,
-    okText: 'Hapus', variant: 'danger',
+    title: t('master.shift_patterns.delete_title'),
+    message: t('master.shift_patterns.delete_msg', { name: item.name }),
+    okText: t('master.shift_patterns.delete_ok'),
+    variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/shift-patterns/${item.id}`)
-    toast.success('Berhasil dihapus')
+    toast.success(t('master.shift_patterns.deleted'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('master.shift_patterns.delete_failed'))
   }
 }
 
-// Helper UI: cepat isi pola umum
 function quickFill(type) {
   const cycle = form.value.cycle_days
   const office = shifts.value.find(s => /office|kantor/i.test(s.code) || s.is_default)
   if (! office) {
-    toast.info('Tidak ada shift OFFICE/default. Pilih shift manual di tiap slot.')
+    toast.info(t('master.shift_patterns.no_default_shift'))
     return
   }
   const out = []
@@ -190,8 +181,8 @@ function shiftColor(slot) {
 }
 
 function shiftLabel(slot) {
-  if (slot.is_holiday) return 'LIBUR'
-  if (slot.is_off) return 'OFF'
+  if (slot.is_holiday) return t('master.shift_patterns.lbl_holiday')
+  if (slot.is_off) return t('master.shift_patterns.lbl_off')
   const s = shiftOptionsMap.value.get(Number(slot.shift_id))
   return s ? s.code : '—'
 }
@@ -201,10 +192,10 @@ function shiftLabel(slot) {
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <CalendarDaysIcon class="w-6 h-6" /> Pola Shift (Cycle)
+        <CalendarDaysIcon class="w-6 h-6" /> {{ t('master.shift_patterns.title') }}
       </h1>
       <button class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Buat Pola
+        <PlusIcon class="w-4 h-4" /> {{ t('master.shift_patterns.btn_create') }}
       </button>
     </div>
 
@@ -213,18 +204,18 @@ function shiftLabel(slot) {
         <table class="table">
           <thead>
             <tr>
-              <th>Kode</th>
-              <th>Nama</th>
-              <th>Siklus (hari)</th>
-              <th>Visualisasi</th>
-              <th class="text-center">Assignment</th>
-              <th>Status</th>
-              <th class="text-right w-32">Aksi</th>
+              <th>{{ t('master.shift_patterns.col_code') }}</th>
+              <th>{{ t('master.shift_patterns.col_name') }}</th>
+              <th>{{ t('master.shift_patterns.col_cycle') }}</th>
+              <th>{{ t('master.shift_patterns.col_visualization') }}</th>
+              <th class="text-center">{{ t('master.shift_patterns.col_assignment') }}</th>
+              <th>{{ t('master.shift_patterns.col_status') }}</th>
+              <th class="text-right w-32">{{ t('master.shift_patterns.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td colspan="7" class="text-center py-8 text-gray-400">Memuat…</td></tr>
-            <tr v-else-if="items.length === 0"><td colspan="7" class="text-center py-8 text-gray-400">Belum ada pola</td></tr>
+            <tr v-if="loading"><td colspan="7" class="text-center py-8 text-gray-400">{{ t('master.shift_patterns.loading') }}</td></tr>
+            <tr v-else-if="items.length === 0"><td colspan="7" class="text-center py-8 text-gray-400">{{ t('master.shift_patterns.no_patterns') }}</td></tr>
             <tr v-for="item in items" :key="item.id">
               <td class="font-mono text-sm">{{ item.code }}</td>
               <td class="font-medium">{{ item.name }}</td>
@@ -248,7 +239,7 @@ function shiftLabel(slot) {
                 <span :class="['px-2 py-0.5 rounded-full text-xs',
                   Number(item.is_active) === 1 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
                 ]">
-                  {{ Number(item.is_active) === 1 ? 'Aktif' : 'Non-aktif' }}
+                  {{ Number(item.is_active) === 1 ? t('master.shift_patterns.active') : t('master.shift_patterns.inactive') }}
                 </span>
               </td>
               <td class="text-right">
@@ -263,58 +254,55 @@ function shiftLabel(slot) {
       </div>
     </div>
 
-    <!-- Editor -->
     <div v-if="showEditor" class="fixed inset-0 z-40 flex items-stretch bg-black/40 p-4">
       <div class="bg-white w-full m-auto rounded-lg shadow-xl flex flex-col max-h-[95vh]" style="max-width: 1100px">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
-          <h2 class="font-semibold">{{ editing ? 'Edit' : 'Buat' }} Pola Shift</h2>
+          <h2 class="font-semibold">{{ editing ? t('master.shift_patterns.modal_edit') : t('master.shift_patterns.modal_create') }}</h2>
           <button class="text-gray-500" @click="showEditor = false"><XMarkIcon class="w-5 h-5" /></button>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-6 gap-3 px-6 py-3 border-b border-gray-100 bg-gray-50">
           <div class="md:col-span-1">
-            <label class="label">Kode</label>
-            <input v-model="form.code" class="input" :disabled="editing" placeholder="P_5_2" required />
+            <label class="label">{{ t('master.shift_patterns.f_code') }}</label>
+            <input v-model="form.code" class="input" :disabled="editing" :placeholder="t('master.shift_patterns.f_code_ph')" required />
           </div>
           <div class="md:col-span-2">
-            <label class="label">Nama</label>
-            <input v-model="form.name" class="input" placeholder="5-2 Kantor (Sen-Jum)" required />
+            <label class="label">{{ t('master.shift_patterns.f_name') }}</label>
+            <input v-model="form.name" class="input" :placeholder="t('master.shift_patterns.f_name_ph')" required />
           </div>
           <div class="md:col-span-1">
-            <label class="label">Siklus (hari)</label>
+            <label class="label">{{ t('master.shift_patterns.f_cycle_days') }}</label>
             <input v-model.number="form.cycle_days" type="number" min="1" max="366" class="input" />
           </div>
           <div class="md:col-span-2 flex items-end gap-3 flex-wrap">
-            <button class="btn-secondary text-xs" @click="quickFill('5-2')">5-2 Kantor</button>
-            <button class="btn-secondary text-xs" @click="quickFill('4-2')">4-2 Rolling</button>
-            <button class="btn-secondary text-xs" @click="quickFill('all-on')">Semua Hari Kerja</button>
-            <button class="btn-secondary text-xs" @click="quickFill('all-off')">Semua OFF</button>
+            <button class="btn-secondary text-xs" @click="quickFill('5-2')">{{ t('master.shift_patterns.qf_5_2') }}</button>
+            <button class="btn-secondary text-xs" @click="quickFill('4-2')">{{ t('master.shift_patterns.qf_4_2') }}</button>
+            <button class="btn-secondary text-xs" @click="quickFill('all-on')">{{ t('master.shift_patterns.qf_all_on') }}</button>
+            <button class="btn-secondary text-xs" @click="quickFill('all-off')">{{ t('master.shift_patterns.qf_all_off') }}</button>
           </div>
           <div class="md:col-span-6">
-            <label class="label">Deskripsi</label>
-            <input v-model="form.description" class="input" placeholder="Pola standar 5 hari kerja kantor" />
+            <label class="label">{{ t('master.shift_patterns.f_description') }}</label>
+            <input v-model="form.description" class="input" :placeholder="t('master.shift_patterns.f_description_ph')" />
           </div>
         </div>
 
-        <!-- Pattern grid -->
         <div class="flex-1 overflow-y-auto p-6">
           <div class="text-sm text-gray-500 mb-3">
-            Atur shift untuk tiap hari dalam siklus. Sistem akan memutar pola ini
-            mulai dari <strong>anchor_date</strong> assignment-nya.
+            {{ t('master.shift_patterns.pattern_intro', { anchor: 'anchor_date' }) }}
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
             <div v-for="(slot, i) in form.pattern_data" :key="i"
               class="border border-gray-200 rounded-md p-3 bg-white"
               :style="{ borderLeft: '4px solid ' + shiftColor(slot) }"
             >
-              <div class="text-xs font-medium text-gray-500 mb-2">Hari {{ i + 1 }}</div>
+              <div class="text-xs font-medium text-gray-500 mb-2">{{ t('master.shift_patterns.day_label', { n: i + 1 }) }}</div>
               <SearchableSelect
                 v-model="slot.shift_id"
                 :items="shifts"
                 value-key="id"
                 label-key="name"
                 :search-keys="['name','code']"
-                placeholder="— Pilih shift —"
+                :placeholder="t('master.shift_patterns.f_pick_shift')"
                 :disabled="slot.is_off || slot.is_holiday"
                 size="sm"
                 class="mb-2"
@@ -332,11 +320,11 @@ function shiftLabel(slot) {
                 <label class="flex items-center gap-1">
                   <input v-model="slot.is_off" type="checkbox"
                     @change="slot.is_off ? (slot.shift_id = null) : null" />
-                  Libur (off)
+                  {{ t('master.shift_patterns.f_off') }}
                 </label>
                 <label class="flex items-center gap-1">
                   <input v-model="slot.is_holiday" type="checkbox" />
-                  Tandai sebagai libur
+                  {{ t('master.shift_patterns.f_holiday') }}
                 </label>
               </div>
             </div>
@@ -344,9 +332,9 @@ function shiftLabel(slot) {
         </div>
 
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end gap-2 bg-white">
-          <button class="btn-secondary" @click="showEditor = false">Tutup</button>
+          <button class="btn-secondary" @click="showEditor = false">{{ t('master.shift_patterns.btn_close') }}</button>
           <button class="btn-primary" @click="save">
-            {{ editing ? 'Simpan Perubahan' : 'Simpan Pola' }}
+            {{ editing ? t('master.shift_patterns.btn_save_changes') : t('master.shift_patterns.btn_save') }}
           </button>
         </div>
       </div>
