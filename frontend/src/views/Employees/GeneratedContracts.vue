@@ -1,5 +1,6 @@
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
@@ -16,6 +17,7 @@ import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
  * dari sini HR bisa preview, ubah status (DRAFT → SENT → SIGNED), atau hapus.
  */
 
+const { t } = useI18n()
 const toast = useToast()
 
 const items = ref([])
@@ -25,12 +27,12 @@ const params = reactive({ page: 1, per_page: 20, status: '', employee_id: '' })
 
 const employees = ref([])
 
-const statusBadge = {
-  DRAFT:   { class: 'bg-gray-100 text-gray-700',   label: 'Draft' },
-  SENT:    { class: 'bg-blue-50 text-blue-700',    label: 'Terkirim' },
-  SIGNED:  { class: 'bg-green-50 text-green-700',  label: 'Ditandatangani' },
-  REVOKED: { class: 'bg-red-50 text-red-700',      label: 'Dicabut' },
-}
+const statusBadge = computed(() => ({
+  DRAFT:   { class: 'bg-gray-100 text-gray-700',   label: t('employees.contracts.st_draft') },
+  SENT:    { class: 'bg-blue-50 text-blue-700',    label: t('employees.contracts.st_sent') },
+  SIGNED:  { class: 'bg-green-50 text-green-700',  label: t('employees.contracts.st_signed') },
+  REVOKED: { class: 'bg-red-50 text-red-700',      label: t('employees.contracts.st_revoked') },
+}))
 
 async function fetchData() {
   loading.value = true
@@ -39,7 +41,7 @@ async function fetchData() {
     items.value = res.data.data || []
     meta.value = res.data.meta || meta.value
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat data')
+    toast.error(e.response?.data?.message || t('employees.contracts.load_failed'))
   } finally {
     loading.value = false
   }
@@ -66,45 +68,50 @@ function openHtml(item) {
       const blob = new Blob([res.data], { type: 'text/html' })
       const url = URL.createObjectURL(blob)
       const w = window.open(url, '_blank')
-      if (! w) toast.warning('Pop-up diblokir browser')
+      if (! w) toast.warning(t('employees.contracts.popup_blocked'))
     })
-    .catch(e => toast.error(e.response?.data?.message || 'Gagal membuka kontrak'))
+    .catch(e => toast.error(e.response?.data?.message || t('employees.contracts.open_failed')))
 }
 
 async function changeStatus(item, newStatus) {
-  const labels = {
-    SENT: 'mengirim ke karyawan',
-    SIGNED: 'menandai sebagai ditandatangani',
-    REVOKED: 'mencabut',
+  const actionMap = {
+    SENT: t('employees.contracts.action_sent'),
+    SIGNED: t('employees.contracts.action_signed'),
+    REVOKED: t('employees.contracts.action_revoked'),
   }
   const ok = await confirmDialog({
-    title: 'Ubah Status',
-    message: `Yakin ${labels[newStatus] || 'mengubah status'} kontrak ${item.contract_number}?`,
-    okText: 'Ya', variant: newStatus === 'REVOKED' ? 'danger' : 'primary',
+    title: t('employees.contracts.change_status_title'),
+    message: t('employees.contracts.change_status_msg', {
+      action: actionMap[newStatus] || t('employees.contracts.action_default'),
+      number: item.contract_number,
+    }),
+    okText: t('employees.contracts.ok_yes'),
+    variant: newStatus === 'REVOKED' ? 'danger' : 'primary',
   })
   if (! ok) return
   try {
     await api.put(`/generated-contracts/${item.id}/status`, { status: newStatus })
-    toast.success('Status diperbarui')
+    toast.success(t('employees.contracts.status_updated'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memperbarui status')
+    toast.error(e.response?.data?.message || t('employees.contracts.status_failed'))
   }
 }
 
 async function remove(item) {
   const ok = await confirmDialog({
-    title: 'Hapus Kontrak',
-    message: `Hapus kontrak ${item.contract_number}? Tindakan ini tidak dapat dibatalkan.`,
-    okText: 'Hapus', variant: 'danger',
+    title: t('employees.contracts.delete_title'),
+    message: t('employees.contracts.delete_msg', { number: item.contract_number }),
+    okText: t('employees.contracts.delete_ok'),
+    variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/generated-contracts/${item.id}`)
-    toast.success('Berhasil dihapus')
+    toast.success(t('employees.contracts.deleted'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('employees.contracts.delete_failed'))
   }
 }
 
@@ -118,23 +125,23 @@ function fmtDate(d) {
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <DocumentTextIcon class="w-6 h-6" /> Kontrak Karyawan
+        <DocumentTextIcon class="w-6 h-6" /> {{ t('employees.contracts.title') }}
       </h1>
     </div>
 
     <div class="card">
       <div class="card-header flex flex-wrap gap-3 items-center">
         <select v-model="params.status" class="input w-full md:w-48">
-          <option value="">— Semua Status —</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SENT">Terkirim</option>
-          <option value="SIGNED">Ditandatangani</option>
-          <option value="REVOKED">Dicabut</option>
+          <option value="">{{ t('employees.contracts.all_status') }}</option>
+          <option value="DRAFT">{{ t('employees.contracts.st_draft') }}</option>
+          <option value="SENT">{{ t('employees.contracts.st_sent') }}</option>
+          <option value="SIGNED">{{ t('employees.contracts.st_signed') }}</option>
+          <option value="REVOKED">{{ t('employees.contracts.st_revoked') }}</option>
         </select>
         <div class="w-full md:w-72">
           <EmployeeSearchSelect
             v-model="params.employee_id"
-            placeholder="— Semua Karyawan —"
+            :placeholder="t('employees.contracts.all_employees')"
             :only-active="false"
           />
         </div>
@@ -143,19 +150,19 @@ function fmtDate(d) {
         <table class="table">
           <thead>
             <tr>
-              <th>Nomor Kontrak</th>
-              <th>Karyawan</th>
-              <th>Subjek</th>
-              <th>Template</th>
-              <th>Status</th>
-              <th>Dibuat</th>
-              <th>Ditandatangani</th>
-              <th class="text-right w-44">Aksi</th>
+              <th>{{ t('employees.contracts.col_number') }}</th>
+              <th>{{ t('employees.contracts.col_employee') }}</th>
+              <th>{{ t('employees.contracts.col_subject') }}</th>
+              <th>{{ t('employees.contracts.col_template') }}</th>
+              <th>{{ t('employees.contracts.col_status') }}</th>
+              <th>{{ t('employees.contracts.col_created') }}</th>
+              <th>{{ t('employees.contracts.col_signed') }}</th>
+              <th class="text-right w-44">{{ t('employees.contracts.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td colspan="8" class="text-center py-8 text-gray-400">Memuat...</td></tr>
-            <tr v-else-if="items.length === 0"><td colspan="8" class="text-center py-8 text-gray-400">Belum ada kontrak</td></tr>
+            <tr v-if="loading"><td colspan="8" class="text-center py-8 text-gray-400">{{ t('employees.contracts.loading') }}</td></tr>
+            <tr v-else-if="items.length === 0"><td colspan="8" class="text-center py-8 text-gray-400">{{ t('employees.contracts.no_contracts') }}</td></tr>
             <tr v-for="item in items" :key="item.id">
               <td class="font-mono text-sm">{{ item.contract_number }}</td>
               <td>
@@ -176,23 +183,23 @@ function fmtDate(d) {
               <td class="text-xs text-gray-500">{{ fmtDate(item.signed_at) }}</td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openHtml(item)" title="Lihat / Cetak">
+                  <button class="text-gray-500 hover:text-primary-600" @click="openHtml(item)" :title="t('employees.contracts.view_print')">
                     <EyeIcon class="w-4 h-4" />
                   </button>
                   <button v-if="item.status === 'DRAFT'" class="text-blue-600 hover:text-blue-800"
-                    @click="changeStatus(item, 'SENT')" title="Tandai Terkirim">
+                    @click="changeStatus(item, 'SENT')" :title="t('employees.contracts.mark_sent')">
                     <PaperAirplaneIcon class="w-4 h-4" />
                   </button>
                   <button v-if="item.status === 'SENT'" class="text-green-600 hover:text-green-800"
-                    @click="changeStatus(item, 'SIGNED')" title="Tandai Ditandatangani">
+                    @click="changeStatus(item, 'SIGNED')" :title="t('employees.contracts.mark_signed')">
                     <CheckBadgeIcon class="w-4 h-4" />
                   </button>
                   <button v-if="['DRAFT','SENT','SIGNED'].includes(item.status)"
                     class="text-amber-600 hover:text-amber-800"
-                    @click="changeStatus(item, 'REVOKED')" title="Cabut">
+                    @click="changeStatus(item, 'REVOKED')" :title="t('employees.contracts.revoke')">
                     <NoSymbolIcon class="w-4 h-4" />
                   </button>
-                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" title="Hapus">
+                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" :title="t('employees.contracts.delete')">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>
@@ -202,11 +209,11 @@ function fmtDate(d) {
         </table>
       </div>
       <div class="card-body flex items-center justify-between">
-        <div class="text-sm text-gray-500">Total: {{ meta.total }}</div>
+        <div class="text-sm text-gray-500">{{ t('employees.contracts.total', { n: meta.total }) }}</div>
         <div class="flex gap-2">
-          <button class="btn-secondary" :disabled="meta.page <= 1" @click="go(meta.page - 1)">Sebelumnya</button>
+          <button class="btn-secondary" :disabled="meta.page <= 1" @click="go(meta.page - 1)">{{ t('employees.contracts.previous') }}</button>
           <span class="px-3 py-2 text-sm">{{ meta.page }} / {{ meta.pages || 1 }}</span>
-          <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="go(meta.page + 1)">Berikutnya</button>
+          <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="go(meta.page + 1)">{{ t('employees.contracts.next') }}</button>
         </div>
       </div>
     </div>

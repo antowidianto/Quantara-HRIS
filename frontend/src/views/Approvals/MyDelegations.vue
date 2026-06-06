@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
+import { useI18n } from '@/locales'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   PlusIcon, PencilIcon, TrashIcon, XMarkIcon, ShieldCheckIcon,
@@ -23,6 +24,7 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
+const { t } = useI18n()
 
 const items = ref([])
 const loading = ref(false)
@@ -39,14 +41,14 @@ const canManageOthers = computed(
   () => auth.can('delegation.manage') || auth.isSuperAdmin
 )
 
-const moduleOptions = [
-  { value: '', label: 'Semua Modul' },
-  { value: 'LEAVE', label: 'Cuti' },
-  { value: 'OVERTIME', label: 'Lembur' },
-  { value: 'ATTENDANCE_CHANGE', label: 'Pengajuan Perubahan Absensi' },
-  { value: 'REIMBURSEMENT', label: 'Reimbursement' },
-  { value: 'LOAN', label: 'Kasbon / Pinjaman' },
-]
+const moduleOptions = computed(() => [
+  { value: '', label: t('delegation.modules.all') },
+  { value: 'LEAVE', label: t('delegation.modules.leave') },
+  { value: 'OVERTIME', label: t('delegation.modules.overtime') },
+  { value: 'ATTENDANCE_CHANGE', label: t('delegation.modules.attendance_change') },
+  { value: 'REIMBURSEMENT', label: t('delegation.modules.reimbursement') },
+  { value: 'LOAN', label: t('delegation.modules.loan') },
+])
 
 function emptyForm() {
   return {
@@ -74,7 +76,7 @@ async function fetchData() {
     }
     items.value = rows
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat delegasi')
+    toast.error(e.response?.data?.message || t('delegation.toast_load_failed'))
   } finally {
     loading.value = false
   }
@@ -110,11 +112,11 @@ function openEdit(item) {
 
 async function save() {
   if (! form.value.delegate_to_user_id) {
-    toast.warning('Pilih user pengganti')
+    toast.warning(t('delegation.toast_choose_delegate'))
     return
   }
   if (form.value.date_to < form.value.date_from) {
-    toast.warning('Tanggal selesai harus >= tanggal mulai')
+    toast.warning(t('delegation.toast_date_mismatch'))
     return
   }
   try {
@@ -122,31 +124,31 @@ async function save() {
     if (! payload.module) payload.module = null
     if (editing.value) {
       await api.put(`/approval-delegations/${payload.id}`, payload)
-      toast.success('Delegasi diperbarui')
+      toast.success(t('delegation.toast_updated'))
     } else {
       await api.post('/approval-delegations', payload)
-      toast.success('Delegasi dibuat')
+      toast.success(t('delegation.toast_created'))
     }
     showEditor.value = false
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('delegation.toast_save_failed'))
   }
 }
 
 async function remove(item) {
   const ok = await confirmDialog({
-    title: 'Hapus Delegasi',
-    message: 'Hapus delegasi ini? User pengganti akan kehilangan kewenangan approval.',
-    okText: 'Hapus', variant: 'danger',
+    title: t('delegation.confirm_delete_title'),
+    message: t('delegation.confirm_delete_message'),
+    okText: t('common.delete'), variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/approval-delegations/${item.id}`)
-    toast.success('Berhasil dihapus')
+    toast.success(t('delegation.toast_deleted'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('delegation.toast_delete_failed'))
   }
 }
 
@@ -155,15 +157,15 @@ async function toggle(item) {
     await api.put(`/approval-delegations/${item.id}`, {
       is_active: item.is_active ? 0 : 1,
     })
-    toast.success(item.is_active ? 'Dinonaktifkan' : 'Diaktifkan')
+    toast.success(item.is_active ? t('delegation.toast_deactivated') : t('delegation.toast_activated'))
     fetchData()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal mengubah status')
+    toast.error(e.response?.data?.message || t('delegation.toast_status_failed'))
   }
 }
 
 function moduleLabel(v) {
-  return moduleOptions.find(m => m.value === (v || ''))?.label || v
+  return moduleOptions.value.find(m => m.value === (v || ''))?.label || v
 }
 
 function isCurrentlyActive(d) {
@@ -177,10 +179,10 @@ function isCurrentlyActive(d) {
   <div>
     <div class="flex items-center justify-between mb-4">
       <h1 class="text-2xl font-bold flex items-center gap-2">
-        <ArrowsRightLeftIcon class="w-6 h-6" /> Delegasi Approval
+        <ArrowsRightLeftIcon class="w-6 h-6" /> {{ t('delegation.title') }}
       </h1>
       <button class="btn-primary" @click="openCreate">
-        <PlusIcon class="w-4 h-4" /> Buat Delegasi
+        <PlusIcon class="w-4 h-4" /> {{ t('delegation.btn_create') }}
       </button>
     </div>
 
@@ -189,17 +191,17 @@ function isCurrentlyActive(d) {
       <button :class="['px-4 py-2 text-sm border-b-2',
         tab === 'mine' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500'
       ]" @click="tab = 'mine'; fetchData()">
-        Saya Delegasikan
+        {{ t('delegation.tab_mine') }}
       </button>
       <button :class="['px-4 py-2 text-sm border-b-2',
         tab === 'as-delegate' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500'
       ]" @click="tab = 'as-delegate'; fetchData()">
-        Mewakili Orang Lain
+        {{ t('delegation.tab_as_delegate') }}
       </button>
       <button v-if="canManageOthers" :class="['px-4 py-2 text-sm border-b-2',
         tab === 'all' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500'
       ]" @click="tab = 'all'; fetchData()">
-        Semua Delegasi
+        {{ t('delegation.tab_all') }}
       </button>
 
       <div class="ml-auto py-1 pr-1 w-56">
@@ -208,7 +210,7 @@ function isCurrentlyActive(d) {
           :items="moduleOptions"
           value-key="value"
           label-key="label"
-          placeholder="Semua Modul"
+          :placeholder="t('delegation.filter_module')"
           size="sm"
           @change="fetchData"
         />
@@ -217,12 +219,10 @@ function isCurrentlyActive(d) {
 
     <!-- Help -->
     <div v-if="tab === 'mine'" class="text-sm text-gray-500 mb-3">
-      Delegasi memberikan kewenangan approval Anda ke user pengganti selama
-      rentang tanggal tertentu. Anda tetap dapat approve sendiri saat kembali aktif.
+      {{ t('delegation.help_mine') }}
     </div>
     <div v-else-if="tab === 'as-delegate'" class="text-sm text-gray-500 mb-3">
-      Berikut delegasi di mana Anda menggantikan user lain. Inbox approval Anda
-      akan otomatis menampilkan request dari user-user ini saat delegasi aktif.
+      {{ t('delegation.help_delegate') }}
     </div>
 
     <!-- List -->
@@ -231,20 +231,20 @@ function isCurrentlyActive(d) {
         <table class="table">
           <thead>
             <tr>
-              <th v-if="tab !== 'mine'">Pendelegasi</th>
-              <th>Pengganti</th>
-              <th>Modul</th>
-              <th>Berlaku</th>
-              <th>Alasan</th>
-              <th>Status</th>
-              <th class="text-right w-32">Aksi</th>
+              <th v-if="tab !== 'mine'">{{ t('delegation.col_delegator') }}</th>
+              <th>{{ t('delegation.col_delegate') }}</th>
+              <th>{{ t('delegation.col_module') }}</th>
+              <th>{{ t('delegation.col_valid') }}</th>
+              <th>{{ t('delegation.col_reason') }}</th>
+              <th>{{ t('delegation.col_status') }}</th>
+              <th class="text-right w-32">{{ t('delegation.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="loading"><td :colspan="tab !== 'mine' ? 7 : 6" class="text-center py-8 text-gray-400">Memuat…</td></tr>
+            <tr v-if="loading"><td :colspan="tab !== 'mine' ? 7 : 6" class="text-center py-8 text-gray-400">{{ t('common.loading') }}</td></tr>
             <tr v-else-if="items.length === 0">
               <td :colspan="tab !== 'mine' ? 7 : 6" class="text-center py-12 text-gray-400">
-                Belum ada delegasi
+                {{ t('delegation.no_data') }}
               </td>
             </tr>
             <tr v-for="item in items" :key="item.id">
@@ -263,28 +263,28 @@ function isCurrentlyActive(d) {
               <td class="text-sm text-gray-600 max-w-xs truncate" :title="item.reason">{{ item.reason || '-' }}</td>
               <td>
                 <span v-if="isCurrentlyActive(item)" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700">
-                  <CheckCircleIcon class="w-3.5 h-3.5" /> Aktif
+                  <CheckCircleIcon class="w-3.5 h-3.5" /> {{ t('delegation.status_active') }}
                 </span>
                 <span v-else-if="Number(item.is_active) === 1" class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">
-                  Terjadwal / Lewat
+                  {{ t('delegation.status_scheduled') }}
                 </span>
                 <span v-else class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">
-                  Non-aktif
+                  {{ t('delegation.status_inactive') }}
                 </span>
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
                   <button v-if="Number(item.user_id) === myUserId || canManageOthers"
-                    class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" title="Edit">
+                    class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" :title="t('common.edit')">
                     <PencilIcon class="w-4 h-4" />
                   </button>
                   <button v-if="Number(item.user_id) === myUserId || canManageOthers"
                     class="text-gray-500 hover:text-amber-600" @click="toggle(item)"
-                    :title="item.is_active ? 'Nonaktifkan' : 'Aktifkan'">
+                    :title="item.is_active ? t('delegation.toast_deactivated') : t('delegation.toast_activated')">
                     <ShieldCheckIcon class="w-4 h-4" />
                   </button>
                   <button v-if="Number(item.user_id) === myUserId || canManageOthers"
-                    class="text-gray-500 hover:text-red-600" @click="remove(item)" title="Hapus">
+                    class="text-gray-500 hover:text-red-600" @click="remove(item)" :title="t('common.delete')">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>
@@ -299,13 +299,13 @@ function isCurrentlyActive(d) {
     <div v-if="showEditor" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-xl">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
-          <h2 class="font-semibold">{{ editing ? 'Edit' : 'Buat' }} Delegasi</h2>
+          <h2 class="font-semibold">{{ editing ? t('delegation.edit_title') : t('delegation.create_title') }}</h2>
           <button class="text-gray-500" @click="showEditor = false"><XMarkIcon class="w-5 h-5" /></button>
         </div>
 
         <form @submit.prevent="save" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div v-if="canManageOthers" class="md:col-span-2">
-            <label class="label">Pendelegasi</label>
+            <label class="label">{{ t('delegation.delegator_label') }}</label>
             <SearchableSelect
               v-model="form.user_id"
               :items="users"
@@ -313,12 +313,12 @@ function isCurrentlyActive(d) {
               label-key="name"
               sub-label-key="email"
               :search-keys="['name','email']"
-              :placeholder="`Saya sendiri (${auth.user?.name || ''})`"
+              :placeholder="t('delegation.myself_placeholder', { name: auth.user?.name || '' })"
             />
           </div>
 
           <div class="md:col-span-2">
-            <label class="label">Pengganti *</label>
+            <label class="label">{{ t('delegation.delegate_label') }}</label>
             <SearchableSelect
               v-model="form.delegate_to_user_id"
               :items="users"
@@ -326,47 +326,47 @@ function isCurrentlyActive(d) {
               label-key="name"
               sub-label-key="email"
               :search-keys="['name','email']"
-              placeholder="— Pilih user pengganti —"
+              :placeholder="t('delegation.delegate_placeholder')"
             />
           </div>
 
           <div>
-            <label class="label">Berlaku dari *</label>
+            <label class="label">{{ t('delegation.valid_from') }}</label>
             <input v-model="form.date_from" type="date" class="input" required />
           </div>
           <div>
-            <label class="label">Berlaku sampai *</label>
+            <label class="label">{{ t('delegation.valid_to') }}</label>
             <input v-model="form.date_to" type="date" class="input" required />
           </div>
 
           <div class="md:col-span-2">
-            <label class="label">Modul</label>
+            <label class="label">{{ t('delegation.module_label') }}</label>
             <SearchableSelect
               v-model="form.module"
               :items="moduleOptions.filter(mo => mo.value)"
               value-key="value"
               label-key="label"
-              placeholder="Semua modul"
+              :placeholder="t('delegation.modules.all')"
             />
             <div class="text-xs text-gray-500 mt-1">
-              Kosongkan untuk delegasi semua modul (LEAVE, OVERTIME, dll).
+              {{ t('delegation.module_hint') }}
             </div>
           </div>
 
           <div class="md:col-span-2">
-            <label class="label">Alasan</label>
-            <textarea v-model="form.reason" rows="2" class="input" placeholder="Contoh: Cuti tahunan 5-12 Mei"></textarea>
+            <label class="label">{{ t('delegation.reason_label') }}</label>
+            <textarea v-model="form.reason" rows="2" class="input" :placeholder="t('delegation.reason_placeholder')"></textarea>
           </div>
 
           <div class="md:col-span-2 flex items-center gap-2">
             <input v-model="form.is_active" type="checkbox" :true-value="1" :false-value="0" class="w-4 h-4" />
-            <span class="text-sm">Aktif</span>
+            <span class="text-sm">{{ t('delegation.active_label') }}</span>
           </div>
 
           <div class="md:col-span-2 flex justify-end gap-2 pt-2">
-            <button type="button" class="btn-secondary" @click="showEditor = false">Batal</button>
+            <button type="button" class="btn-secondary" @click="showEditor = false">{{ t('common.cancel') }}</button>
             <button type="submit" class="btn-primary">
-              {{ editing ? 'Simpan Perubahan' : 'Simpan Delegasi' }}
+              {{ editing ? t('delegation.edit_title') : t('delegation.create_title') }}
             </button>
           </div>
         </form>

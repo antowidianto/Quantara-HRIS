@@ -4,6 +4,7 @@ import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from 'vue-toastification'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
+import { useI18n } from '@/locales'
 import { GiftIcon, CalendarDaysIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
 
 /**
@@ -21,18 +22,18 @@ import { GiftIcon, CalendarDaysIcon, ArrowPathIcon } from '@heroicons/vue/24/out
  */
 const auth = useAuthStore()
 const toast = useToast()
+const { t } = useI18n()
 const loading = ref(false)
 const history = ref([])
 const stats = ref({ total_amount: 0, count: 0, by_kind: {} })
 
-const KIND_LABEL = {
-  ANNUAL:        'Annual / Tahunan',
-  KPI:           'KPI / Performance',
-  MILESTONE:     'Milestone',
-  SIGNON:        'Sign-on',
-  RETENTION:     'Retention',
-  DISCRETIONARY: 'Discretionary',
+const kindLabel = (kind) => {
+  const k = (kind || '').toLowerCase()
+  const key = `payroll.my_bonuses.kinds.${k}`
+  const trans = t(key)
+  return trans === key ? kind : trans
 }
+
 const KIND_COLOR = {
   ANNUAL:        'badge-blue',
   KPI:           'badge-green',
@@ -74,9 +75,9 @@ async function fetchData() {
     lastFetchedAt.value = new Date()
   } catch (e) {
     if (e.response?.status === 403) {
-      toast.error('Anda tidak memiliki akses ke data ini')
+      toast.error(t('payroll.my_bonuses.no_access'))
     } else {
-      toast.error(e.response?.data?.message || 'Gagal memuat riwayat bonus')
+      toast.error(e.response?.data?.message || t('payroll.my_bonuses.load_failed'))
     }
     console.error('[MyBonuses] fetch failed', e.response?.status, e.response?.data)
   } finally {
@@ -96,10 +97,12 @@ const diagnosticMessage = computed(() => {
   if (d.cross_company) {
     return {
       level: 'error',
-      title: 'Akun Anda lintas-company dengan record karyawan',
-      detail: `User Anda (company #${d.user_tenant_company_id}) tidak match dengan
-        record karyawan (#${d.employee_id} di company #${d.employee_company_id}).
-        Hubungi IT/HR untuk fix mapping di tabel users.`,
+      title: t('payroll.my_bonuses.diagnostics.cross_company_title'),
+      detail: t('payroll.my_bonuses.diagnostics.cross_company_detail', {
+        userTenant: d.user_tenant_company_id,
+        employeeId: d.employee_id,
+        employeeCompany: d.employee_company_id,
+      }),
     }
   }
   // Ada banyak recipient di status APPROVED/PAID tapi semuanya di-exclude
@@ -107,21 +110,25 @@ const diagnosticMessage = computed(() => {
   if (approvedish > 0 && d.excluded_count >= approvedish) {
     return {
       level: 'error',
-      title: 'Bonus Anda di-exclude dari run',
-      detail: `Ada ${approvedish} entry di run APPROVED/PAID, tapi semuanya
-        di-mark as excluded (${d.excluded_count} dari total ${d.total_recipients_db}
-        recipient). Minta HR include kembali (Bonus Run Detail → Include All).`,
+      title: t('payroll.my_bonuses.diagnostics.excluded_title'),
+      detail: t('payroll.my_bonuses.diagnostics.excluded_detail', {
+        approvedish,
+        excludedCount: d.excluded_count,
+        totalRecipients: d.total_recipients_db,
+      }),
     }
   }
   // Ada recipient pending tapi belum di-approve
   const pending = (d.recipients_by_status?.DRAFT || 0) + (d.recipients_by_status?.CALCULATED || 0)
   if (approvedish === 0 && pending > 0) {
+    const statuses = [
+      d.recipients_by_status.DRAFT > 0 ? 'DRAFT' : '',
+      d.recipients_by_status.CALCULATED > 0 ? 'CALCULATED' : '',
+    ].filter(Boolean).join(' / ')
     return {
       level: 'info',
-      title: `Ada ${pending} bonus menunggu approval HR`,
-      detail: `Bonus run yang melibatkan Anda masih di status
-        ${d.recipients_by_status.DRAFT > 0 ? 'DRAFT ' : ''}${d.recipients_by_status.CALCULATED > 0 ? 'CALCULATED' : ''}.
-        Belum disetujui manajemen. Hubungi HR untuk konfirmasi timeline approval.`,
+      title: t('payroll.my_bonuses.diagnostics.pending_title', { pending }),
+      detail: t('payroll.my_bonuses.diagnostics.pending_detail', { statuses }),
     }
   }
   // Run cancelled
@@ -129,19 +136,16 @@ const diagnosticMessage = computed(() => {
       && approvedish === 0 && pending === 0) {
     return {
       level: 'warning',
-      title: 'Run bonus dibatalkan',
-      detail: `Bonus run yang melibatkan Anda telah di-cancel oleh HR
-        (${d.recipients_by_status.CANCELLED} entry). Konfirmasi alasan ke HR.`,
+      title: t('payroll.my_bonuses.diagnostics.cancelled_title'),
+      detail: t('payroll.my_bonuses.diagnostics.cancelled_detail', { count: d.recipients_by_status.CANCELLED }),
     }
   }
   // Tidak ada recipient sama sekali
   if (d.total_recipients_db === 0) {
     return {
       level: 'info',
-      title: 'Belum pernah masuk run bonus apapun',
-      detail: 'Anda belum pernah ter-include di bonus run manapun. '
-        + 'Bisa karena belum ada run yang dibuat, atau Anda tidak lolos eligibility filter '
-        + '(min tenure, employment status, dst).',
+      title: t('payroll.my_bonuses.diagnostics.no_recipient_title'),
+      detail: t('payroll.my_bonuses.diagnostics.no_recipient_detail'),
     }
   }
   return null
@@ -174,11 +178,11 @@ const historyByYear = computed(() => {
 const taxLabel = (treatment) => {
   switch ((treatment || '').toUpperCase()) {
     case 'NORMAL':
-    case 'GROSS':       return { text: 'Taxable', cls: 'bg-blue-100 text-blue-700' }
-    case 'NON_TAXABLE': return { text: 'Non-Pajak', cls: 'bg-green-100 text-green-700' }
-    case 'GROSS_UP':    return { text: 'Gross-Up (Employer Absorb)', cls: 'bg-amber-100 text-amber-700' }
-    case 'NET':         return { text: 'Net (Employer Absorb)', cls: 'bg-amber-100 text-amber-700' }
-    default:            return { text: 'Taxable', cls: 'bg-gray-100 text-gray-700' }
+    case 'GROSS':       return { text: t('payroll.my_bonuses.tax.taxable'), cls: 'bg-blue-100 text-blue-700' }
+    case 'NON_TAXABLE': return { text: t('payroll.my_bonuses.tax.non_taxable'), cls: 'bg-green-100 text-green-700' }
+    case 'GROSS_UP':    return { text: t('payroll.my_bonuses.tax.gross_up'), cls: 'bg-amber-100 text-amber-700' }
+    case 'NET':         return { text: t('payroll.my_bonuses.tax.net'), cls: 'bg-amber-100 text-amber-700' }
+    default:            return { text: t('payroll.my_bonuses.tax.taxable'), cls: 'bg-gray-100 text-gray-700' }
   }
 }
 </script>
@@ -189,41 +193,36 @@ const taxLabel = (treatment) => {
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2">
           <GiftIcon class="w-7 h-7 text-amber-600" />
-          Riwayat Bonus
+          {{ t('payroll.my_bonuses.title') }}
         </h1>
         <p class="text-sm text-gray-500">
-          Daftar bonus yang sudah Anda terima. Hanya menampilkan run yang
-          sudah disetujui atau dibayar.
+          {{ t('payroll.my_bonuses.subtitle') }}
         </p>
       </div>
       <div class="flex items-center gap-2">
         <span v-if="lastFetchedAt" class="text-xs text-gray-400">
-          Diperbarui {{ lastFetchedAt.toLocaleTimeString('id-ID') }}
+          {{ t('payroll.my_bonuses.updated_at', { time: lastFetchedAt.toLocaleTimeString() }) }}
         </span>
-        <button @click="fetchData" :disabled="loading" class="btn-secondary" title="Reload data">
+        <button @click="fetchData" :disabled="loading" class="btn-secondary" :title="t('payroll.my_bonuses.refresh')">
           <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" />
-          Refresh
+          {{ t('payroll.my_bonuses.refresh') }}
         </button>
       </div>
     </div>
 
     <div v-if="loading" class="card p-12 text-center text-gray-400">
-      Memuat riwayat bonus...
+      {{ t('payroll.my_bonuses.loading') }}
     </div>
 
     <!-- User account tidak punya employee_id (mis. super admin / IT admin) -->
     <template v-else-if="noEmployeeLink">
       <div class="card p-12 text-center">
         <GiftIcon class="w-16 h-16 mx-auto text-gray-300 mb-3" />
-        <h3 class="text-lg font-medium text-gray-700 mb-1">Akun belum terhubung ke karyawan</h3>
+        <h3 class="text-lg font-medium text-gray-700 mb-1">{{ t('payroll.my_bonuses.no_emp_title') }}</h3>
         <p class="text-sm text-gray-500 max-w-lg mx-auto">
-          Akun {{ employeeName }} tidak terhubung ke record karyawan, jadi tidak ada
-          data bonus pribadi untuk ditampilkan. Halaman ini diperuntukkan
-          karyawan dengan profil HR aktif.
+          {{ t('payroll.my_bonuses.no_emp_desc', { name: employeeName }) }}
         </p>
-        <p class="text-xs text-gray-400 mt-3">
-          Kalau Anda HR / admin yang ingin melihat bonus seluruh karyawan,
-          buka <strong>Payroll → Bonus Runs</strong>.
+        <p class="text-xs text-gray-400 mt-3" v-html="t('payroll.my_bonuses.no_emp_hint')">
         </p>
       </div>
     </template>
@@ -232,11 +231,10 @@ const taxLabel = (treatment) => {
       <div class="card p-12 text-center">
         <GiftIcon class="w-16 h-16 mx-auto text-gray-300 mb-3" />
         <h3 class="text-lg font-medium text-gray-700 mb-1">
-          {{ includePending ? 'Belum ada bonus (termasuk pending)' : 'Belum ada bonus' }}
+          {{ includePending ? t('payroll.my_bonuses.no_data_pending') : t('payroll.my_bonuses.no_data') }}
         </h3>
         <p class="text-sm text-gray-500 max-w-lg mx-auto">
-          Riwayat bonus tampil di sini hanya untuk run yang sudah berstatus
-          <strong>APPROVED</strong> atau <strong>PAID</strong>.
+          {{ t('payroll.my_bonuses.no_data_desc') }}
         </p>
         <!-- Diagnostic dari backend — actionable message berdasarkan
              kondisi data sebenarnya. -->
@@ -252,17 +250,15 @@ const taxLabel = (treatment) => {
         </div>
 
         <div class="mt-4 inline-flex flex-col gap-2 text-left text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3 max-w-md">
-          <p class="font-semibold text-gray-700">Alur status bonus:</p>
+          <p class="font-semibold text-gray-700">{{ t('payroll.my_bonuses.status_flow_title') }}</p>
           <ol class="list-decimal list-inside space-y-1">
-            <li><span class="font-mono text-gray-600">DRAFT</span> — HR baru bikin run, belum dihitung.</li>
-            <li><span class="font-mono text-gray-600">CALCULATED</span> — sudah dihitung, masih bisa direvisi HR.</li>
-            <li><span class="font-mono text-amber-700">APPROVED</span> — disetujui manajemen, mulai muncul di sini.</li>
-            <li><span class="font-mono text-green-700">PAID</span> — sudah dibayarkan.</li>
+            <li><span class="font-mono text-gray-600">DRAFT</span> — {{ t('payroll.my_bonuses.status_draft_desc') }}</li>
+            <li><span class="font-mono text-gray-600">CALCULATED</span> — {{ t('payroll.my_bonuses.status_calculated_desc') }}</li>
+            <li><span class="font-mono text-amber-700">APPROVED</span> — {{ t('payroll.my_bonuses.status_approved_desc') }}</li>
+            <li><span class="font-mono text-green-700">PAID</span> — {{ t('payroll.my_bonuses.status_paid_desc') }}</li>
           </ol>
           <p class="text-gray-400 mt-1">
-            Kalau HR sudah bilang bonus Anda sudah dihitung tapi belum tampil,
-            artinya masih menunggu approval manajemen. Hubungi HRBP atau Finance
-            untuk konfirmasi.
+            {{ t('payroll.my_bonuses.status_explanation_timeline') }}
           </p>
         </div>
 
@@ -271,38 +267,22 @@ const taxLabel = (treatment) => {
              salah, dll). -->
         <details class="mt-4 inline-block max-w-md text-left">
           <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
-            Bonus Anda sudah di-approve tapi tidak tampil di sini?
+            {{ t('payroll.my_bonuses.timeline_help_title') }}
           </summary>
           <div class="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1.5">
-            <p>Coba langkah-langkah berikut:</p>
             <ol class="list-decimal list-inside space-y-1">
-              <li>
-                Klik <strong>Refresh</strong> di kanan atas (cache UI mungkin belum update).
-              </li>
-              <li>
-                Logout dan login ulang. Token JWT lama mungkin tidak punya
-                <code>employee_id</code> yang ter-link.
-              </li>
-              <li>
-                Cek di profile — pastikan akun Anda terhubung ke record karyawan yang
-                benar (NIK / employee_number cocok dengan run yang di-approve HR).
-              </li>
-              <li>
-                Konfirmasi ke HR: company / cabang Anda match dengan bonus run.
-                Bonus run di company A tidak tampil ke karyawan di company B.
-              </li>
-              <li>
-                Klik <strong>"Tampilkan Pending"</strong> di bawah untuk cek apakah
-                run masih di status CALCULATED (belum APPROVED).
-              </li>
+              <li>{{ t('payroll.my_bonuses.timeline_help_step1') }}</li>
+              <li>{{ t('payroll.my_bonuses.timeline_help_step2') }}</li>
+              <li>{{ t('payroll.my_bonuses.timeline_help_step3') }}</li>
+              <li>{{ t('payroll.my_bonuses.timeline_help_step4') }}</li>
+              <li>{{ t('payroll.my_bonuses.timeline_help_step5') }}</li>
             </ol>
             <p class="pt-1 border-t border-amber-200 mt-2">
-              <strong>Debug info:</strong> employee_id yang dipakai = <code>{{ employeeId }}</code>,
-              filter saat ini = <code>{{ includePending ? 'APPROVED + PAID + pending' : 'APPROVED + PAID' }}</code>.
+              <strong>Debug info:</strong> {{ t('payroll.my_bonuses.debug_info', { id: employeeId, filter: includePending ? 'APPROVED + PAID + pending' : 'APPROVED + PAID' }) }}
             </p>
             <details v-if="diagnostic" class="pt-1">
               <summary class="cursor-pointer text-xs text-gray-500">
-                Backend diagnostic (untuk laporan ke IT/HR)
+                {{ t('payroll.my_bonuses.backend_diagnostic') }}
               </summary>
               <pre class="mt-1 p-2 bg-white rounded border border-gray-200 overflow-x-auto text-[10px] font-mono">{{ JSON.stringify(diagnostic, null, 2) }}</pre>
             </details>
@@ -311,7 +291,7 @@ const taxLabel = (treatment) => {
 
         <div class="mt-4">
           <button @click="togglePending" class="btn-secondary text-xs">
-            {{ includePending ? 'Sembunyikan Pending' : 'Tampilkan Pending (DRAFT/CALCULATED)' }}
+            {{ includePending ? t('payroll.my_bonuses.btn_pending_hide') : t('payroll.my_bonuses.btn_pending_show') }}
           </button>
         </div>
       </div>
@@ -321,20 +301,20 @@ const taxLabel = (treatment) => {
       <!-- Stats summary -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div class="card p-4">
-          <div class="text-xs text-gray-500 mb-1">Total Bonus Sepanjang Karir</div>
+          <div class="text-xs text-gray-500 mb-1">{{ t('payroll.my_bonuses.total_career') }}</div>
           <div class="text-2xl font-bold text-primary-700">{{ fmtCurrency(stats.total_amount) }}</div>
           <div class="text-xs text-gray-400 mt-1">
-            {{ stats.count }} bonus diterima
+            {{ t('payroll.my_bonuses.bonus_received', { count: stats.count }) }}
           </div>
         </div>
         <div class="card p-4 md:col-span-2">
-          <div class="text-xs text-gray-500 mb-2">Breakdown per Jenis</div>
+          <div class="text-xs text-gray-500 mb-2">{{ t('payroll.my_bonuses.breakdown_kind') }}</div>
           <div class="flex flex-wrap gap-2">
             <div v-for="(amount, kind) in stats.by_kind"
                  :key="kind"
                  class="flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-200 bg-gray-50">
               <span :class="KIND_COLOR[kind] || 'badge-gray'">
-                {{ KIND_LABEL[kind] || kind }}
+                {{ kindLabel(kind) }}
               </span>
               <span class="text-sm font-semibold tabular-nums">{{ fmtCurrency(amount) }}</span>
             </div>
@@ -353,12 +333,12 @@ const taxLabel = (treatment) => {
             <table class="table">
               <thead>
                 <tr>
-                  <th>Bonus</th>
-                  <th>Jenis</th>
-                  <th>Pay Date</th>
-                  <th>Tax Treatment</th>
-                  <th class="text-right">Amount</th>
-                  <th>Status</th>
+                  <th>{{ t('payroll.my_bonuses.col_bonus') }}</th>
+                  <th>{{ t('payroll.my_bonuses.col_kind') }}</th>
+                  <th>{{ t('payroll.my_bonuses.col_pay_date') }}</th>
+                  <th>{{ t('payroll.my_bonuses.col_tax') }}</th>
+                  <th class="text-right">{{ t('payroll.my_bonuses.col_amount') }}</th>
+                  <th>{{ t('payroll.my_bonuses.col_status') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100">
@@ -371,7 +351,7 @@ const taxLabel = (treatment) => {
                   </td>
                   <td>
                     <span :class="KIND_COLOR[item.scheme_kind] || 'badge-gray'">
-                      {{ KIND_LABEL[item.scheme_kind] || item.scheme_kind }}
+                      {{ kindLabel(item.scheme_kind) }}
                     </span>
                   </td>
                   <td class="text-sm">{{ fmtDate(item.pay_date) }}</td>
@@ -385,10 +365,10 @@ const taxLabel = (treatment) => {
                   </td>
                   <td>
                     <span :class="STATUS_BADGE[item.run_status] || 'badge-gray'">
-                      {{ item.run_status }}
+                      {{ item.run_status === 'APPROVED' ? t('payroll.my_bonuses.status_approved_hint') : (item.run_status === 'PAID' ? t('common.paid') : item.run_status) }}
                     </span>
                     <div v-if="item.payroll_period_id" class="text-xs text-gray-400 mt-0.5">
-                      → Slip gaji
+                      {{ t('payroll.my_bonuses.payslip_link') }}
                     </div>
                   </td>
                 </tr>
@@ -399,10 +379,7 @@ const taxLabel = (treatment) => {
       </div>
 
       <p class="text-xs text-gray-400 mt-3">
-        Catatan: Bonus dengan tax treatment <strong>Non-Pajak</strong> tidak masuk
-        perhitungan PPh21. Bonus <strong>Gross-Up / Net</strong> berarti pajaknya
-        sudah ditanggung perusahaan; nominal yang Anda lihat adalah amount setelah
-        gross-up untuk transparansi.
+        {{ t('payroll.my_bonuses.footer_note') }}
       </p>
     </template>
   </div>
