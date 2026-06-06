@@ -8,12 +8,22 @@ import { useI18n } from '@/locales'
 const toast = useToast()
 const { t } = useI18n()
 const items = ref([])
+const balances = ref([])
 const showForm = ref(false)
 const form = ref({ category: 'TRANSPORT', expense_date: '', amount: 0, description: '' })
 
 async function fetchData() {
   const res = await api.get('/reimbursements', { params: { per_page: 50 } })
   items.value = res.data.data
+
+  // Fetch benefit balances
+  try {
+    const bRes = await api.get('/my-benefit-balances')
+    balances.value = bRes.data.data || []
+    if (balances.value.length > 0 && form.value.category === 'TRANSPORT') {
+        form.value.category = balances.value[0].name
+    }
+  } catch(e) {}
 }
 onMounted(fetchData)
 
@@ -32,6 +42,16 @@ async function submit() {
       <h1 class="text-2xl font-bold">{{ t('reimbursement.title') }}</h1>
       <button class="btn-primary" @click="showForm = true">+ {{ t('reimbursement.apply') }}</button>
     </div>
+
+    <!-- Sisa Plafon Widget -->
+    <div v-if="balances.length > 0" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div v-for="b in balances" :key="b.id" class="card bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 p-4">
+        <h3 class="font-medium text-gray-500 text-sm mb-1">Sisa Plafon: {{ b.name }}</h3>
+        <p class="text-2xl font-bold text-indigo-700">{{ fmtCurrency(b.available_amount) }}</p>
+        <p class="text-xs text-gray-400 mt-2">Terpakai: {{ fmtCurrency(b.used_amount) }} dari {{ fmtCurrency(b.limit_amount) }} ({{ b.reset_type }})</p>
+      </div>
+    </div>
+
     <div class="card">
       <table class="table">
         <thead><tr><th>{{ t('reimbursement.col_number') }}</th><th>{{ t('reimbursement.col_date') }}</th><th>{{ t('reimbursement.col_category') }}</th><th>{{ t('reimbursement.col_amount') }}</th><th>{{ t('reimbursement.col_description') }}</th><th>{{ t('reimbursement.col_status') }}</th></tr></thead>
@@ -58,7 +78,12 @@ async function submit() {
         <h2 class="font-semibold">{{ t('reimbursement.apply_title') }}</h2>
         <div><label class="label">{{ t('reimbursement.category') }}</label>
           <select v-model="form.category" class="input">
-            <option>TRANSPORT</option><option>MEDICAL</option><option>MEAL</option><option>OFFICE</option><option>OTHER</option>
+            <template v-if="balances.length > 0">
+              <option v-for="b in balances" :key="b.id" :value="b.name">{{ b.name }}</option>
+            </template>
+            <template v-else>
+              <option>TRANSPORT</option><option>MEDICAL</option><option>MEAL</option><option>OFFICE</option><option>OTHER</option>
+            </template>
           </select>
         </div>
         <div><label class="label">{{ t('reimbursement.expense_date') }}</label><input v-model="form.expense_date" type="date" class="input" required /></div>

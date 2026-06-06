@@ -786,6 +786,25 @@ class PayrollService
                     'status'            => $status,
                     'updated_at'        => date('Y-m-d H:i:s'),
                 ]);
+
+                // Mark the oldest unpaid installment as PAID
+                $unpaidInst = $db->table('loan_installments')
+                    ->where('loan_id', $loan['id'])
+                    ->where('status', 'UNPAID')
+                    ->orderBy('installment_number', 'ASC')
+                    ->limit(1)
+                    ->get()
+                    ->getRowArray();
+                    
+                if ($unpaidInst) {
+                    $db->table('loan_installments')->where('id', $unpaidInst['id'])->update([
+                        'status' => 'PAID',
+                        'paid_at' => date('Y-m-d H:i:s'),
+                        'payroll_period_id' => $payrollPeriodId,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+
                 $remainingDeduction -= $apply;
             }
         }

@@ -84,6 +84,7 @@ const routes = [
       { path: 'roster', name: 'roster', component: () => import('@/views/Roster/RosterMatrix.vue') },
       { path: 'master/leave-types', name: 'leave-types', component: () => import('@/views/Master/LeaveTypes.vue') },
       { path: 'master/payroll-components', name: 'payroll-components', component: () => import('@/views/Master/PayrollComponents.vue') },
+      { path: 'master/benefit-policies', name: 'benefit-policies', component: () => import('@/views/Master/BenefitPolicies.vue') },
       // Cost Center master + budget vs actual report. Lihat docs/COST_CENTER.md.
       { path: 'master/cost-centers', name: 'cost-centers', component: () => import('@/views/Master/CostCenters.vue') },
       { path: 'master/regulations', name: 'regulations', component: () => import('@/views/Master/Regulations.vue') },
@@ -94,10 +95,13 @@ const routes = [
       // Approval inbox
       { path: 'approvals/inbox', name: 'approval-inbox', component: () => import('@/views/Approvals/Inbox.vue') },
       { path: 'approvals/delegations', name: 'approval-delegations', component: () => import('@/views/Approvals/MyDelegations.vue') },
+      { path: 'approvals/loans', name: 'approval-loans', component: () => import('@/views/Approvals/Loans.vue') },
 
       // ─── Horizon 1 (Sprint 7-9 Quick Wins) ───────────────────
       // H1.5 WFH Mode — pengajuan & approval inbox WFH
       { path: 'attendance/wfh', name: 'wfh-requests', component: () => import('@/views/Attendance/WfhRequests.vue') },
+      // ADMS / Physical Devices (Fingerprint)
+      { path: 'attendance/physical-devices', name: 'physical-devices', component: () => import('@/views/Attendance/PhysicalDevices.vue') },
       // H1.4 Recruitment Funnel Metrics — bottleneck pipeline + stale candidates
       { path: 'recruitment/funnel', name: 'recruitment-funnel', component: () => import('@/views/Recruitment/FunnelMetrics.vue') },
       // H1.8 THR Planning Dashboard — proyeksi total THR per tahun
@@ -238,6 +242,7 @@ const routes = [
       // Reimbursement / Loan
       { path: 'reimbursements', name: 'reimbursements', component: () => import('@/views/Finance/ReimbursementList.vue') },
       { path: 'loans', name: 'loans', component: () => import('@/views/Finance/LoanList.vue') },
+      { path: 'loans/my', name: 'my-loans', component: () => import('@/views/Payroll/MyLoans.vue') },
 
       // Notifications
       { path: 'notifications', name: 'notifications', component: () => import('@/views/Notifications.vue') },

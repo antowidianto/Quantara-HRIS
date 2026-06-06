@@ -136,6 +136,50 @@ async function finalize() {
   } catch (e) { toast.error(e.response?.data?.message || t('payroll.period_detail.finalize_failed')) }
 }
 
+async function disburseSalary() {
+  const ok = await confirmDialog({
+    title: 'Mulai Transfer Gaji via Midtrans?',
+    message: 'Ini akan mengirimkan instruksi transfer ke bank masing-masing karyawan secara otomatis via Midtrans IRIS.',
+    okText: 'Transfer Sekarang',
+    variant: 'warning',
+  })
+  if (! ok) return
+  try {
+    await api.post(`/payroll-periods/${route.params.id}/disburse`)
+    toast.success('Disbursement batch berhasil dibuat')
+    fetchData()
+  } catch (e) { toast.error(e.response?.data?.message || 'Gagal memulai disbursement') }
+}
+
+async function checkDisbursementStatus() {
+  try {
+    await api.get(`/payroll-periods/${route.params.id}/disburse-status`)
+    toast.info('Status transfer dicek.')
+    fetchData()
+  } catch (e) { toast.error('Gagal mengecek status') }
+}
+
+async function syncEbupot() {
+  const ok = await confirmDialog({
+    title: 'Lapor e-Bupot via API?',
+    message: 'Data PPh 21 dari slip gaji akan dikirim langsung ke server DJP melalui PJAP.',
+    okText: 'Lapor Sekarang',
+    variant: 'warning',
+  })
+  if (! ok) return
+  exportLoading.value = true
+  try {
+    const res = await api.post(`/payroll-periods/${route.params.id}/ebupot-sync`)
+    toast.success('Batch e-Bupot berhasil dibuat: ' + res.data.data.batch_id)
+    fetchData()
+  } catch (e) { 
+    toast.error(e.response?.data?.message || 'Gagal memulai sinkronisasi e-Bupot') 
+  } finally {
+    exportLoading.value = false
+    showExportDialog.value = false
+  }
+}
+
 async function openExport() {
   exportLoading.value = true
   showExportDialog.value = true
@@ -392,8 +436,8 @@ function downloadBpjs(type) {
             <div class="bg-gray-50 px-4 py-2 border-b border-gray-200 font-medium flex items-center gap-2">
               <DocumentTextIcon class="w-5 h-5 text-amber-600" /> {{ t('payroll.period_detail.espt_pph21') }}
             </div>
-            <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-              <div class="md:col-span-2">
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+              <div>
                 <label class="flex items-center gap-2 text-sm">
                   <input type="checkbox" v-model="isFinalForm" class="w-4 h-4" />
                   {{ t('payroll.period_detail.december_form') }}

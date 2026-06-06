@@ -55,6 +55,7 @@ hris-project-1/
 │   │   ├── Constants/             # ApprovalStatus, AttendanceStatus, ErrorCode, ...
 │   │   ├── Notifications/         # In-app + email + push templates
 │   │   └── Validation/            # Custom rules (NIK, NPWP, magic-byte)
+│   ├── scripts/                   # Database migration, test, and refactor scripts
 │   ├── tests/Unit/                # 53 test files, 761 test methods
 │   ├── env-templates/             # local/staging/production .env templates
 │   ├── Dockerfile                 # Production multi-stage build
@@ -86,6 +87,9 @@ hris-project-1/
 │   ├── ios/                       # Native iOS project
 │   ├── native-config/             # Manifest + Info.plist additions
 │   └── scripts/                   # init-native.sh
+│
+├── adms-middleware/               # ZKTeco/ADMS push middleware
+│   └── index.js                   # Forwarder to backend API
 │
 ├── scripts/
 │   ├── setup-dev.ps1              # Onboarding Windows (idempotent)

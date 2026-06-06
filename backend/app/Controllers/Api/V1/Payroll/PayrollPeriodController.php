@@ -521,4 +521,61 @@ class PayrollPeriodController extends ApiController
             'supported_banks' => \App\Libraries\Payroll\PayrollExporter::supportedBanks(),
         ]);
     }
+
+    /**
+     * POST /payroll-periods/(:num)/ebupot-sync
+     * Mengirim data PPh21 ke API PJAP.
+     */
+    public function syncEbupot($id = null)
+    {
+        $id = (int) $id;
+        $db = \Config\Database::connect();
+        $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        if (! $period) return $this->failNotFound('Period not found');
+        if ($period['status'] !== 'PAID') {
+            return $this->fail('Periode harus dalam status PAID sebelum melapor e-Bupot', 422);
+        }
+
+        $payslips = $db->table('payslips p')
+            ->select('p.*, e.npwp_encrypted, e.full_name')
+            ->join('employees e', 'e.id = p.employee_id')
+            ->where('p.payroll_period_id', $id)
+            ->where('p.pph21_amount >', 0)
+            ->get()->getResultArray();
+
+        if (empty($payslips)) {
+            return $this->fail('Tidak ada potongan PPh 21 pada periode ini', 422);
+        }
+
+        try {
+            $ebupotService = new \App\Libraries\Tax\Providers\MockEbupotService();
+            $batchId = $ebupotService->uploadBuktiPotong($payslips);
+
+            $db->table('payroll_periods')->where('id', $id)->update([
+                'ebupot_status' => 'IN_PROGRESS',
+                'ebupot_reference' => $batchId,
+            ]);
+
+            // Pura-puranya langsung ngecek status
+            $status = $ebupotService->getUploadStatus($batchId);
+            if ($status['status'] === 'COMPLETED') {
+                $db->table('payroll_periods')->where('id', $id)->update(['ebupot_status' => 'COMPLETED']);
+                $db->table('payslips')->where('payroll_period_id', $id)->update(['ebupot_status' => 'COMPLETED']);
+            }
+
+            Services::audit()->forModule('PAYROLL')->log(
+                action: 'payroll.ebupot_sync',
+                entity: 'payroll_period', entityId: $id,
+                description: "Sync e-Bupot PPh21 ke PJAP (Batch: {$batchId})"
+            );
+
+            return $this->ok(['batch_id' => $batchId, 'status' => $status['status']], 'Sinkronisasi e-Bupot dimulai');
+        } catch (\Throwable $e) {
+            $db->table('payroll_periods')->where('id', $id)->update([
+                'ebupot_status' => 'FAILED',
+                'ebupot_error'  => $e->getMessage(),
+            ]);
+            return $this->fail('Gagal sinkronisasi e-Bupot: ' . $e->getMessage(), 500);
+        }
+    }
 }
