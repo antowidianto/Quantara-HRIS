@@ -44,6 +44,10 @@ class Filters extends BaseConfig
         'sameorigin'    => \App\Filters\SameOriginFilter::class,
         // Mobile Prep / MOB-3 — Idempotency-Key anti-duplikat untuk POST critical
         'idempotency'   => \App\Filters\IdempotencyFilter::class,
+        // S1.1 SaaS — Feature flag gate untuk plan tiers
+        'feature'       => \App\Filters\FeatureGateFilter::class,
+        // S1.6 SaaS — Block write op untuk tenant SUSPENDED/CANCELLED
+        'suspended'     => \App\Filters\SuspendedTenantFilter::class,
     ];
 
     /**
@@ -86,6 +90,11 @@ class Filters extends BaseConfig
      */
     public array $filters = [
         'throttle:api' => ['before' => ['api/v1/*']],
+        // S1.6 SaaS — Block POST/PUT/DELETE untuk tenant SUSPENDED.
+        // Filter cek subscription status di setiap request; cepat (1 query
+        // dengan index company_id). Read-only (GET/HEAD/OPTIONS) tetap
+        // allowed supaya user bisa lihat data + reactivate via /billing.
+        'suspended' => ['before' => ['api/v1/*']],
         // Mobile Prep / MOB-3 — Idempotency-Key untuk POST critical.
         // Filter optional: hanya aktif kalau client kirim header
         // `Idempotency-Key`. Dipasang di pattern POST yang sering jadi

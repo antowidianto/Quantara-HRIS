@@ -115,6 +115,14 @@ class ThrottleFilter implements FilterInterface
                 (int) env('ratelimit.inboundWebhookAttempts', 60),
                 (int) env('ratelimit.inboundWebhookWindow', 60),
             ],
+            // S1.3 SaaS — Self-Service Tenant Signup. Sangat ketat karena
+            // ini endpoint publik tanpa auth + memicu provisioning DB
+            // (mahal). 3/jam/IP cukup untuk legit user yang mau coba
+            // beberapa email, dan blokir bot/scraper.
+            'signup' => [
+                (int) env('ratelimit.signupAttempts', 3),
+                (int) env('ratelimit.signupWindow', 3600),
+            ],
             'api'   => [
                 (int) env('ratelimit.apiPerMinute', 120),
                 60,

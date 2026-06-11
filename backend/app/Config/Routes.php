@@ -29,10 +29,20 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('forgot-password', 'Auth\AuthController::forgotPassword', ['filter' => 'throttle:forgot_password']);
         $routes->post('reset-password', 'Auth\AuthController::resetPassword', ['filter' => 'throttle:password_reset']);
         $routes->post('verify-2fa', 'Auth\AuthController::verifyTwoFactor', ['filter' => 'throttle:twofa']);
+
+        // S1.3 SaaS — Self-Service Tenant Signup (publik, no JWT)
+        // Rate limit: signup throttle:signup (3/hour/IP), verify tidak limited
+        // karena token unique acts as authorization.
+        $routes->post('signup',                'Auth\AuthSignupController::signup',
+            ['filter' => 'throttle:signup']);
+        $routes->get('verify-signup',          'Auth\AuthSignupController::verify');
+        $routes->get('signup/(:num)/status',   'Auth\AuthSignupController::status/$1');
     });
 
-    // Health check
+    // Health check + observability (S2.1 Roadmap SaaS)
     $routes->get('health', 'System\HealthController::index');
+    // /metrics — Prometheus scrape (publik tapi IP-allowlisted; super admin bypass)
+    $routes->get('metrics', 'System\MetricsController::index');
 
     // ─── Mobile Prep / MOB-5 — OpenAPI spec (public) ────────────────
     // Spec sendiri tidak rahasia; endpoint actual tetap auth-protected.
@@ -61,6 +71,24 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     $routes->post('inbound/(:segment)', 'Webhook\InboundWebhookController::receive/$1', [
         'filter' => 'throttle:inbound_webhook',
     ]);
+
+    // ─── S2.3 Roadmap SaaS — Public Data Export download (token-based) ───
+    // Token short-lived 7 hari + signed di DB. Tidak butuh JWT karena
+    // user akan klik link di email, browser tanpa session.
+    $routes->get('data-exports/download', 'Backup\DataExportController::download',
+        ['filter' => 'throttle:export']);
+
+    // ─── S2.4 Roadmap SaaS — Email webhook receiver (PUBLIC) ───
+    // Provider (SES/Postmark/Sendgrid) POST event bounce/complaint/delivery.
+    // Signature verified per provider di EmailWebhookController.
+    // Bucket throttle terpisah supaya retry sender tidak kena throttle:api.
+    $routes->post('webhooks/email/(:segment)', 'Webhook\EmailWebhookController::receive/$1',
+        ['filter' => 'throttle:inbound_webhook']);
+
+    // ─── S3.1 Roadmap SaaS — Public branding lookup (no auth) ───
+    // Login page panggil ini untuk dapat branding tenant via custom domain
+    // sebelum user login. Fallback ke Quantara default kalau host tidak match.
+    $routes->get('branding/by-host', 'WhiteLabel\BrandingController::byHost');
 
     // ─── Career Portal (PUBLIC, no auth) ───────────────────────────
     // Lihat docs/CAREER_PORTAL.md. Endpoint dipisah dari group ber-JWT
@@ -122,6 +150,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     // Pelamar klik link `/r/{slug}` → resolve ke job posting / career page.
     $routes->get('referrals/r/(:segment)',                    'System\Horizon2Controller::resolveReferralSlug/$1');
 
+    // ─── SaaS / S1.1 — Pricing page publik ──────────────────────────
+    // Marketing site tarik daftar plan + matrix fitur. No auth.
+    $routes->get('plans',                                     'Billing\BillingController::plans');
+
     // ─── Authenticated routes ────────────────────────────────────────
     $routes->group('', ['filter' => 'jwt'], static function ($routes) {
 
@@ -147,6 +179,69 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Sprint A / B3 — Origin guard untuk multipart upload.
         $routes->post('auth/me/avatar',   'Auth\AuthController::uploadAvatar', ['filter' => 'sameorigin']);
         $routes->delete('auth/me/avatar', 'Auth\AuthController::deleteAvatar');
+
+        // ─── SaaS / Billing (S1.1 + S1.2 + S1.4) ───────────────────
+        // Subscription, feature flags, usage meters, plan management
+        $routes->get('features/me',                     'Billing\BillingController::myFeatures');
+        $routes->get('billing/subscription',            'Billing\BillingController::mySubscription');
+        // S1.4 — Usage meter dashboard (semua tenant boleh lihat usage sendiri)
+        $routes->get('billing/usage',                   'Billing\BillingController::myUsage');
+        // Super admin only — fix drift counter dari source table
+        $routes->post('billing/usage/recompute',        'Billing\BillingController::recomputeUsage');
+        // Operasi mengubah subscription butuh permission billing.manage
+        // (super_company_admin punya by default)
+        $routes->post('billing/upgrade',
+            'Billing\BillingController::upgrade',     ['filter' => 'permission:billing.manage']);
+        $routes->post('billing/downgrade',
+            'Billing\BillingController::downgrade',   ['filter' => 'permission:billing.manage']);
+        $routes->post('billing/cancel',
+            'Billing\BillingController::cancel',      ['filter' => 'permission:billing.manage']);
+        $routes->post('billing/reactivate',
+            'Billing\BillingController::reactivate',  ['filter' => 'permission:billing.manage']);
+        // Super admin only
+        $routes->post('admin/tenants/(:num)/extend-trial',
+            'Billing\BillingController::extendTrial/$1');
+        $routes->post('admin/tenants/(:num)/feature-override',
+            'Billing\BillingController::featureOverride/$1');
+
+        // ─── SaaS / S2.1 — Deep health (super admin) ───────────────
+        $routes->get('health/deep', 'System\HealthController::deep');
+
+        // ─── SaaS / S3.5 — Admin Console (super admin) ─────────────
+        // Console internal Quantara untuk manage tenant + support
+        $routes->get('admin/tenants',                          'Admin\AdminTenantController::index');
+        $routes->get('admin/tenants/(:num)',                   'Admin\AdminTenantController::show/$1');
+        $routes->post('admin/tenants/(:num)/impersonate',      'Admin\AdminTenantController::impersonate/$1');
+        $routes->post('admin/tenants/(:num)/suspend',          'Admin\AdminTenantController::suspend/$1');
+        $routes->post('admin/tenants/(:num)/unsuspend',        'Admin\AdminTenantController::unsuspend/$1');
+        $routes->get('admin/metrics/saas',                     'Admin\AdminTenantController::saasMetrics');
+
+        // ─── SaaS / S2.3 — Tenant Data Export (UU PDP / GDPR) ──────
+        // Self-service tenant: HR admin request export semua data company.
+        // Async generation; download link signed token (lihat public route
+        // /data-exports/download di luar JWT group).
+        $routes->post('companies/me/data-exports',             'Backup\DataExportController::create',
+            ['filter' => 'throttle:export']);
+        $routes->get('companies/me/data-exports',              'Backup\DataExportController::index');
+        $routes->get('companies/me/data-exports/(:num)',       'Backup\DataExportController::show/$1');
+
+        // ─── SaaS / S3.1 — White-Label Branding (ENTERPRISE plan) ──
+        // GET selalu allowed. PUT + verify-domain butuh feature
+        // `white_label.enabled`. Audit log severity HIGH (publik surface).
+        $routes->get('companies/me/branding',                  'WhiteLabel\BrandingController::show');
+        $routes->put('companies/me/branding',                  'WhiteLabel\BrandingController::update');
+        $routes->post('companies/me/branding/verify-domain',   'WhiteLabel\BrandingController::verifyDomain');
+
+        // ─── SaaS / S3.4 — Customer Success Tooling ────────────────
+        // Onboarding progress + announcements + customer health score
+        $routes->get('onboarding/progress',                    'CustomerSuccess\CustomerSuccessController::progress');
+        $routes->post('onboarding/(:segment)/complete',        'CustomerSuccess\CustomerSuccessController::completeStep/$1');
+        $routes->get('announcements/unread',                   'CustomerSuccess\CustomerSuccessController::unreadAnnouncements');
+        $routes->post('announcements/(:num)/read',             'CustomerSuccess\CustomerSuccessController::markRead/$1');
+        $routes->get('companies/me/health-score',              'CustomerSuccess\CustomerSuccessController::myHealth');
+        // Super admin Quantara only
+        $routes->get('admin/cs/health-scores',                 'CustomerSuccess\CustomerSuccessController::adminHealthScores');
+        $routes->post('admin/cs/recompute/(:num)',             'CustomerSuccess\CustomerSuccessController::adminRecompute/$1');
 
         // ─── UU PDP (Sprint 4) — Data Subject Rights ───────────────
         // Self-service untuk hak akses, hak penghapusan, dan record consent.
@@ -1133,6 +1228,100 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('compensation/band-recommendations',     'System\Horizon4Controller::bandRecommendations');
         $routes->get('salary-benchmarks',                     'System\Horizon4Controller::listBenchmarks');
         $routes->post('salary-benchmarks',                    'System\Horizon4Controller::createBenchmark');
+
+        // ─── H3.4 — ERP Journal Integration ─────────────────────────
+        // Connection management (per company × provider)
+        $routes->get('erp/connections',                       'Erp\ErpJournalController::listConnections');
+        $routes->post('erp/connections',                      'Erp\ErpJournalController::createConnection');
+        $routes->put('erp/connections/(:num)',                'Erp\ErpJournalController::updateConnection/$1');
+        $routes->delete('erp/connections/(:num)',             'Erp\ErpJournalController::deleteConnection/$1');
+        $routes->post('erp/connections/(:num)/test',          'Erp\ErpJournalController::testConnection/$1');
+
+        // COA mapping per cost_center × account_type
+        $routes->get('erp/mappings',                          'Erp\ErpJournalController::listMappings');
+        $routes->post('erp/mappings',                         'Erp\ErpJournalController::createMapping');
+        $routes->put('erp/mappings/(:num)',                   'Erp\ErpJournalController::updateMapping/$1');
+        $routes->delete('erp/mappings/(:num)',                'Erp\ErpJournalController::deleteMapping/$1');
+
+        // Journal exports (preview, persist, post, reverse, download CSV)
+        $routes->get('erp/journal-exports',                   'Erp\ErpJournalController::listExports');
+        $routes->post('erp/journal-exports/preview',          'Erp\ErpJournalController::previewExport');
+        $routes->post('erp/journal-exports',                  'Erp\ErpJournalController::createExport');
+        $routes->get('erp/journal-exports/(:num)',            'Erp\ErpJournalController::showExport/$1');
+        $routes->get('erp/journal-exports/(:num)/csv',        'Erp\ErpJournalController::downloadCsv/$1', ['filter' => 'throttle:export']);
+        $routes->post('erp/journal-exports/(:num)/post',      'Erp\ErpJournalController::postExport/$1');
+        $routes->post('erp/journal-exports/(:num)/reverse',   'Erp\ErpJournalController::reverseExport/$1');
+
+        // ─── H3.7 — Digital Signing PSrE ────────────────────────────
+        // Provider config (PrivyID/Vida/Peruri/MOCK_DEV)
+        $routes->get('signing/providers',                     'Signing\SigningController::listProviders');
+        $routes->post('signing/providers',                    'Signing\SigningController::createProvider');
+        $routes->put('signing/providers/(:num)',              'Signing\SigningController::updateProvider/$1');
+        $routes->delete('signing/providers/(:num)',           'Signing\SigningController::deleteProvider/$1');
+
+        // Envelope lifecycle
+        $routes->get('signing/envelopes',                     'Signing\SigningController::listEnvelopes');
+        $routes->post('signing/envelopes',                    'Signing\SigningController::createEnvelope');
+        $routes->get('signing/envelopes/(:num)',              'Signing\SigningController::showEnvelope/$1');
+        $routes->post('signing/envelopes/(:num)/signers',     'Signing\SigningController::addSigner/$1');
+        $routes->post('signing/envelopes/(:num)/send',        'Signing\SigningController::send/$1');
+        $routes->post('signing/envelopes/(:num)/cancel',      'Signing\SigningController::cancel/$1');
+        $routes->post('signing/envelopes/(:num)/wet-sign',    'Signing\SigningController::wetSignFallback/$1',
+            ['filter' => 'sameorigin']);
+        $routes->get('signing/envelopes/(:num)/audit',        'Signing\SigningController::audit/$1');
+        // Callback PSrE (production via webhook + HMAC; dev via direct call)
+        $routes->post('signing/envelopes/(:num)/signers/(:num)/event',
+            'Signing\SigningController::recordSignerEvent/$1/$2');
+
+        // ─── H3.8 — Open API & Developer Portal ─────────────────────
+        $routes->get('api-scopes',                            'Api\ApiKeyController::listScopes');
+        $routes->get('api-keys',                              'Api\ApiKeyController::listKeys');
+        $routes->post('api-keys',                             'Api\ApiKeyController::createKey');
+        $routes->get('api-keys/(:num)',                       'Api\ApiKeyController::showKey/$1');
+        $routes->post('api-keys/(:num)/rotate',               'Api\ApiKeyController::rotateKey/$1');
+        $routes->post('api-keys/(:num)/revoke',               'Api\ApiKeyController::revokeKey/$1');
+        $routes->get('api-keys/(:num)/usage',                 'Api\ApiKeyController::usage/$1');
+
+        // ─── Project Timesheet (jasa profesional / konsultan) ────────
+        // Project master + assignments. burn-rate harus di atas /(:num)
+        // generic agar tidak nyangkut sebagai resource id.
+        $routes->get('projects/(:num)/burn-rate',             'Timesheet\ProjectController::burnRate/$1');
+        $routes->get('projects/(:num)/assignments',           'Timesheet\ProjectController::listAssignments/$1');
+        $routes->post('projects/(:num)/assignments',          'Timesheet\ProjectController::createAssignment/$1');
+        $routes->get('projects',                              'Timesheet\ProjectController::index');
+        $routes->post('projects',                             'Timesheet\ProjectController::create');
+        $routes->get('projects/(:num)',                       'Timesheet\ProjectController::show/$1');
+        $routes->put('projects/(:num)',                       'Timesheet\ProjectController::update/$1');
+        $routes->delete('projects/(:num)',                    'Timesheet\ProjectController::delete/$1');
+        $routes->put('project-assignments/(:num)',            'Timesheet\ProjectController::updateAssignment/$1');
+        $routes->delete('project-assignments/(:num)',         'Timesheet\ProjectController::deleteAssignment/$1');
+
+        // Timesheet entries — endpoint khusus didahulukan
+        $routes->get('timesheet/my',                          'Timesheet\TimesheetController::my');
+        $routes->get('timesheet/utilization',                 'Timesheet\TimesheetController::utilization');
+        $routes->get('timesheet',                             'Timesheet\TimesheetController::index');
+        $routes->post('timesheet',                            'Timesheet\TimesheetController::upsert');
+        $routes->post('timesheet/(:num)/submit',              'Timesheet\TimesheetController::submit/$1');
+        $routes->post('timesheet/(:num)/approve',             'Timesheet\TimesheetController::approve/$1');
+        $routes->post('timesheet/(:num)/reject',              'Timesheet\TimesheetController::reject/$1');
+
+        // ─── License & Certification Expiry Tracker ─────────────────
+        // Master license types per company
+        $routes->get('license-types',                         'License\LicenseController::listTypes');
+        $routes->post('license-types',                        'License\LicenseController::createType');
+        $routes->put('license-types/(:num)',                  'License\LicenseController::updateType/$1');
+        $routes->delete('license-types/(:num)',               'License\LicenseController::deleteType/$1');
+
+        // Karyawan ↔ license — endpoint khusus didahulukan
+        $routes->get('licenses/expiring-dashboard',           'License\LicenseController::expiringDashboard');
+        $routes->post('licenses/scan-now',                    'License\LicenseController::scanNow');
+        $routes->get('employees/(:num)/license-compliance',   'License\LicenseController::compliance/$1');
+        $routes->get('employee-licenses',                     'License\LicenseController::listLicenses');
+        $routes->post('employee-licenses',                    'License\LicenseController::createLicense');
+        $routes->get('employee-licenses/(:num)',              'License\LicenseController::showLicense/$1');
+        $routes->put('employee-licenses/(:num)',              'License\LicenseController::updateLicense/$1');
+        $routes->post('employee-licenses/(:num)/renew',       'License\LicenseController::renewLicense/$1');
+        $routes->post('employee-licenses/(:num)/revoke',      'License\LicenseController::revokeLicense/$1');
     });
 });
 

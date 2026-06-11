@@ -33,6 +33,30 @@ class Database extends Config
         'busyTimeout'  => 1000,
     ];
 
+    public array $replica = [
+        'DSN'          => '',
+        'hostname'     => 'localhost',
+        'username'     => 'root',
+        'password'     => '',
+        'database'     => 'hris_db',
+        'DBDriver'     => 'MySQLi',
+        'DBPrefix'     => '',
+        'pConnect'     => false,
+        'DBDebug'      => false,
+        'charset'      => 'utf8mb4',
+        'DBCollat'     => 'utf8mb4_unicode_ci',
+        'swapPre'      => '',
+        'encrypt'      => false,
+        'compress'     => false,
+        'strictOn'     => true,
+        'failover'     => [],
+        'port'         => 3306,
+        'numberNative' => false,
+        'foundRows'    => false,
+        'foreignKeys'  => true,
+        'busyTimeout'  => 1000,
+    ];
+
     public array $tests = [
         'DSN'          => '',
         'hostname'     => '127.0.0.1',

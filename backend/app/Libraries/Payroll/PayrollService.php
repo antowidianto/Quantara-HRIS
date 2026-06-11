@@ -107,11 +107,23 @@ class PayrollService
             $bonusByEmp = [];
         }
 
+        // H1.12 — Lookup kompensasi PKWT yang akan jatuh tempo di
+        // periode ini (per PP 35/2021). Map: employee_id => earning entry.
+        // Persist ke `pkwt_compensation_paid` di-handle saat finalize().
+        try {
+            $pkwtByEmp = (new \App\Libraries\Lifecycle\PkwtCompensationService())
+                ->earningEntriesForPayrollPeriod($payrollPeriodId);
+        } catch (\Throwable $e) {
+            log_message('warning', 'PkwtCompensationService lookup failed: ' . $e->getMessage());
+            $pkwtByEmp = [];
+        }
+
         foreach ($employees as $emp) {
             $result = $this->calculateEmployee(
                 $emp, $period, $bpjsCalc, $pphCalc, $otCalc,
                 $workingDaysPerMonth, $overtimeHoursPerMonth, $absentDeductionEnabled,
                 $bonusByEmp[(int) $emp['id']] ?? null,
+                $pkwtByEmp[(int) $emp['id']] ?? null,
             );
             $totalGross     += $result['gross_earning'];
             $totalDeduction += $result['total_deduction'];
@@ -377,6 +389,9 @@ class PayrollService
      *        period ini. Kalau null/empty → tidak ada bonus untuk
      *        karyawan ini. Diteruskan oleh calculatePeriod() supaya
      *        DB query bonus hanya sekali (di luar loop employee).
+     * @param array{code:string,name:string,category:string,amount:float,is_taxable:int,contract_id:int}|null $pkwtInfo
+     *        H1.12 — entry kompensasi PKWT yang akan dibayarkan di
+     *        period ini (jika kontrak PKWT karyawan jatuh tempo).
      */
     private function calculateEmployee(
         array $emp,
@@ -388,6 +403,7 @@ class PayrollService
         int $overtimeHoursPerMonth = 173,
         bool $absentDeductionEnabled = true,
         ?array $bonusInfo = null,
+        ?array $pkwtInfo = null,
     ): array {
         $db = \Config\Database::connect();
         $companyId = (int) $period['company_id'];
@@ -401,10 +417,27 @@ class PayrollService
             $earnings[] = ['code' => 'BASIC', 'name' => 'Gaji Pokok', 'category' => 'BASIC', 'amount' => $basicSalary, 'is_taxable' => 1];
         }
 
-        // Recurring components
-        $recurring = $db->table('employee_payroll_components epc')
-            ->select('epc.amount, c.code, c.name, c.type, c.category, c.is_taxable')
-            ->join('payroll_components c', 'c.id = epc.component_id')
+        // Recurring components.
+        //
+        // H2.10 — Pajak Natura (PMK 66/2023): LEFT JOIN allowance_types
+        // untuk men-detect kalau payroll_component ini sebenarnya
+        // representasi natura/kenikmatan. Detection: payroll_components
+        // dirujuk dari allowance_types.payroll_component_id.
+        // Bila `is_taxable_natura=1` → item ditandai is_natura supaya
+        // diperlakukan: (a) tetap menambah Gross Taxable PPh21 di atas
+        // ambang batas tahunan, (b) tidak menambah cash Take Home Pay.
+        $hasNaturaCols = $db->fieldExists('is_taxable_natura', 'allowance_types');
+
+        $recBuilder = $db->table('employee_payroll_components epc')
+            ->select('epc.amount, c.code, c.name, c.type, c.category, c.is_taxable'
+                . ($hasNaturaCols
+                    ? ', at.is_taxable_natura AS is_natura, at.natura_tax_threshold AS natura_threshold_yearly'
+                    : ''))
+            ->join('payroll_components c', 'c.id = epc.component_id');
+        if ($hasNaturaCols) {
+            $recBuilder->join('allowance_types at', 'at.payroll_component_id = c.id', 'left');
+        }
+        $recurring = $recBuilder
             ->where('epc.employee_id', $emp['id'])
             ->where('c.is_active', 1)
             ->where('epc.effective_from <=', $period['end_date'])
@@ -417,7 +450,25 @@ class PayrollService
 
         foreach ($recurring as $r) {
             if ($r['type'] === 'EARNING') {
-                $earnings[] = ['code' => $r['code'], 'name' => $r['name'], 'category' => $r['category'], 'amount' => (float) $r['amount'], 'is_taxable' => (int) $r['is_taxable']];
+                $entry = [
+                    'code'       => $r['code'],
+                    'name'       => $r['name'],
+                    'category'   => $r['category'],
+                    'amount'     => (float) $r['amount'],
+                    'is_taxable' => (int) $r['is_taxable'],
+                ];
+                if ((int) ($r['is_natura'] ?? 0) === 1) {
+                    // Apply ambang batas natura via pure helper
+                    // (NaturaTaxCalculator). Logic taxability per
+                    // PMK 66/2023 di-extract supaya bisa unit tested.
+                    $entry = NaturaTaxCalculator::buildEntry(
+                        $entry,
+                        (float) ($r['natura_threshold_yearly'] ?? 0),
+                    );
+                } else {
+                    $entry['is_natura'] = 0;
+                }
+                $earnings[] = $entry;
             } else {
                 $deductions[] = ['code' => $r['code'], 'name' => $r['name'], 'category' => $r['category'], 'amount' => (float) $r['amount'], 'is_taxable' => (int) $r['is_taxable']];
             }
@@ -546,6 +597,24 @@ class PayrollService
             $bonusTotal += (float) $entry['amount'];
         }
 
+        // ─── Kompensasi PKWT (H1.12 — PP 35/2021) ───────────────────
+        // Bila kontrak PKWT karyawan jatuh tempo di periode ini,
+        // sisipkan earning "Kompensasi PKWT" sebagai bagian dari Gross.
+        // Status `pkwt_compensation_paid=1` di-flag saat finalize().
+        $pkwtCompensationAmount = 0.0;
+        $pkwtContractId = null;
+        if (is_array($pkwtInfo) && (float) ($pkwtInfo['amount'] ?? 0) > 0) {
+            $earnings[] = [
+                'code'       => $pkwtInfo['code'] ?? 'PKWT_COMP',
+                'name'       => $pkwtInfo['name'] ?? 'Kompensasi PKWT',
+                'category'   => $pkwtInfo['category'] ?? 'BONUS',
+                'amount'     => (float) $pkwtInfo['amount'],
+                'is_taxable' => (int) ($pkwtInfo['is_taxable'] ?? 1),
+            ];
+            $pkwtCompensationAmount = (float) $pkwtInfo['amount'];
+            $pkwtContractId = (int) ($pkwtInfo['contract_id'] ?? 0);
+        }
+
         // ─── Absent deduction (proportional) ────────────────────────
         // Sprint 5-6 — workingDaysPerMonth dari setting per-company,
         // default 22. Bisa di-disable lewat setting `payroll.absent_deduction_enabled=0`.
@@ -556,13 +625,20 @@ class PayrollService
             $deductions[] = ['code' => 'ABSENT', 'name' => 'Potongan Absen', 'category' => 'OTHER', 'amount' => $absentDeduction, 'is_taxable' => 0];
         }
 
-        // ─── Compute gross taxable / non-taxable ─────────────────────
-        $grossTaxable = 0;
-        $grossEarning = 0;
-        foreach ($earnings as $e) {
-            $grossEarning += $e['amount'];
-            if ($e['is_taxable']) $grossTaxable += $e['amount'];
-        }
+        // ─── Compute gross / cash / taxable split via pure helper ───
+        //
+        // H2.10 — `NaturaTaxCalculator::aggregate` mengembalikan tuple
+        // (grossEarning, cashEarning, grossTaxable, naturaTotal) yang
+        // sesuai PMK 66/2023:
+        //   - `grossEarning` (basis SPT 1721) = SEMUA earning incl natura
+        //   - `cashEarning` (basis THP)       = earning kecuali natura
+        //   - `grossTaxable` (basis PPh21)    = pakai natura_tax_base
+        //                                       (sudah di-apply threshold)
+        $agg = NaturaTaxCalculator::aggregate($earnings);
+        $grossEarning = $agg['gross_earning'];
+        $cashEarning  = $agg['cash_earning'];
+        $grossTaxable = $agg['gross_taxable'];
+        $naturaTotal  = $agg['natura_total'];
 
         // ─── BPJS ────────────────────────────────────────────────────
         $bpjs = $bpjsCalc->calculate($companyId, $basicSalary, $fixedAllowance);
@@ -621,9 +697,12 @@ class PayrollService
         }
 
         // ─── Totals ─────────────────────────────────────────────────
+        // H2.10 — Take Home Pay cash = cashEarning - totalDeduction
+        // (natura tidak ikut dibayar tunai). grossEarning tetap di
+        // payslip untuk dasar pelaporan SPT 1721.
         $totalDeduction = 0;
         foreach ($deductions as $d) $totalDeduction += $d['amount'];
-        $takeHome = $grossEarning - $totalDeduction;
+        $takeHome = $cashEarning - $totalDeduction;
 
         // ─── Persist payslip ────────────────────────────────────────
         $slipNumber = 'PS-' . $period['code'] . '-' . str_pad((string) $emp['id'], 5, '0', STR_PAD_LEFT);
@@ -699,8 +778,9 @@ class PayrollService
         // Insert details
         $sort = 0;
         $details = [];
+        $payslipDetailsHasNatura = $db->fieldExists('is_natura', 'payslip_details');
         foreach ($earnings as $e) {
-            $details[] = [
+            $row = [
                 'payslip_id' => $payslipId,
                 'code'       => $e['code'],
                 'name'       => $e['name'],
@@ -710,6 +790,10 @@ class PayrollService
                 'is_taxable' => $e['is_taxable'],
                 'sort_order' => $sort++,
             ];
+            if ($payslipDetailsHasNatura) {
+                $row['is_natura'] = (int) ($e['is_natura'] ?? 0);
+            }
+            $details[] = $row;
         }
         foreach ($deductions as $d) {
             $details[] = [
@@ -807,6 +891,34 @@ class PayrollService
 
                 $remainingDeduction -= $apply;
             }
+        }
+
+        // H1.12 — Tandai kompensasi PKWT yang dibayarkan di period ini.
+        // PkwtCompensationService.markPaid() idempotent: hanya kontrak
+        // yang masih `pkwt_compensation_paid=0` & end_date dalam range
+        // periode ini akan di-flag.
+        try {
+            $pkwtSvc = new \App\Libraries\Lifecycle\PkwtCompensationService();
+            if ($db->fieldExists('pkwt_compensation_paid', 'employee_contracts')) {
+                $expiringPkwt = $db->table('employee_contracts')
+                    ->select('id, employee_id, end_date')
+                    ->where('contract_type', 'PKWT')
+                    ->where('end_date >=', $period['start_date'])
+                    ->where('end_date <=', $period['end_date'])
+                    ->groupStart()
+                        ->where('pkwt_compensation_paid', 0)
+                        ->orWhere('pkwt_compensation_paid IS NULL')
+                    ->groupEnd()
+                    ->get()->getResultArray();
+                foreach ($expiringPkwt as $row) {
+                    $calc = $pkwtSvc->compensationForContract((int) $row['id']);
+                    if ($calc['amount'] > 0) {
+                        $pkwtSvc->markPaid((int) $row['id'], $payrollPeriodId, (float) $calc['amount']);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            log_message('warning', 'PkwtCompensationService.markPaid failed: ' . $e->getMessage());
         }
 
         $db->table('payroll_periods')->where('id', $payrollPeriodId)->update([
