@@ -71,109 +71,133 @@
       </div>
     </div>
 
-    <!-- Apply Modal -->
-    <ModalBasic :isOpen="showApplyModal" @close="showApplyModal = false" title="Ajukan Kasbon Baru">
-      <div class="px-5 py-4">
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium mb-1">Nominal (Rp) <span class="text-rose-500">*</span></label>
-            <input v-model="form.principal" type="number" class="form-input w-full" placeholder="Contoh: 1000000" />
+    <!-- Apply Modal Custom -->
+    <div v-if="showApplyModal" class="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden overflow-y-auto outline-none focus:outline-none">
+      <div class="relative w-auto max-w-lg mx-auto my-6">
+        <div class="relative flex flex-col w-full bg-white border-0 rounded-lg shadow-lg outline-none focus:outline-none dark:bg-slate-800">
+          <div class="flex items-start justify-between p-5 border-b border-solid rounded-t border-slate-200 dark:border-slate-700">
+            <h3 class="text-xl font-semibold dark:text-slate-100">Ajukan Kasbon Baru</h3>
+            <button class="p-1 ml-auto bg-transparent border-0 text-black dark:text-white float-right text-3xl leading-none font-semibold outline-none focus:outline-none" @click="showApplyModal = false">
+              <span class="text-black dark:text-white h-6 w-6 text-2xl block outline-none focus:outline-none">×</span>
+            </button>
           </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">Tenor Cicilan (Bulan) <span class="text-rose-500">*</span></label>
-            <select v-model="form.installments" class="form-select w-full">
-              <option value="1">1 Bulan</option>
-              <option value="2">2 Bulan</option>
-              <option value="3">3 Bulan</option>
-              <option value="6">6 Bulan</option>
-              <option value="12">12 Bulan</option>
-            </select>
+          <div class="relative p-6 flex-auto">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium mb-1 dark:text-slate-300">Nominal (Rp) <span class="text-rose-500">*</span></label>
+                <input v-model="form.principal" type="number" class="form-input w-full dark:bg-slate-900 dark:border-slate-600" placeholder="Contoh: 1000000" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1 dark:text-slate-300">Tenor Cicilan (Bulan) <span class="text-rose-500">*</span></label>
+                <select v-model="form.installments" class="form-select w-full dark:bg-slate-900 dark:border-slate-600">
+                  <option value="1">1 Bulan</option>
+                  <option value="2">2 Bulan</option>
+                  <option value="3">3 Bulan</option>
+                  <option value="6">6 Bulan</option>
+                  <option value="12">12 Bulan</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1 dark:text-slate-300">Alasan Pengajuan <span class="text-rose-500">*</span></label>
+                <textarea v-model="form.reason" class="form-textarea w-full dark:bg-slate-900 dark:border-slate-600" rows="3" placeholder="Jelaskan kebutuhan secara singkat..."></textarea>
+              </div>
+              
+              <div class="bg-amber-50 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 p-3 rounded text-sm mt-4">
+                <strong>Catatan:</strong> Bunga pinjaman flat dikenakan sesuai ketentuan perusahaan. Nominal cicilan dapat dilihat setelah pengajuan atau dengan menghubungi HR.
+              </div>
+            </div>
           </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">Alasan Pengajuan <span class="text-rose-500">*</span></label>
-            <textarea v-model="form.reason" class="form-textarea w-full" rows="3" placeholder="Jelaskan kebutuhan secara singkat..."></textarea>
-          </div>
-          
-          <div class="bg-amber-50 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 p-3 rounded text-sm mt-4">
-            <strong>Catatan:</strong> Bunga pinjaman flat dikenakan sesuai ketentuan perusahaan. Nominal cicilan dapat dilihat setelah pengajuan atau dengan menghubungi HR.
+          <div class="flex items-center justify-end p-6 border-t border-solid rounded-b border-slate-200 dark:border-slate-700 space-x-2">
+            <button class="btn-sm border-slate-200 hover:border-slate-300 text-slate-600 dark:text-slate-300 dark:border-slate-600 dark:hover:border-slate-500" @click="showApplyModal = false">Batal</button>
+            <button class="btn-sm bg-indigo-500 hover:bg-indigo-600 text-white" @click="submitLoan" :disabled="loading">
+              {{ loading ? 'Mengajukan...' : 'Ajukan' }}
+            </button>
           </div>
         </div>
       </div>
-      <div class="px-5 py-4 border-t border-slate-200 dark:border-slate-700 flex flex-wrap justify-end space-x-2">
-        <button class="btn-sm border-slate-200 hover:border-slate-300 text-slate-600" @click="showApplyModal = false">Batal</button>
-        <button class="btn-sm bg-indigo-500 hover:bg-indigo-600 text-white" @click="submitLoan" :disabled="loading">
-          {{ loading ? 'Mengajukan...' : 'Ajukan' }}
-        </button>
-      </div>
-    </ModalBasic>
+    </div>
+    <div v-if="showApplyModal" class="fixed inset-0 z-40 bg-black opacity-25"></div>
 
-    <!-- Detail Modal -->
-    <ModalBasic :isOpen="showDetailModal" @close="showDetailModal = false" title="Detail Pinjaman">
-      <div class="px-5 py-4" v-if="selectedLoan">
-        <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
-          <div>
-            <span class="block text-slate-500">Nomor Pinjaman:</span>
-            <span class="font-medium">{{ selectedLoan.loan_number }}</span>
+    <!-- Detail Modal Custom -->
+    <div v-if="showDetailModal" class="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden overflow-y-auto outline-none focus:outline-none">
+      <div class="relative w-auto max-w-2xl mx-auto my-6">
+        <div class="relative flex flex-col w-full bg-white border-0 rounded-lg shadow-lg outline-none focus:outline-none dark:bg-slate-800">
+          <div class="flex items-start justify-between p-5 border-b border-solid rounded-t border-slate-200 dark:border-slate-700">
+            <h3 class="text-xl font-semibold dark:text-slate-100">Detail Pinjaman</h3>
+            <button class="p-1 ml-auto bg-transparent border-0 text-black dark:text-white float-right text-3xl leading-none font-semibold outline-none focus:outline-none" @click="showDetailModal = false">
+              <span class="text-black dark:text-white h-6 w-6 text-2xl block outline-none focus:outline-none">×</span>
+            </button>
           </div>
-          <div>
-            <span class="block text-slate-500">Status:</span>
-            <span class="font-medium" :class="statusColor(selectedLoan.status)">{{ selectedLoan.status }}</span>
+          <div class="relative p-6 flex-auto" v-if="selectedLoan">
+            <div class="grid grid-cols-2 gap-4 mb-4 text-sm dark:text-slate-200">
+              <div>
+                <span class="block text-slate-500">Nomor Pinjaman:</span>
+                <span class="font-medium">{{ selectedLoan.loan_number }}</span>
+              </div>
+              <div>
+                <span class="block text-slate-500">Status:</span>
+                <span class="font-medium" :class="statusColor(selectedLoan.status)">{{ selectedLoan.status }}</span>
+              </div>
+              <div>
+                <span class="block text-slate-500">Plafon Pinjaman:</span>
+                <span class="font-medium">{{ formatRupiah(selectedLoan.principal) }}</span>
+              </div>
+              <div>
+                <span class="block text-slate-500">Total + Bunga:</span>
+                <span class="font-medium">{{ formatRupiah(selectedLoan.total_amount) }}</span>
+              </div>
+              <div>
+                <span class="block text-slate-500">Cicilan per Bulan:</span>
+                <span class="font-medium">{{ formatRupiah(selectedLoan.installment_amount) }} ({{ selectedLoan.installments }}x)</span>
+              </div>
+              <div>
+                <span class="block text-slate-500">Sisa Pembayaran:</span>
+                <span class="font-medium text-rose-500">{{ formatRupiah(selectedLoan.remaining) }}</span>
+              </div>
+            </div>
+            
+            <h3 class="font-semibold text-slate-800 dark:text-slate-100 mb-2 mt-6">Jadwal Cicilan</h3>
+            <div class="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded">
+              <table class="table-auto w-full text-sm">
+                <thead class="bg-slate-50 dark:bg-slate-900/20 text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th class="px-2 py-2 text-left">Bulan Ke</th>
+                    <th class="px-2 py-2 text-left">Jatuh Tempo</th>
+                    <th class="px-2 py-2 text-right">Nominal</th>
+                    <th class="px-2 py-2 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200 dark:divide-slate-700 dark:text-slate-300">
+                  <tr v-for="inst in installments" :key="inst.id">
+                    <td class="px-2 py-2">{{ inst.installment_number }}</td>
+                    <td class="px-2 py-2">{{ formatDate(inst.due_date) }}</td>
+                    <td class="px-2 py-2 text-right">{{ formatRupiah(inst.amount) }}</td>
+                    <td class="px-2 py-2 text-center">
+                      <span v-if="inst.status === 'PAID'" class="text-emerald-500">Lunas</span>
+                      <span v-else class="text-slate-500">Belum Dibayar</span>
+                    </td>
+                  </tr>
+                  <tr v-if="installments.length === 0">
+                    <td colspan="4" class="px-2 py-2 text-center text-slate-500">Jadwal belum tersedia (menunggu approval)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div>
-            <span class="block text-slate-500">Plafon Pinjaman:</span>
-            <span class="font-medium">{{ formatRupiah(selectedLoan.principal) }}</span>
+          <div class="flex items-center justify-end p-6 border-t border-solid rounded-b border-slate-200 dark:border-slate-700 space-x-2">
+            <button class="btn-sm border-slate-200 hover:border-slate-300 text-slate-600 dark:text-slate-300 dark:border-slate-600 dark:hover:border-slate-500" @click="showDetailModal = false">Tutup</button>
           </div>
-          <div>
-            <span class="block text-slate-500">Total + Bunga:</span>
-            <span class="font-medium">{{ formatRupiah(selectedLoan.total_amount) }}</span>
-          </div>
-          <div>
-            <span class="block text-slate-500">Cicilan per Bulan:</span>
-            <span class="font-medium">{{ formatRupiah(selectedLoan.installment_amount) }} ({{ selectedLoan.installments }}x)</span>
-          </div>
-          <div>
-            <span class="block text-slate-500">Sisa Pembayaran:</span>
-            <span class="font-medium text-rose-500">{{ formatRupiah(selectedLoan.remaining) }}</span>
-          </div>
-        </div>
-        
-        <h3 class="font-semibold text-slate-800 dark:text-slate-100 mb-2 mt-6">Jadwal Cicilan</h3>
-        <div class="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded">
-          <table class="table-auto w-full text-sm">
-            <thead class="bg-slate-50 dark:bg-slate-900/20 text-slate-500 dark:text-slate-400">
-              <tr>
-                <th class="px-2 py-2 text-left">Bulan Ke</th>
-                <th class="px-2 py-2 text-left">Jatuh Tempo</th>
-                <th class="px-2 py-2 text-right">Nominal</th>
-                <th class="px-2 py-2 text-center">Status</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
-              <tr v-for="inst in installments" :key="inst.id">
-                <td class="px-2 py-2">{{ inst.installment_number }}</td>
-                <td class="px-2 py-2">{{ formatDate(inst.due_date) }}</td>
-                <td class="px-2 py-2 text-right">{{ formatRupiah(inst.amount) }}</td>
-                <td class="px-2 py-2 text-center">
-                  <span v-if="inst.status === 'PAID'" class="text-emerald-500">Lunas</span>
-                  <span v-else class="text-slate-500">Belum Dibayar</span>
-                </td>
-              </tr>
-              <tr v-if="installments.length === 0">
-                <td colspan="4" class="px-2 py-2 text-center text-slate-500">Jadwal belum tersedia (menunggu approval)</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
-    </ModalBasic>
+    </div>
+    <div v-if="showDetailModal" class="fixed inset-0 z-40 bg-black opacity-25"></div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import loanApi from '@/api/loan'
-import ModalBasic from '@/components/ModalBasic.vue'
-import { formatRupiah, formatDate } from '@/utils/formatter'
+import { fmtCurrency as formatRupiah, fmtDate as formatDate } from '@/composables/useResource'
 import { useToast } from 'vue-toastification'
 
 const toast = useToast()

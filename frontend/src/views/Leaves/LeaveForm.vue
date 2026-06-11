@@ -251,6 +251,9 @@ async function submit() {
             <optgroup :label="t('leave.form.group_available')">
               <option v-for="lt in eligibleTypes" :key="lt.id" :value="lt.id">
                 {{ lt.name }} ({{ categoryLabel[lt.category] || lt.category }})
+                <template v-if="lt.gender_restriction === 'F'"> ♀</template>
+                <template v-else-if="lt.gender_restriction === 'M'"> ♂</template>
+                <template v-if="lt.is_system_mandatory"> · wajib terbayar</template>
                 <template v-if="lt.balance">{{ t('leave.form.balance_remaining', { remaining: lt.balance.remaining, allocated: lt.balance.allocated }) }}</template>
               </option>
             </optgroup>
@@ -273,6 +276,22 @@ async function submit() {
               <span v-if="selectedType.is_paid"
                 class="px-2 py-0.5 rounded-full bg-green-100 text-green-800">{{ t('leave.form.paid') }}</span>
               <span v-else class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{{ t('leave.form.unpaid') }}</span>
+              <!-- H1.11 — Penanda cuti wajib & gender restriction -->
+              <span v-if="selectedType.is_system_mandatory"
+                class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800"
+                title="Cuti wajib UU 13/2003 / UU KIA — tidak memotong saldo cuti tahunan">
+                Cuti Wajib · Tidak potong saldo
+              </span>
+              <span v-if="selectedType.gender_restriction === 'F'"
+                class="px-2 py-0.5 rounded-full bg-pink-100 text-pink-800"
+                title="Hanya untuk karyawan perempuan">
+                ♀ Khusus Perempuan
+              </span>
+              <span v-else-if="selectedType.gender_restriction === 'M'"
+                class="px-2 py-0.5 rounded-full bg-sky-100 text-sky-800"
+                title="Hanya untuk karyawan laki-laki">
+                ♂ Khusus Laki-laki
+              </span>
               <span v-if="selectedType.default_days"
                 class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
                 {{ t('leave.form.default_days', { n: selectedType.default_days }) }}

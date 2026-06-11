@@ -23,6 +23,8 @@ import {
   SunIcon, MoonIcon, ComputerDesktopIcon, LanguageIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
 import SidebarMenu from '@/components/menu/SidebarMenu.vue'
+import SubscriptionStatusBanner from '@/components/SubscriptionStatusBanner.vue'
+import AnnouncementsModal from '@/components/AnnouncementsModal.vue'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useI18n } from '@/locales'
 
@@ -348,12 +350,17 @@ watch(() => auth.user?.id, (newId, oldId) => {
       </header>
 
       <main class="flex-1 p-6">
+        <!-- S1.6 SaaS — Banner status subscription (PAST_DUE / SUSPENDED / EXPIRED / TRIAL ≤ 5d) -->
+        <SubscriptionStatusBanner class="-mx-6 -mt-6 mb-4" />
         <RouterView />
       </main>
     </div>
 
     <!-- Mobile overlay -->
     <div v-if="sidebarOpen" class="fixed inset-0 z-20 bg-black/30 lg:hidden" @click="sidebarOpen = false"></div>
+
+    <!-- S3.4 SaaS — "What's New" announcement modal (auto-mount, polling /announcements/unread) -->
+    <AnnouncementsModal />
   </div>
 </template>
 
