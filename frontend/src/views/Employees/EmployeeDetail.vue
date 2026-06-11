@@ -63,6 +63,37 @@ const totalAllocated = computed(() =>
 const totalRemaining = computed(() =>
   balances.value.reduce((sum, b) => sum + Number(b.remaining || 0), 0)
 )
+
+function isContractNearingEnd(endDate) {
+  if (!endDate) return false
+  const end = new Date(endDate)
+  const now = new Date()
+  const diffDays = Math.ceil((end - now) / (1000 * 60 * 60 * 24))
+  return diffDays >= 0 && diffDays <= 30
+}
+
+// H1.12 — PP 35/2021 Pasal 8: total durasi PKWT max 5 tahun (1825 hari)
+const PKWT_MAX_DAYS = 1825
+const PKWT_WARNING_THRESHOLD_DAYS = 1825 - 90 // alert ketika sisa < 90 hari
+
+function contractDays(c) {
+  if (!c.start_date || !c.end_date) return 0
+  const start = new Date(c.start_date).getTime()
+  const end = new Date(c.end_date).getTime()
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0
+  return Math.floor((end - start) / 86400000) + 1
+}
+
+const pkwtTotalDays = computed(() =>
+  contracts.value
+    .filter(c => (c.contract_type || '').toUpperCase() === 'PKWT')
+    .reduce((sum, c) => sum + contractDays(c), 0)
+)
+
+const pkwtRemainingDays = computed(() => Math.max(0, PKWT_MAX_DAYS - pkwtTotalDays.value))
+
+const pkwtNearLimit = computed(() => pkwtTotalDays.value >= PKWT_WARNING_THRESHOLD_DAYS)
+const pkwtExceeded = computed(() => pkwtTotalDays.value >= PKWT_MAX_DAYS)
 </script>
 
 <template>
@@ -176,7 +207,28 @@ const totalRemaining = computed(() =>
     </div>
 
     <div class="card mt-6">
-      <div class="card-header"><span class="font-semibold">{{ t('employees.detail.contract_history') }}</span></div>
+      <div class="card-header flex items-center justify-between">
+        <span class="font-semibold">{{ t('employees.detail.contract_history') }}</span>
+        <span v-if="pkwtTotalDays > 0" class="text-xs"
+              :class="pkwtExceeded ? 'text-red-600 font-semibold' : (pkwtNearLimit ? 'text-amber-600' : 'text-gray-500')">
+          PKWT akumulatif: {{ pkwtTotalDays }} / {{ PKWT_MAX_DAYS }} hari
+          (sisa {{ pkwtRemainingDays }} hari)
+        </span>
+      </div>
+
+      <!-- H1.12 — Banner alert kalau total durasi PKWT mendekati / melewati 5 tahun -->
+      <div v-if="pkwtExceeded"
+           class="mx-4 mt-3 mb-1 rounded border border-red-200 bg-red-50 text-red-700 text-sm px-3 py-2">
+        <strong>Total kontrak PKWT karyawan sudah mencapai/melewati batas 5 tahun (1.825 hari)
+        sesuai PP 35/2021 Pasal 8.</strong>
+        Perpanjangan PKWT berikutnya akan ditolak sistem. Disarankan susun draft PKWTT.
+      </div>
+      <div v-else-if="pkwtNearLimit"
+           class="mx-4 mt-3 mb-1 rounded border border-amber-200 bg-amber-50 text-amber-700 text-sm px-3 py-2">
+        Akumulasi durasi PKWT karyawan ini mendekati batas 5 tahun (PP 35/2021).
+        Sisa hari yang masih bisa diperpanjang: <strong>{{ pkwtRemainingDays }} hari</strong>.
+      </div>
+
       <div class="overflow-x-auto">
         <table class="table">
           <thead><tr>
@@ -190,7 +242,14 @@ const totalRemaining = computed(() =>
             <tr v-if="contracts.length === 0"><td colspan="5" class="text-center py-4 text-gray-400">{{ t('employees.detail.no_contracts') }}</td></tr>
             <tr v-for="c in contracts" :key="c.id">
               <td>{{ c.contract_number }}</td>
-              <td><span class="badge-blue">{{ c.contract_type }}</span></td>
+              <td>
+                <span class="badge-blue">{{ c.contract_type }}</span>
+                <span v-if="isContractNearingEnd(c.end_date)" class="ml-1 badge-yellow">jatuh tempo (≤ 30 hari)</span>
+                <span v-if="(c.contract_type || '').toUpperCase() === 'PKWT' && c.pkwt_compensation_paid"
+                      class="ml-1 badge-green" title="Kompensasi PKWT sudah dibayarkan">
+                  Kompensasi: {{ fmtCurrency(c.pkwt_compensation_amount) }}
+                </span>
+              </td>
               <td>{{ fmtDate(c.start_date) }}</td>
               <td>{{ fmtDate(c.end_date) }}</td>
               <td>{{ fmtCurrency(c.basic_salary) }}</td>

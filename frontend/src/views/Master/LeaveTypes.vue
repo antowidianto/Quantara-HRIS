@@ -36,6 +36,12 @@ const fields = computed(() => [
     { value: 'M',   label: t('master.leave_types.male') },
     { value: 'F',   label: t('master.leave_types.female') },
   ]},
+  // H1.11 — Cuti Wajib (UU 13/2003 & UU KIA): tipe yang ditandai
+  // mandatory tidak memotong saldo cuti tahunan dan tidak masuk
+  // perhitungan carry-over cap. Contoh: cuti haid, melahirkan,
+  // ayah/istri melahirkan, alasan penting (UU 13/2003 Pasal 81-82).
+  { key: 'is_system_mandatory', label: 'Cuti Wajib (Tidak potong saldo cuti tahunan)', type: 'number',
+    hint: '1 = ya (UU 13/2003 / UU KIA), 0 = tidak' },
   { key: 'description', label: t('master.common.description'), type: 'textarea' },
 ])
 </script>

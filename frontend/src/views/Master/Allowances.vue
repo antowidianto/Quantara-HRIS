@@ -48,6 +48,9 @@ function blankType() {
     default_threshold_km: 30,
     payroll_component_id: null,
     is_active: 1,
+    // H2.10 — PMK 66/2023 Natura/Kenikmatan
+    is_taxable_natura: 0,
+    natura_tax_threshold: null,
   }
 }
 function blankRate() {
@@ -374,6 +377,32 @@ async function recomputeAll() {
             <input v-model.number="typeForm.default_threshold_km" type="number" min="0" step="0.5" class="input" />
             <p class="text-xs text-gray-500 mt-1">{{ t('master.allowances.f_default_threshold_hint') }}</p>
           </div>
+
+          <!-- H2.10 — Natura / Kenikmatan (PMK 66/2023) -->
+          <div class="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <label class="flex items-start gap-2">
+              <input type="checkbox" v-model="typeForm.is_taxable_natura"
+                     :true-value="1" :false-value="0" class="mt-1" />
+              <span>
+                <span class="font-medium">Natura / Kenikmatan (PMK 66/2023)</span>
+                <span class="block text-xs text-amber-800">
+                  Komponen non-tunai (mobil dinas, perumahan, gym, dll). Akan menambah
+                  basis Penghasilan Bruto PPh21 namun tidak menambah cash Take Home Pay.
+                </span>
+              </span>
+            </label>
+            <div v-if="typeForm.is_taxable_natura">
+              <label class="label text-xs">Ambang batas tahunan bebas pajak (Rp)</label>
+              <input v-model.number="typeForm.natura_tax_threshold" type="number"
+                     min="0" step="100000" class="input"
+                     placeholder="Contoh: 3000000 untuk paket sembako" />
+              <p class="text-xs text-amber-800 mt-1">
+                Kosongkan jika seluruh nilai natura langsung taxable. Threshold dipecah
+                proporsional bulanan saat perhitungan PPh21.
+              </p>
+            </div>
+          </div>
+
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="btn-secondary" @click="showTypeModal = false">{{ t('master.allowances.f_cancel') }}</button>
             <button type="submit" class="btn-primary">{{ t('master.allowances.f_save') }}</button>

@@ -6,6 +6,14 @@ const routes = [
   { path: '/forgot-password', name: 'forgot-password', component: () => import('@/views/ForgotPassword.vue'), meta: { guest: true } },
   { path: '/reset-password', name: 'reset-password', component: () => import('@/views/ResetPassword.vue'), meta: { guest: true } },
 
+  // S1.3 SaaS — Self-Service Tenant Signup (publik, no auth)
+  // Signup form + email verification handler. Verify route TIDAK pakai
+  // `meta.guest: true` karena setelah verify sukses kita auto-login user
+  // dan butuh redirect ke /onboarding (route auth required). Guest guard
+  // akan kick user yg sudah login ke dashboard sebelum verify selesai.
+  { path: '/signup',         name: 'signup',         component: () => import('@/views/Signup.vue'),       meta: { guest: true } },
+  { path: '/verify-email',   name: 'verify-email',   component: () => import('@/views/VerifyEmail.vue'),  meta: { public: true } },
+
   // ─── Public Career Portal (no auth) ─────────────────────────
   // Lihat docs/CAREER_PORTAL.md. Pelamar mengakses tanpa login.
   {
@@ -123,6 +131,11 @@ const routes = [
       // H3.6 Talent Marketplace — skills + internal job board + 9-box
       { path: 'hr/talent-marketplace', name: 'talent-marketplace', component: () => import('@/views/HR/TalentMarketplace.vue') },
 
+      // ─── Fase 4: Talent Management ───
+      { path: 'talent/review-360', name: 'talent-review-360', component: () => import('@/views/Talent/Review360.vue') },
+      { path: 'talent/nine-box', name: 'talent-nine-box', component: () => import('@/views/Talent/NineBox.vue') },
+      { path: 'talent/succession', name: 'talent-succession', component: () => import('@/views/Talent/SuccessionPlan.vue') },
+
       // ─── Horizon 4 (Sprint 19+ Platform Evolution) ───────────
       // H4.1 AI HR Copilot — chat assistant dengan PII redactor
       { path: 'hr/ai-copilot', name: 'ai-copilot', component: () => import('@/views/HR/AiCopilot.vue') },
@@ -132,6 +145,18 @@ const routes = [
       { path: 'hr/workforce-scenarios', name: 'workforce-scenarios', component: () => import('@/views/HR/WorkforceScenarios.vue') },
       // H4.5 Compensation Intelligence — compa-ratio, equity, bands, benchmarks
       { path: 'hr/compensation-intel', name: 'compensation-intel', component: () => import('@/views/HR/CompensationIntel.vue') },
+
+      // ─── Sprint 20 — Enterprise Readiness Modules ──────────────
+      // H3.4 ERP Journal Integration (Accurate / Zahir / Odoo / SAP / CSV)
+      { path: 'erp/journal',     name: 'erp-journal',     component: () => import('@/views/Erp/ErpJournalDashboard.vue') },
+      // H3.7 Digital Signing PSrE (PrivyID / Vida / Peruri)
+      { path: 'signing',         name: 'signing-envelopes', component: () => import('@/views/Signing/SigningEnvelopes.vue') },
+      // H3.8 Open API & Developer Portal
+      { path: 'developer/api-keys', name: 'api-keys',     component: () => import('@/views/Developer/ApiKeys.vue') },
+      // Project Timesheet (jasa profesional / konsultan / agency)
+      { path: 'timesheet',       name: 'timesheet',       component: () => import('@/views/Timesheet/TimesheetEntry.vue') },
+      // License & Certification Expiry Tracker (healthcare / EHS)
+      { path: 'licenses',        name: 'licenses',        component: () => import('@/views/License/LicenseDashboard.vue') },
 
       // ─── Tambahan Sprint 7-12 — Quick Wins polish & ESS ────
       // H1.9 WhatsApp Provider config (admin)
@@ -257,6 +282,21 @@ const routes = [
       { path: 'admin/companies', name: 'companies', component: () => import('@/views/Admin/Companies.vue') },
       { path: 'admin/settings', name: 'settings', component: () => import('@/views/Admin/Settings.vue') },
       { path: 'admin/email-settings', name: 'email-settings', component: () => import('@/views/Admin/EmailSettings.vue') },
+
+      // ─── Roadmap SaaS Phase 1-3 (S1.x..S3.5) ──────────────────────────────
+      // Tenant-facing: billing, branding, data export, onboarding
+      { path: 'billing/plan',          name: 'billing-plan',     component: () => import('@/views/Billing/BillingPlan.vue') },
+      { path: 'billing/usage',         name: 'billing-usage',    component: () => import('@/views/Billing/BillingUsage.vue') },
+      { path: 'settings/branding',     name: 'settings-branding', component: () => import('@/views/Settings/BrandingSettings.vue') },
+      { path: 'settings/data-export',  name: 'settings-data-export', component: () => import('@/views/Settings/DataExport.vue') },
+      { path: 'onboarding',            name: 'onboarding-wizard', component: () => import('@/views/Onboarding/OnboardingWizard.vue') },
+
+      // Quantara internal (super_admin) — SaaS console
+      { path: 'admin/tenants',         name: 'admin-tenants',    component: () => import('@/views/Admin/TenantList.vue') },
+      { path: 'admin/tenants/:id',     name: 'admin-tenant-detail', component: () => import('@/views/Admin/TenantDetail.vue'), props: true },
+      { path: 'admin/saas-metrics',    name: 'admin-saas-metrics', component: () => import('@/views/Admin/SaasMetrics.vue') },
+      { path: 'admin/customer-health', name: 'admin-customer-health', component: () => import('@/views/Admin/CustomerHealth.vue') },
+
       // Migration #076 — Menu Manager (sidebar dinamis)
       { path: 'admin/menus', name: 'menus', component: () => import('@/views/Admin/Menus.vue') },
 

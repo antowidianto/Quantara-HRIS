@@ -30,6 +30,18 @@ const earningsNonBonus = computed(() => earnings.value.filter(d => d.category !=
 const earningsBonus = computed(() => earnings.value.filter(d => d.category === 'BONUS'))
 const hasBonus = computed(() => earningsBonus.value.length > 0 || (slip.value?.bonus_amount || 0) > 0)
 
+// H2.10 — Penanda kalau slip mengandung komponen natura/kenikmatan.
+// Karyawan perlu tahu bahwa natura masuk Penghasilan Bruto (basis pajak)
+// tetapi tidak dibayar tunai → menjelaskan kenapa Total Earnings > THP.
+const hasNatura = computed(() =>
+  earnings.value.some(d => Number(d.is_natura) === 1)
+)
+const naturaTotal = computed(() =>
+  earnings.value
+    .filter(d => Number(d.is_natura) === 1)
+    .reduce((sum, d) => sum + Number(d.amount || 0), 0)
+)
+
 /**
  * Download PDF lewat axios supaya header Authorization (JWT) ikut.
  * `window.open` ke endpoint protected akan kena 401 karena browser tidak
@@ -109,7 +121,14 @@ async function downloadBlob(url, filename, expectedMime) {
           <table class="table mb-4">
             <tbody class="divide-y divide-gray-100">
               <tr v-for="d in earningsNonBonus" :key="d.id">
-                <td>{{ d.name }}</td>
+                <td>
+                  <span>{{ d.name }}</span>
+                  <span v-if="d.is_natura"
+                        class="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700"
+                        :title="t('payroll.slip_detail.natura_hint', 'Benefit Fasilitas/Natura (Non-Tunai) - PMK 66/2023')">
+                    Natura
+                  </span>
+                </td>
                 <td class="text-right">{{ fmtCurrency(d.amount) }}</td>
               </tr>
               <tr class="font-semibold bg-gray-50"><td>{{ t('payroll.slip_detail.total_earnings') }}</td><td class="text-right">{{ fmtCurrency(slip.gross_earning) }}</td></tr>
@@ -162,6 +181,19 @@ async function downloadBlob(url, filename, expectedMime) {
               <tr class="font-semibold bg-gray-50"><td>{{ t('payroll.slip_detail.total_deductions') }}</td><td class="text-right">{{ fmtCurrency(slip.total_deduction) }}</td></tr>
             </tbody>
           </table>
+
+          <!-- H2.10 — Disclaimer natura PMK 66/2023 -->
+          <div v-if="hasNatura"
+               class="mb-4 rounded-md border border-purple-200 bg-purple-50 p-3 text-xs text-purple-900">
+            <div class="font-semibold mb-1">Catatan Natura / Kenikmatan (PMK 66/2023)</div>
+            <p>
+              Slip ini memuat komponen non-tunai senilai
+              <strong>{{ fmtCurrency(naturaTotal) }}</strong>. Komponen
+              tersebut termasuk dalam Penghasilan Bruto sebagai basis perhitungan
+              PPh21, namun tidak dibayar tunai. Sehingga Take Home Pay yang
+              diterima lebih kecil dari Total Earnings.
+            </p>
+          </div>
 
           <div class="bg-primary-50 p-4 rounded flex items-center justify-between">
             <span class="font-semibold">{{ t('payroll.slip_detail.thp') }}</span>
