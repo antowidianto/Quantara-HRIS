@@ -169,6 +169,29 @@ class EmployeeController extends ApiController
             return $this->fail('Employee number already exists', 422, 'DUPLICATE_EMPLOYEE_NUMBER');
         }
 
+        // ─── S1.4 Quota Check — block kalau plan limit terlampaui ──
+        // Super admin Quantara internal bypass quota (untuk operasional support).
+        if (! $this->tenant()->isSuperAdmin()) {
+            try {
+                $quota = (new \App\Libraries\Billing\UsageMeterService())
+                    ->check($companyId, 'employees', 1);
+                if (! $quota['ok']) {
+                    return $this->fail(
+                        sprintf(
+                            'Quota karyawan tercapai (%d/%d). Upgrade plan untuk tambah karyawan.',
+                            $quota['current'], $quota['limit']
+                        ),
+                        422,
+                        'QUOTA_EXCEEDED',
+                        $quota
+                    );
+                }
+            } catch (\Throwable $e) {
+                // Fail-open: kalau quota service error, log tapi jangan block create.
+                log_message('warning', '[EmployeeController.create] Quota check failed: ' . $e->getMessage());
+            }
+        }
+
         $enc = \Config\Services::encryption();
         $now = date('Y-m-d H:i:s');
 
@@ -299,6 +322,21 @@ class EmployeeController extends ApiController
 
         $db->table('employees')->insert($insert);
         $id = (int) $db->insertID();
+
+        // ─── S1.4 Increment usage meter setelah insert sukses ──────
+        // Async-friendly: kalau gagal, log warning tapi tidak rollback create.
+        try {
+            (new \App\Libraries\Billing\UsageMeterService())->increment(
+                $companyId,
+                'employees',
+                1,
+                ['source' => 'api:employees.create', 'employee_id' => $id],
+                false, // sudah di-check sebelum insert; skip enforce di sini
+                $this->userId() ?: null,
+            );
+        } catch (\Throwable $e) {
+            log_message('warning', '[EmployeeController.create] Meter increment failed: ' . $e->getMessage());
+        }
 
         // Optionally create a user account
         if (! empty($data['create_user_account']) && ! empty($data['email'])) {
@@ -614,6 +652,26 @@ class EmployeeController extends ApiController
         $db = \Config\Database::connect();
         $emp = $db->table('employees')->where('id', $id)->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
+
+        // H1.12 — PP 35/2021: total durasi PKWT (termasuk perpanjangan
+        // & pembaruan) max 5 tahun. PkwtCompensationService menjadi
+        // single source of truth supaya frontend & backend pakai logika
+        // identik. Service melempar RuntimeException dengan pesan
+        // detail bila melewati cap.
+        if ($data['contract_type'] === 'PKWT' && ! empty($data['end_date'])) {
+            try {
+                (new \App\Libraries\Lifecycle\PkwtCompensationService())
+                    ->guardMaxDuration($id, [
+                        'contract_type' => 'PKWT',
+                        'start_date'    => $data['start_date'],
+                        'end_date'      => $data['end_date'],
+                    ]);
+            } catch (\InvalidArgumentException $e) {
+                return $this->fail($e->getMessage(), 422, 'INVALID_CONTRACT_RANGE');
+            } catch (\RuntimeException $e) {
+                return $this->fail($e->getMessage(), 422, 'CONTRACT_LIMIT_EXCEEDED');
+            }
+        }
 
         $insert = [
             'company_id' => $emp['company_id'],
