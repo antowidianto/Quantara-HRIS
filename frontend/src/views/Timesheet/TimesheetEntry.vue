@@ -136,7 +136,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '@/api/axios'
+import api from '@/api/client'
 
 const today = new Date().toISOString().slice(0, 10)
 const monthStart = new Date(); monthStart.setDate(1)

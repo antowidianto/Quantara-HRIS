@@ -137,7 +137,7 @@
 
 <script setup>
 import { ref, onMounted, h } from 'vue'
-import api from '@/api/axios'
+import api from '@/api/client'
 
 const StatCard = (props) => h('div', {
   class: 'bg-white dark:bg-slate-800 p-4 rounded shadow',

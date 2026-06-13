@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hris.fullname" . }}-backend
+  labels:
+    {{- include "hris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "hris.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        {{- include "hris.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "hris.fullname" . }}-config
+          env:
+            - name: database.default.password
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hris.fullname" . }}-secrets
+                  key: database.default.password
+            - name: database.replica.password
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hris.fullname" . }}-secrets
+                  key: database.replica.password
+            - name: jwt.secret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hris.fullname" . }}-secrets
+                  key: jwt.secret
+            - name: jwt.refreshSecret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hris.fullname" . }}-secrets
+                  key: jwt.refreshSecret
+            - name: encryption.key
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hris.fullname" . }}-secrets
+                  key: encryption.key
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          # Health check endpoints if available
+          livenessProbe:
+            httpGet:
+              path: /api/v1/auth/me
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/auth/me
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3

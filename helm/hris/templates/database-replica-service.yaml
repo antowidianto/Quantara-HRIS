@@ -1,0 +1,18 @@
+{{- if .Values.mysql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hris.fullname" . }}-mysql-replica
+  labels:
+    {{- include "hris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-replica
+spec:
+  ports:
+    - port: {{ .Values.mysql.service.port }}
+      targetPort: 3306
+      protocol: TCP
+      name: mysql
+  selector:
+    {{- include "hris.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: database # Resolves to database pods for fallback, or can be adjusted for master-slave setup
+{{- end }}

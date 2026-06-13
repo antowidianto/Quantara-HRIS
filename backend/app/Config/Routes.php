@@ -1198,6 +1198,16 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
             'System\Horizon3Controller::recommendInternalCandidates/$1');
         $routes->get('talent-pool/9-box',                     'System\Horizon3Controller::nineBoxGrid');
 
+        // H3.6 — Employee Aspirations (career goal CRUD self-service + HR view)
+        $routes->get('employees/(:num)/aspirations',
+            'System\Horizon3Controller::listAspirations/$1');
+        $routes->post('employees/(:num)/aspirations',
+            'System\Horizon3Controller::upsertAspiration/$1');
+        $routes->patch('employees/(:num)/aspirations/(:num)',
+            'System\Horizon3Controller::upsertAspiration/$1/$2');
+        $routes->delete('employees/(:num)/aspirations/(:num)',
+            'System\Horizon3Controller::deleteAspiration/$1/$2');
+
         // ─── Horizon 4 (Sprint 19+) — Platform Evolution ───────────
         // H4.1 AI HR Copilot
         $routes->get('ai/sessions',                           'System\Horizon4Controller::listAiSessions');

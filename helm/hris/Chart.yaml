@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hris
+description: A Helm chart for deploying the Quantara HRIS ecosystem on Kubernetes (Backend, Frontend, ADMS Middleware, MySQL, and Redis)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
