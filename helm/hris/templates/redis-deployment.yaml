@@ -1,0 +1,47 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hris.fullname" . }}-redis
+  labels:
+    {{- include "hris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "hris.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: cache
+  template:
+    metadata:
+      labels:
+        {{- include "hris.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: cache
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          ports:
+            - containerPort: 6379
+              name: redis
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+{{- end }}

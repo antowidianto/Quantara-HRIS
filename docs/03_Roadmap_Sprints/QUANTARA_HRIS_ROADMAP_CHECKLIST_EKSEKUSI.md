@@ -21,10 +21,11 @@
 
 | Horizon | Sprint | Total Item | Selesai | Status |
 | --- | --- | --- | --- | --- |
-| H1 — Quick Wins | 7–9 | 9 | 9 | ✅ HORIZON 1 LENGKAP (BE + FE) |
-| H2 — Core Deepening | 10–13 | 9 | 8 | ✅ Backend + FE inti done (8/9) |
-| H3 — New Capabilities | 14–18 | 8 | 3 | ✅ Talent Mgmt cluster done BE + FE (H3.1, H3.2, H3.6); H3.3/3.4/3.5/3.7/3.8 defer |
+| H1 — Quick Wins | 7–9 | 12 | 12 | ✅ Termasuk Critical Legal Fixes (H1.10, H1.11, H1.12) — done BE + FE |
+| H2 — Core Deepening | 10–13 | 10 | 10 | ✅ Backend + FE inti done (termasuk H2.10 Natura PMK 66) |
+| H3 — New Capabilities | 14–18 | 8 | 6 | ✅ H3.1, H3.2, H3.4 (Sprint 20), H3.6, H3.7 (Sprint 20), H3.8 (Sprint 20) — backend done; H3.3 Flex Benefits, H3.5 Predictive defer |
 | H4 — Platform Evolution | 19+ | 5 | 4 | ✅ 4/5 backend + FE done; H4.2 Multi-Country defer |
+| **Sprint 20 — Enterprise Readiness** | **20** | **5** | **5** | ✅ H3.4 ERP, H3.7 PSrE, H3.8 Open API + 2 modul baru (Project Timesheet, License Tracker) — BE + FE done |
 | Technical Debt | Lintas Sprint | 6 | 0 | ⬜ Belum dimulai |
 
 > Eksekusi terkini: **Horizon 1-4 — Backend + Frontend rilis end-to-end.**
@@ -78,6 +79,41 @@
 # 🟦 HORIZON 1 — QUICK WINS (Sprint 7–9)
 
 ## SPRINT 7
+
+### H1.10 — Kepatuhan Lembur & Potongan Gaji (PP 35/2021 & PP 36/2021) ✅
+**Modul:** D. Operasional & E. Payroll · **Effort:** Medium · **Impact:** High (Legal Risk) · **Status:** SELESAI
+
+#### Database
+- [x] Migration `000064_KepatuhanLemburPP35.php` (kolom `is_holiday`, `payable_hours` di `overtimes`)
+
+#### Backend
+- [x] Validasi limit 4 jam/hari dan 18 jam/minggu di `OvertimeController`
+- [x] Kalkulator Multiplier Lembur (1.5x, 2x, 3x) sesuai regulasi hari libur/kerja
+- [x] `PayrollCalculator`: Lock potongan maksimal 50% Take Home Pay (PP 36/2021)
+
+#### Testing
+- [x] Unit test `validateLegalOvertimeLimits` + Multiplier (`OvertimeCalculatorTest.php`)
+
+---
+
+### H1.11 — Cuti Wajib Terbayar (Mandatory Paid Leaves) ✅
+**Modul:** A. Master Data — Leave Types · **Effort:** Low · **Impact:** High (Legal Risk) · **Status:** SELESAI
+
+#### Database
+- [x] Migration `000065_CutiWajibMandatori.php` (tambah `is_system_mandatory`, `gender_restriction`)
+- [x] Migration di-refactor jadi idempotent + portable (cek `tableExists` & `fieldExists`, VARCHAR(1) bukan ENUM untuk SQLite-compat)
+
+#### Backend
+- [x] Bypass limit `annual_leave` di `LeaveBalanceService` untuk cuti mandatory
+- [x] `LeaveController::categoryEligibility` & `for-me` filter gender restriction (M/F/ALL)
+- [x] Reject submission cuti yang tidak sesuai gender (`GENDER_RESTRICTED` 422)
+
+#### Frontend
+- [x] `LeaveForm.vue`: badge ♀/♂ + label "Cuti Wajib · Tidak potong saldo" pada selected type
+- [x] Optgroup "Tidak tersedia" untuk tipe yang ditolak filter gender + reason inline
+- [x] `Master/LeaveTypes.vue`: field `is_system_mandatory` (number 1/0) di admin form
+
+---
 
 ### H1.1 — Bulk Approval di Approval Inbox ✅
 **Modul:** J. Self-Service · **Effort:** Low · **Impact:** High · **Status:** SELESAI (Sprint 7)
@@ -145,6 +181,38 @@
 ---
 
 ## SPRINT 8
+
+### H1.12 — Kompensasi PKWT & Limit 5 Tahun (PP 35/2021) ✅
+**Modul:** E. Payroll & H. Offboarding · **Effort:** Medium-High · **Impact:** High (Legal Risk) · **Status:** SELESAI
+
+#### Database
+- [x] Migration `000067_KompensasiPkwt.php` di-refactor: target tabel benar `employee_contracts` (sebelumnya salah `contracts`); idempotent dengan tableExists/fieldExists
+- [x] Kolom: `pkwt_compensation_paid`, `pkwt_compensation_amount`, `pkwt_compensation_paid_period_id`, `pkwt_compensation_paid_at`. `is_pkwt` redundan tidak ditambah karena `contract_type='PKWT'` sudah cukup
+
+#### Backend
+- [x] Library baru `App\Libraries\Lifecycle\PkwtCompensationService`:
+  - [x] `guardMaxDuration()` — accumulator durasi PKWT, throw `RuntimeException` jika > 1825 hari (PP 35/2021 Pasal 8)
+  - [x] Pure helpers `daysBetween`, `accumulatedDaysPure`, `tenureMonthsPure`, `calculatePure` (PP 35/2021 Pasal 16)
+  - [x] `compensationForContract()` — DB-aware: basic_salary + tunjangan tetap recurring
+  - [x] `earningEntriesForPayrollPeriod()` — query kontrak expired di periode + map per employee_id
+  - [x] `markPaid()` — set flag idempotent + audit log severity NOTICE
+- [x] `EmployeeController::addContract` ganti validasi 5-tahun primitif → wire ke `guardMaxDuration` (error code `CONTRACT_LIMIT_EXCEEDED`)
+- [x] `PayrollService::calculatePeriod` lookup `pkwtByEmp` sekali per period + inject ke `calculateEmployee`
+- [x] `PayrollService::calculateEmployee` insert earning kategori BONUS "Kompensasi PKWT" sebagai taxable
+- [x] `PayrollService::finalize` panggil `markPaid` untuk semua kontrak PKWT yang ekspirasinya jatuh di periode
+- [x] Idempoten — re-calculate periode tidak menggandakan kompensasi (filter `pkwt_compensation_paid IS NULL`)
+
+#### Frontend
+- [x] `EmployeeDetail.vue`: computed `pkwtTotalDays`, `pkwtNearLimit`, `pkwtExceeded`
+- [x] Banner amber/red kalau akumulasi PKWT mendekati / melewati 5 tahun
+- [x] Header table kontrak tampilkan total akumulasi & sisa hari
+- [x] Badge "Kompensasi: Rp X" di row kontrak yang sudah dibayar
+
+#### Testing
+- [x] Unit test `tests/Unit/PkwtCompensationServiceTest.php` — 16 assertion untuk pure helpers
+- [x] Smoke test runner `backend/scripts/verify_pkwt_logic.php` — 16/16 pass
+
+---
 
 ### H1.5 — WFH Mode di Attendance ✅
 **Modul:** D. Operasional Harian · **Effort:** Medium · **Impact:** High · **Status:** SELESAI (Sprint 8)
@@ -381,6 +449,28 @@
 
 ## SPRINT 11
 
+### H2.10 — Pajak atas Natura / Kenikmatan (PMK 66/2023) ✅
+**Modul:** E. Compensation & Benefits · **Effort:** Medium · **Impact:** High (Legal Risk) · **Status:** SELESAI
+
+#### Database
+- [x] Migration `000066_PajakNaturaPMK66.php` (tambah `is_taxable_natura`, `natura_tax_threshold` di tabel `allowance_types`)
+- [x] Migration di-refactor: idempotent dengan tableExists & fieldExists guard
+
+#### Backend
+- [x] `PayrollService::calculateEmployee`: LEFT JOIN `allowance_types` saat resolve recurring components untuk menarik flag `is_taxable_natura` & `natura_tax_threshold`
+- [x] Per-entry tagging `is_natura` + `natura_tax_base` (di-apply threshold tahunan dipecah proporsional `/12` bulanan)
+- [x] `grossEarning` (untuk display & laporan SPT 1721) jumlahkan SEMUA earning termasuk natura
+- [x] `cashEarning` baru = total earning kecuali natura → dasar perhitungan Take Home Pay tunai
+- [x] `grossTaxable` (basis PPh21) pakai `natura_tax_base` (sudah di-apply threshold) untuk natura, amount penuh untuk non-natura
+- [x] Take Home Pay = `cashEarning - totalDeduction` (natura non-tunai tidak dibayar tunai meski masuk pajak)
+- [x] `payslip_details.is_natura` di-persist saat kolom tersedia (defensive; backward-compat untuk schema lama)
+
+#### Frontend
+- [x] `PayslipDetail.vue`: badge "Natura" per item earning + disclaimer card menjelaskan THP < Total Earnings karena natura non-tunai
+- [x] `Master/Allowances.vue`: section khusus Natura dengan checkbox `is_taxable_natura` + input `natura_tax_threshold`
+
+---
+
 ### H2.2 — Performance Goals Cascading
 **Modul:** F. Performance & Development · **Effort:** Medium-High · **Impact:** High · **Status:** 🟩 Backend done
 
@@ -490,7 +580,7 @@
 - [ ] Service `FlightRiskScorer` (defer — masuk Horizon 3 atau iterasi berikut):
   - [ ] Faktor: salary vs market, tenure tanpa kenaikan, attendance anomaly, perf trend menurun, no active training
   - [ ] Output: skor 0–100 + driver breakdown
-- [ ] Cron `php spark turnover:snapshot` Command class (manual trigger via API sudah jalan)
+- [x] Cron `php spark turnover:snapshot` Command class — `App\Commands\TurnoverSnapshotCommand` (loop semua company, idempotent upsert)
 
 #### Frontend
 - [ ] Dashboard "Turnover Analytics" (HRBP/HR)
@@ -632,17 +722,17 @@ Existing `CostCenterService` sudah punya method drill-down via `actualsBreakdown
 - [ ] **FE:** Report utilization per item
 - [ ] **QA:** Test: total alokasi tidak boleh exceed pool
 
-### H3.4 — Integrasi ERP / Accounting Journal
-**Modul Baru:** L (extension) · **Effort:** High · **Impact:** High · **Status:** ⬜ Defer (butuh vendor mapping + PoC per ERP)
+### H3.4 — Integrasi ERP / Accounting Journal ✅ Sprint 20
+**Modul Baru:** L (extension) · **Effort:** High · **Impact:** High · **Status:** ✅ Backend + FE done — driver real API stub, Generic CSV fully working
 
-- [ ] **DB:** `journal_mappings` (cost_center → COA), `journal_exports` log
-- [ ] **BE:** Generator jurnal SAK setelah payroll finalize
-- [ ] **BE:** Driver: Accurate Online API, Zahir, Odoo, SAP iDoc
-- [ ] **BE:** CSV export untuk fallback
-- [ ] **FE:** Halaman mapping COA per company
-- [ ] **FE:** Tombol "Post to Accounting" + status log
-- [ ] **QA:** Test debit-kredit balance
-- [ ] **QA:** Test: jurnal tidak duplikat untuk period yang sama
+- [x] **DB:** `erp_connections`, `erp_journal_mappings` (cost_center × account_type → COA debit/credit), `erp_journal_exports` log — migration `2026-09-01-000001_H3_4_ErpIntegration.php`
+- [x] **BE:** `ErpJournalService` — generator jurnal payroll (gross salary, BPJS-K/T, PPh21, Natura, deductions) dengan pure helpers `pickMapping`, `isBalanced`, `validateMapping`, `toCsv`
+- [x] **BE:** Format support: `GENERIC_CSV`, `ACCURATE_API`, `ZAHIR_CSV`, `ODOO_API`, `SAP_IDOC` (driver real API stub, CSV fully working dengan escape proper)
+- [x] **BE:** CSV export untuk fallback (handle quote, comma, newline) + endpoint `GET /erp/journal-exports/:id/csv`
+- [x] **FE:** `frontend/src/views/Erp/ErpJournalDashboard.vue` — 3 tab (Connections / COA Mappings / Journal Exports) + modal export periode + test connection
+- [x] **FE:** Tombol "Post" pada export DRAFT → POSTED dengan audit log otomatis
+- [x] **QA:** `Sprint20PrioritiesTest` 7 test — `pickMapping` (specific/fallback/inactive/null), `isBalanced` (toleransi 0.01), `toCsv` escape, `validateMapping` detect errors
+- [x] **QA:** Unique constraint `(source_type, source_id, format)` di `erp_journal_exports` mencegah duplikat untuk period+format yang sama
 
 ---
 
@@ -678,7 +768,7 @@ Existing `CostCenterService` sudah punya method drill-down via `actualsBreakdown
 - [x] **BE:** Matching engine — `recommendCandidatesForPosting()` ranking by skill match score (pure `matchScore` helper)
 - [x] **BE:** 9-box grid generator (performance × potential)
 - [ ] **BE:** ACCEPTED → JIC otomatis (kolom `internal_applications.jic_id` siap, hook belum dipasang)
-- [ ] **BE:** Aspiration CRUD endpoint (schema siap, controller belum)
+- [x] **BE:** Aspiration CRUD endpoint — `Horizon3Controller::listAspirations / upsertAspiration / deleteAspiration` + `TalentPoolService::upsertAspiration / deleteAspiration / validateAspirationPure` (visibility filter SUPERVISOR/HR/COMPANY)
 - [ ] **FE:** ESS "Profil Talent Saya"
 - [ ] **FE:** Internal Job Board
 - [ ] **FE:** HRBP talent map (9-box)
@@ -688,34 +778,35 @@ Existing `CostCenterService` sudah punya method drill-down via `actualsBreakdown
 
 ## SPRINT 18
 
-### H3.7 — Digital Signing Berstandar Hukum
-**Modul Baru:** C (enhancement major) · **Effort:** Very High · **Impact:** High · **Status:** ⬜ Defer (butuh kontrak komersial PSrE)
+### H3.7 — Digital Signing Berstandar Hukum ✅ Sprint 20
+**Modul Baru:** C (enhancement major) · **Effort:** Very High · **Impact:** High · **Status:** ✅ Backend + FE done — vendor kontrak komersial PSrE menyusul saat go-live (MOCK driver fungsional untuk dev/sandbox)
 
-- [ ] **Vendor:** kontrak dengan PSrE (PrivyID / Vida / Peruri)
-- [ ] **BE:** Adapter `PSrEDriver` interface
-- [ ] **BE:** Workflow: generate doc → kirim PSrE → callback → simpan certificate
-- [ ] **BE:** Audit trail lengkap (siapa, kapan, IP, certificate)
-- [ ] **BE:** Cakupan: contract, JIC amendment, severance, offer letter
-- [ ] **BE:** Fallback wet-sign + scan upload
-- [ ] **FE:** Halaman ContractSign update: redirect ke PSrE flow
-- [ ] **FE:** History tanda tangan dengan certificate viewer
-- [ ] **QA:** End-to-end test dengan sandbox PSrE
-- [ ] **DOC:** Compliance UU ITE & Perpres 95/2018
+- [ ] **Vendor:** kontrak dengan PSrE (PrivyID / Vida / Peruri) — pending komersial
+- [x] **DB:** `psre_providers` (PRIVYID/VIDA/PERURI/MOCK), `signing_envelopes`, `signing_envelope_signers`, `signing_envelope_events` — migration `2026-09-01-000002_H3_7_DigitalSigning.php`
+- [x] **BE:** `PsreSigningService` interface-ready dengan provider abstraction; MOCK driver fungsional + slot adapter PrivyID/Vida/Peruri
+- [x] **BE:** Workflow: create → assign signers → send → callback (event log) → aggregate status (`COMPLETED` / `PARTIALLY` / `FAILED` / `EXPIRED`)
+- [x] **BE:** Audit trail via `signing_envelope_events` (siapa, kapan, IP via meta JSON) + `hashDocument()` SHA-256 deterministic untuk certificate of integrity
+- [x] **BE:** Cakupan: dapat di-link ke source_type (CONTRACT/JIC/SEVERANCE/OFFER_LETTER) via kolom `source_type`+`source_id`
+- [ ] **BE:** Fallback wet-sign + scan upload — defer (re-use existing document upload module)
+- [x] **FE:** `frontend/src/views/Signing/SigningEnvelopes.vue` — list + detail + signer status + tombol kirim
+- [ ] **FE:** Certificate viewer rich UI — defer (link download cert sudah cukup)
+- [x] **QA:** `Sprint20PrioritiesTest` 8 test — aggregate `ALL_SIGNED`/`ANY_DECLINED`/`MIXED`/`ALL_EXPIRED`/empty, `validateEnvelope`, `hashDocument` deterministic
+- [x] **DOC:** `docs/SPRINT_20_ENTERPRISE_MODULES.md` mencantumkan compliance UU ITE & Perpres 95/2018 mapping
 
-### H3.8 — Open API & Developer Portal
-**Modul Baru:** L (extension) · **Effort:** High · **Impact:** Medium-High · **Status:** ⬜ Defer (butuh OAuth server + sandbox env)
+### H3.8 — Open API & Developer Portal ✅ Sprint 20
+**Modul Baru:** L (extension) · **Effort:** High · **Impact:** Medium-High · **Status:** ✅ Backend + FE done — OAuth 2.0 full server + Swagger UI auto-gen di-defer (API key + scope sudah cukup untuk MVP enterprise)
 
-- [ ] **DB:** `api_keys`, `api_key_scopes`, `oauth_clients`, `oauth_tokens`
-- [ ] **BE:** OpenAPI spec lengkap (auto-generate dari controller)
-- [ ] **BE:** Swagger UI di `/developer/docs`
-- [ ] **BE:** API key CRUD (rotate, revoke)
-- [ ] **BE:** OAuth 2.0 server (auth code + client credentials)
-- [ ] **BE:** Rate limiting per API key per tier
-- [ ] **BE:** Webhook event catalog + subscription
-- [ ] **FE:** Developer Portal halaman: docs, key management, webhooks
-- [ ] **FE:** Sandbox environment toggle
-- [ ] **QA:** Security test: scope enforcement
-- [ ] **DOC:** Quickstart guide untuk developer pelanggan
+- [x] **DB:** `api_keys` (key_hash + prefix), `api_key_scopes`, `api_scopes` (catalog 11 scopes), `api_request_logs` — migration `2026-09-01-000003_H3_8_OpenApiPortal.php`
+- [ ] **BE:** OpenAPI spec lengkap auto-generate — defer (manual spec sufficient for closed-beta partners)
+- [ ] **BE:** Swagger UI di `/developer/docs` — defer (link ke spec statis lebih dulu)
+- [x] **BE:** API key CRUD (generate `live_xxx` / `sandbox_xxx`, hash bcrypt-style, rotate, revoke, expiry) via `ApiKeyService`
+- [ ] **BE:** OAuth 2.0 server (auth code + client credentials) — defer (API key + scope cover use case integrator B2B)
+- [x] **BE:** Rate limiting per API key per tier — re-use `RedisRateLimiter` (Sprint 18) attached via filter
+- [ ] **BE:** Webhook event catalog + subscription — defer (table prepared via api_scopes `webhooks.subscribe`, controller belum)
+- [x] **FE:** `frontend/src/views/Developer/ApiKeys.vue` — list + create + rotate + revoke + scope picker; catalog 11 scopes public
+- [x] **FE:** Sandbox environment toggle (lewat key prefix `sandbox_` vs `live_`)
+- [x] **QA:** `Sprint20PrioritiesTest` 5 test — valid format, invalid rejected, `isUsable` revoked/expired, `sanitizeScopes` dedupe, `hasScope` match/mismatch
+- [x] **DOC:** `docs/SPRINT_20_ENTERPRISE_MODULES.md` — quickstart developer + scope catalog 11 scopes
 
 ---
 

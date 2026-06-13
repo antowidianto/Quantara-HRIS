@@ -1,0 +1,125 @@
+# Global settings
+global:
+  environment: production
+  companyName: Quantara
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: hris.quantara.id
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: backend
+  tls:
+    - secretName: hris-tls-cert
+      hosts:
+        - hris.quantara.id
+
+# Backend Service (PHP CI4)
+backend:
+  replicaCount: 2
+  image:
+    repository: quantara/hris-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "1024Mi"
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+  env:
+    appBaseURL: "https://hris.quantara.id/api/"
+    appTimezone: "Asia/Jakarta"
+    jwtSecret: "production_secret_change_me_to_long_random_value"
+    jwtRefreshSecret: "production_refresh_secret_change_me_to_different_long_random_value"
+    encryptionKey: "base64:abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"
+
+# Frontend Service (Vue.js + Nginx)
+frontend:
+  replicaCount: 2
+  image:
+    repository: quantara/hris-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 85
+
+# ADMS Fingerprint Middleware (Node.js)
+middleware:
+  replicaCount: 1
+  image:
+    repository: quantara/hris-middleware
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5000
+  resources:
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+    requests:
+      cpu: "100m"
+      memory: "64Mi"
+
+# Embedded Database (MySQL 8) - set enabled to false to use external RDS/CloudSQL
+mysql:
+  enabled: true
+  image:
+    repository: mysql
+    tag: "8.0"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: "standard"
+  auth:
+    database: hris_db
+    username: hris_user
+    password: hris_password
+    rootPassword: root_mysql_password
+  service:
+    port: 3306
+
+# Embedded Cache (Redis) - set enabled to false to use external ElastiCache
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  service:
+    port: 6379

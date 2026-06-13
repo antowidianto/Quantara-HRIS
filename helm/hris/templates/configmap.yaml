@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hris.fullname" . }}-config
+  labels:
+    {{- include "hris.labels" . | nindent 4 }}
+data:
+  CI_ENVIRONMENT: {{ .Values.global.environment | quote }}
+  app.baseURL: {{ .Values.backend.env.appBaseURL | quote }}
+  app.appTimezone: {{ .Values.backend.env.appTimezone | quote }}
+  database.default.DBDriver: "MySQLi"
+  database.default.port: "3306"
+  database.default.database: {{ .Values.mysql.auth.database | quote }}
+  # If mysql is enabled in cluster, hostname is mysql service name
+  database.default.hostname: {{ if .Values.mysql.enabled }}{{ include "hris.fullname" . }}-mysql{{ else }}"external-mysql"{{ end }}
+  database.default.username: {{ .Values.mysql.auth.username | quote }}
+
+  # Replica settings (Sprint 17 / H3.2 scale enhancement)
+  database.replica.DBDriver: "MySQLi"
+  database.replica.port: "3306"
+  database.replica.database: {{ .Values.mysql.auth.database | quote }}
+  database.replica.hostname: {{ if .Values.mysql.enabled }}{{ include "hris.fullname" . }}-mysql-replica{{ else }}"external-mysql-replica"{{ end }}
+  database.replica.username: {{ .Values.mysql.auth.username | quote }}
+
+  cache.handler: "redis"
+  cache.redis.host: {{ if .Values.redis.enabled }}{{ include "hris.fullname" . }}-redis{{ else }}"external-redis"{{ end }}
+  cache.redis.port: {{ .Values.redis.service.port | quote }}

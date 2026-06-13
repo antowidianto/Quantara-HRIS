@@ -139,7 +139,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '@/api/axios'
+import api from '@/api/client'
 
 const statuses = ['DRAFT', 'SENT', 'PARTIALLY_SIGNED', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'FAILED']
 const docTypes = ['CONTRACT', 'CONTRACT_AMENDMENT', 'OFFER_LETTER', 'SEVERANCE', 'TRANSFER_LETTER', 'OTHER']

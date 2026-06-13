@@ -435,4 +435,107 @@ class TalentPoolService
             'boxes'           => array_values($result),
         ];
     }
+
+    // ─── Aspirations CRUD ─────────────────────────────────────
+    // Career goal employee. Schema di migration #062 (employee_aspirations).
+
+    public const ASPIRATION_TYPES = [
+        'POSITION', 'DEPARTMENT', 'CAREER_TRACK', 'SKILL_DEVELOPMENT', 'GEOGRAPHY',
+    ];
+
+    public const VISIBILITY_LEVELS = ['SUPERVISOR', 'HR', 'COMPANY'];
+
+    /**
+     * Validate input aspiration. Throw RuntimeException kalau invalid.
+     */
+    public static function validateAspirationPure(array $data): void
+    {
+        $type = strtoupper((string) ($data['aspiration_type'] ?? 'POSITION'));
+        if (! in_array($type, self::ASPIRATION_TYPES, true)) {
+            throw new \RuntimeException("aspiration_type tidak valid. Pilih: " . implode(',', self::ASPIRATION_TYPES));
+        }
+
+        $timeline = strtoupper((string) ($data['timeline'] ?? 'MID_TERM'));
+        if (! in_array($timeline, self::TIMELINE, true)) {
+            throw new \RuntimeException("timeline tidak valid. Pilih: " . implode(',', self::TIMELINE));
+        }
+
+        $visibility = strtoupper((string) ($data['visibility'] ?? 'SUPERVISOR'));
+        if (! in_array($visibility, self::VISIBILITY_LEVELS, true)) {
+            throw new \RuntimeException("visibility tidak valid. Pilih: " . implode(',', self::VISIBILITY_LEVELS));
+        }
+
+        // Minimal salah satu target harus ada (FK atau free text).
+        $hasFkTarget = ! empty($data['target_position_id'])
+            || ! empty($data['target_department_id'])
+            || ! empty($data['target_branch_id']);
+        $hasTextTarget = ! empty(trim((string) ($data['target_text'] ?? '')));
+        if (! $hasFkTarget && ! $hasTextTarget) {
+            throw new \RuntimeException('Minimal isi salah satu: target_position_id / target_department_id / target_branch_id / target_text');
+        }
+    }
+
+    /**
+     * Insert atau update aspiration. Kalau $aspirationId NULL → INSERT.
+     * Kalau di-set → UPDATE setelah verifikasi ownership tenant + employee.
+     *
+     * @return array Row aspiration yang baru saja dipersist (re-read dari DB).
+     */
+    public function upsertAspiration(int $companyId, int $employeeId, ?int $aspirationId, array $data): array
+    {
+        self::validateAspirationPure($data);
+        $now = date('Y-m-d H:i:s');
+        $db = $this->db();
+
+        $payload = [
+            'company_id'           => $companyId,
+            'employee_id'          => $employeeId,
+            'aspiration_type'      => strtoupper((string) ($data['aspiration_type'] ?? 'POSITION')),
+            'target_position_id'   => isset($data['target_position_id']) && $data['target_position_id'] !== ''
+                ? (int) $data['target_position_id'] : null,
+            'target_department_id' => isset($data['target_department_id']) && $data['target_department_id'] !== ''
+                ? (int) $data['target_department_id'] : null,
+            'target_branch_id'     => isset($data['target_branch_id']) && $data['target_branch_id'] !== ''
+                ? (int) $data['target_branch_id'] : null,
+            'target_text'          => isset($data['target_text']) ? trim((string) $data['target_text']) : null,
+            'timeline'             => strtoupper((string) ($data['timeline'] ?? 'MID_TERM')),
+            'visibility'           => strtoupper((string) ($data['visibility'] ?? 'SUPERVISOR')),
+            'updated_at'           => $now,
+        ];
+
+        if ($aspirationId !== null && $aspirationId > 0) {
+            $existing = $db->table('employee_aspirations')
+                ->where('id', $aspirationId)
+                ->where('company_id', $companyId)
+                ->where('employee_id', $employeeId)
+                ->get()->getRowArray();
+            if (! $existing) {
+                throw new \RuntimeException('Aspiration tidak ditemukan');
+            }
+            $db->table('employee_aspirations')->where('id', $aspirationId)->update($payload);
+        } else {
+            $payload['created_at'] = $now;
+            $db->table('employee_aspirations')->insert($payload);
+            $aspirationId = (int) $db->insertID();
+        }
+
+        return $db->table('employee_aspirations')->where('id', $aspirationId)->get()->getRowArray() ?? [];
+    }
+
+    /**
+     * Hapus aspiration (hard delete — tidak ada PII, hanya intent karir).
+     */
+    public function deleteAspiration(int $companyId, int $employeeId, int $aspirationId): void
+    {
+        $db = $this->db();
+        $existing = $db->table('employee_aspirations')
+            ->where('id', $aspirationId)
+            ->where('company_id', $companyId)
+            ->where('employee_id', $employeeId)
+            ->get()->getRowArray();
+        if (! $existing) {
+            throw new \RuntimeException('Aspiration tidak ditemukan');
+        }
+        $db->table('employee_aspirations')->where('id', $aspirationId)->delete();
+    }
 }

@@ -444,6 +444,99 @@ class Horizon3Controller extends ApiController
         return $this->ok($rows);
     }
 
+    // ─── H3.6 — Employee Aspirations CRUD ────────────────────────────
+    // Career goal employee (target posisi/dept/skill + timeline + visibility).
+    // Self-service: karyawan boleh lihat/edit aspirasi sendiri; supervisor/HR
+    // boleh lihat sesuai `visibility` (SUPERVISOR/HR/COMPANY).
+
+    /**
+     * GET /api/v1/employees/(:num)/aspirations
+     */
+    public function listAspirations(int $employeeId)
+    {
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+
+        $isOwn = $this->isOwnEmployee($employeeId);
+        $canManage = $this->canManageTalentPool();
+        if (! $isOwn && ! $canManage) {
+            return $this->fail('Forbidden — hanya employee bersangkutan / HR', 403);
+        }
+
+        $db = \Config\Database::connect();
+        $rows = $db->table('employee_aspirations a')
+            ->select('a.*, p.name AS target_position_name, d.name AS target_department_name, b.name AS target_branch_name')
+            ->join('positions p', 'p.id = a.target_position_id', 'left')
+            ->join('departments d', 'd.id = a.target_department_id', 'left')
+            ->join('branches b', 'b.id = a.target_branch_id', 'left')
+            ->where('a.company_id', $companyId)
+            ->where('a.employee_id', $employeeId)
+            ->orderBy('a.timeline', 'ASC')
+            ->orderBy('a.id', 'DESC')
+            ->get()->getResultArray();
+
+        // Privacy filter: kalau bukan owner & bukan HR full, hide row dengan
+        // visibility lebih restricted dari role caller. SUPERVISOR < HR < COMPANY.
+        if (! $isOwn && ! $canManage) {
+            $rows = array_values(array_filter($rows, fn ($r) => $r['visibility'] === 'COMPANY'));
+        }
+
+        return $this->ok($rows);
+    }
+
+    /**
+     * POST /api/v1/employees/(:num)/aspirations — create.
+     * PATCH /api/v1/employees/(:num)/aspirations/(:num) — update.
+     * Body:
+     *   aspiration_type  ENUM(POSITION/DEPARTMENT/CAREER_TRACK/SKILL_DEVELOPMENT/GEOGRAPHY)
+     *   target_position_id, target_department_id, target_branch_id (opsional)
+     *   target_text (free-form)
+     *   timeline ENUM(IMMEDIATE/SHORT_TERM/MID_TERM/LONG_TERM)
+     *   visibility ENUM(SUPERVISOR/HR/COMPANY) default SUPERVISOR
+     */
+    public function upsertAspiration(int $employeeId, ?int $aspirationId = null)
+    {
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+        if (! $this->isOwnEmployee($employeeId) && ! $this->canManageTalentPool()) {
+            return $this->fail('Forbidden — hanya employee bersangkutan / HR', 403);
+        }
+
+        $data = $this->getJsonInput();
+        try {
+            $svc = new \App\Libraries\Recruitment\TalentPoolService();
+            $row = $svc->upsertAspiration(
+                $companyId,
+                $employeeId,
+                $aspirationId ? (int) $aspirationId : null,
+                $data
+            );
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        return $this->ok($row);
+    }
+
+    /**
+     * DELETE /api/v1/employees/(:num)/aspirations/(:num)
+     */
+    public function deleteAspiration(int $employeeId, int $aspirationId)
+    {
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+        if (! $this->isOwnEmployee($employeeId) && ! $this->canManageTalentPool()) {
+            return $this->fail('Forbidden — hanya employee bersangkutan / HR', 403);
+        }
+
+        try {
+            $svc = new \App\Libraries\Recruitment\TalentPoolService();
+            $svc->deleteAspiration($companyId, $employeeId, $aspirationId);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        return $this->ok(['deleted' => true]);
+    }
+
     public function nineBoxGrid()
     {
         if (! $this->canViewTalentPool()) return $this->fail('Forbidden', 403);

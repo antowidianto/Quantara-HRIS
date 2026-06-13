@@ -161,7 +161,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import api from '@/api/axios'
+import api from '@/api/client'
 
 const keys   = ref([])
 const scopes = ref([])

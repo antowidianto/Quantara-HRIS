@@ -181,6 +181,16 @@ Rencana ini dibagi menjadi **4 Horizon** berdasarkan urgensi dan dampak bisnis:
 
 ---
 
+### 🔍 M. Kepatuhan Regulasi Indonesia (Indonesian Compliance Gap)
+
+**Gap yang ditemukan (High Legal Risk):**
+- Lembur belum membatasi maksimal 4 jam/hari dan 18 jam/minggu (PP 35/2021)
+- Potongan gaji belum dikunci maksimal 50% dari Take Home Pay (PP 36/2021)
+- Uang Kompensasi PKWT di akhir kontrak belum otomatis dihitung (PP 35/2021)
+- Cuti mandatory (haid, melahirkan, alasan penting) masih bercampur dengan saldo cuti tahunan reguler (UU 13/2003 & UU KIA)
+- Natura/Kenikmatan belum dilabeli taxable untuk perhitungan PPh21 (PMK 66/2023)
+- Retensi data karyawan offboard belum otomatis di-anonymize setelah 10 tahun (UU PDP)
+
 ## HORIZON 1 — QUICK WINS (Sprint 7–9)
 
 > Perbaikan dengan effort rendah, dampak tinggi. Mayoritas adalah enhancement
@@ -318,6 +328,38 @@ untuk notifikasi time-sensitive (approval, payslip, dll).
 - Provider dikonfigurasi per company (bring your own API key)
 - Notification templates untuk WA mengikuti format yang ada
 - Rate limit: max 3 pesan WA per user per hari untuk menghindari spam
+
+---
+
+### H1.10 — Kepatuhan Lembur & Potongan Gaji (PP 35/2021 & PP 36/2021)
+
+**Modul:** D. Operasional & E. Payroll
+**Latar Belakang:** Risiko audit Disnaker tinggi jika sistem mengizinkan lembur melebihi batas legal atau memotong gaji hingga karyawan menerima kurang dari 50% THP.
+**Rencana:**
+- Tambah rule validasi di `OvertimeController`: tolak/block jika > 4 jam/hari atau akumulasi > 18 jam/minggu.
+- Tambah kalkulator multiplier lembur (1.5x, 2x, 3x) sesuai regulasi hari kerja vs libur nasional.
+- Update `PayrollCalculator`: cap total potongan (cicilan, denda aset) di angka 50% dari total upah bulanan. Sisa nominal otomatis di-carry over ke bulan berikutnya.
+
+---
+
+### H1.11 — Cuti Wajib Terbayar (Mandatory Paid Leaves)
+
+**Modul:** A. Master Data — Leave Types
+**Latar Belakang:** Cuti haid, melahirkan (UU KIA), dan izin penting wajib dibayar dan tidak boleh memotong saldo cuti tahunan.
+**Rencana:**
+- Tambah flag `is_system_mandatory` (boolean) di tabel `leave_types`.
+- Tambah flag `gender_restriction` (`M`, `F`, `NULL`) di tabel `leave_types`.
+- Modifikasi `LeaveController`: tipe cuti dengan flag mandatory dilewati dari proses pengurangan limit `annual_leave` dan bebas dari limit `carry_over`.
+
+---
+
+### H1.12 — Kompensasi PKWT & Limit 5 Tahun
+
+**Modul:** E. Payroll & H. Offboarding
+**Latar Belakang:** Berakhirnya kontrak PKWT mewajibkan perusahaan membayar Uang Kompensasi sesuai proporsi masa kerja.
+**Rencana:**
+- **Contract Guard:** Tambah validasi di modul Contract: akumulasi rentang perpanjangan PKWT tidak boleh melebihi 5 tahun. Munculkan error jika dilanggar dan sarankan draft PKWTT.
+- **Auto-Compensation:** Integrasi ke engine `PayrollService`. Otomatis generate item pendapatan (Earnings) bernama "Kompensasi PKWT" di bulan di mana kontrak karyawan tersebut mencapai *expired date*.
 
 ---
 
@@ -489,6 +531,16 @@ sampai ke transaksi individual.
 
 ---
 
+### H2.10 — Pajak atas Natura / Kenikmatan (PMK 66/2023)
+
+**Modul:** E. Compensation & Benefits
+**Latar Belakang:** Fasilitas dari perusahaan selain uang tunai (Natura) yang nilainya melewati ambang batas kini diwajibkan pajak PPh21.
+**Rencana:**
+- Tambah flag `is_taxable_natura` dan kolom ambang batas `natura_tax_threshold` pada master `allowance_types`.
+- Modifikasi engine PPh21 TER: tambahkan nominal benefit Natura ke *Gross Income (Bruto)* khusus untuk dasar perhitungan pajak, namun tidak menambahkan uang tunai (cash) pada *Take Home Pay* akhir.
+
+---
+
 ## HORIZON 3 — NEW CAPABILITIES (Sprint 14–18)
 
 > Modul-modul baru bernilai tinggi yang memperluas cakupan sistem secara signifikan.
@@ -632,6 +684,17 @@ bertukar data dengan HRIS.
   (mis. "notifikasi saya setiap karyawan baru di-hire")
 - Rate limiting per API key dengan tier (basic / pro / enterprise)
 - Sandbox environment untuk testing integrasi
+
+---
+
+### H3.9 — Retensi Data Offboarding & Right to Erasure (UU PDP)
+
+**Modul:** K. Security & Privacy
+**Latar Belakang:** UU Dokumen Perusahaan mensyaratkan retensi data minimal 10 tahun, dan setelahnya UU PDP memberi hak kepada mantan karyawan untuk "dilupakan" (Right to Erasure).
+**Rencana:**
+- Buat cron job tahunan `hr:pdp-data-purge`.
+- Eksekusi anonymization untuk akun eks-karyawan yang resign > 10 tahun lalu (Hapus KTP, mask NIK menjadi `***`, ubah nama jadi `Archived User [ID]`).
+- Pertahankan nilai numerik pada tabel history *Payroll* dan *Asset* agar validitas jurnal akuntansi masa lalu tidak rusak.
 
 ---
 

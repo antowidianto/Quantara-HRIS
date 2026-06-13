@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hris.fullname" . }}-middleware
+  labels:
+    {{- include "hris.labels" . | nindent 4 }}
+    app.kubernetes.io/component: middleware
+spec:
+  replicas: {{ .Values.middleware.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "hris.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: middleware
+  template:
+    metadata:
+      labels:
+        {{- include "hris.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: middleware
+    spec:
+      containers:
+        - name: middleware
+          image: "{{ .Values.middleware.image.repository }}:{{ .Values.middleware.image.tag }}"
+          imagePullPolicy: {{ .Values.middleware.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: BACKEND_API_URL
+              value: "http://{{ include "hris.fullname" . }}-backend:8080"
+          resources:
+            {{- toYaml .Values.middleware.resources | nindent 12 }}
+          # Check readiness of Node.js app
+          readinessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
