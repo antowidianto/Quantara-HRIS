@@ -111,6 +111,46 @@ class CandidateOnlineTestController extends BaseController
         return $this->ok($view, 'Attempt started', 201);
     }
 
+    public function completeAssignment($id = null)
+    {
+        $account = $this->candidateAccount();
+        if (! $account) return $this->fail('Not authenticated', 401);
+
+        $assignment = $this->loadOwnedAssignment((int) $id, (int) $account['id']);
+        if (! $assignment) return $this->fail('Assignment tidak ditemukan', 404);
+        if (in_array($assignment['status'], ['COMPLETED', 'EXPIRED', 'CANCELLED'], true)) {
+            return $this->ok(['assignment' => $assignment], 'Assignment already closed');
+        }
+
+        $db = \Config\Database::connect();
+        $inProgress = $db->table('online_test_attempts')
+            ->where('assignment_id', (int) $assignment['id'])
+            ->where('status', 'IN_PROGRESS')
+            ->countAllResults();
+        if ($inProgress > 0) {
+            return $this->fail('Masih ada percobaan yang sedang berjalan. Submit dulu sebelum menyelesaikan test.', 422);
+        }
+
+        $submitted = $db->table('online_test_attempts')
+            ->where('assignment_id', (int) $assignment['id'])
+            ->whereIn('status', ['SUBMITTED', 'GRADED', 'EXPIRED'])
+            ->countAllResults();
+        if ($submitted <= 0) {
+            return $this->fail('Belum ada percobaan yang sudah dikirim.', 422);
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $db->table('online_test_assignments')->where('id', (int) $assignment['id'])->update([
+            'status'       => 'COMPLETED',
+            'completed_at' => $assignment['completed_at'] ?: $now,
+            'updated_at'   => $now,
+        ]);
+        $assignment['status'] = 'COMPLETED';
+        $assignment['completed_at'] = $assignment['completed_at'] ?: $now;
+
+        return $this->ok(['assignment' => $assignment], 'Assignment completed');
+    }
+
     public function attemptState($attemptId = null)
     {
         $account = $this->candidateAccount();

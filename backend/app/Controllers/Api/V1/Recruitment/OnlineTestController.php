@@ -3,7 +3,15 @@
 namespace App\Controllers\Api\V1\Recruitment;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Import\XlsxImportService;
 use Config\Services;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 
 /**
  * OnlineTestController — admin (HR) endpoint untuk mengelola test online,
@@ -427,6 +435,170 @@ class OnlineTestController extends ApiController
         ]);
     }
 
+    public function bankTemplate()
+    {
+        if (! $this->canView()) return $this->fail('Forbidden', 403);
+
+        $columns = $this->bankImportColumns();
+        $ss = new Spreadsheet();
+        $data = $ss->getActiveSheet();
+        $data->setTitle('Data');
+
+        foreach ($columns as $idx => $column) {
+            $cell = chr(65 + $idx) . '1';
+            $data->setCellValue($cell, $column['header'] . (! empty($column['required']) ? ' *' : ''));
+            $data->getColumnDimension(chr(65 + $idx))->setWidth($column['width'] ?? 22);
+        }
+        $data->fromArray([
+            'GENERAL',
+            'MEDIUM',
+            'MCQ_SINGLE',
+            'Jika 2 + 3 = ..., pilih jawaban yang benar.',
+            'A=5|B=6|C=7|D=8',
+            'A',
+            '',
+            '2 + 3 sama dengan 5.',
+            'contoh,aritmatika',
+        ], null, 'A2');
+        $data->getStyle('A1:I1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '4F46E5']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'CBD5E1']]],
+        ]);
+        $data->getStyle('A2:I2')->applyFromArray([
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FEF3C7']],
+            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'E5E7EB']]],
+        ]);
+        $data->freezePane('A2');
+
+        $ref = $ss->createSheet();
+        $ref->setTitle('Referensi');
+        $ref->setCellValue('A1', 'Referensi Template Bank Soal');
+        $ref->getStyle('A1')->applyFromArray(['font' => ['bold' => true, 'size' => 14]]);
+        $ref->setCellValue('A3', 'Kolom');
+        $ref->setCellValue('B3', 'Wajib');
+        $ref->setCellValue('C3', 'Keterangan');
+        $ref->getStyle('A3:C3')->applyFromArray([
+            'font' => ['bold' => true],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E0E7FF']],
+        ]);
+        $row = 4;
+        foreach ($columns as $column) {
+            $ref->setCellValue("A{$row}", $column['header']);
+            $ref->setCellValue("B{$row}", ! empty($column['required']) ? 'Ya' : '-');
+            $ref->setCellValue("C{$row}", $column['help']);
+            $ref->getStyle("C{$row}")->getAlignment()->setWrapText(true);
+            $row++;
+        }
+
+        $row += 2;
+        $ref->setCellValue("A{$row}", 'Question Type');
+        $ref->setCellValue("B{$row}", implode(', ', \App\Libraries\Recruitment\OnlineTestService::ALL_TYPES));
+        $row++;
+        $ref->setCellValue("A{$row}", 'Difficulty');
+        $ref->setCellValue("B{$row}", 'EASY, MEDIUM, HARD');
+        $row++;
+        $ref->setCellValue("A{$row}", 'Category');
+        $ref->setCellValue("B{$row}", implode(', ', array_keys(\App\Libraries\Recruitment\OnlineTestService::QUESTION_BANK_CATEGORIES)));
+        $row++;
+        $ref->setCellValue("A{$row}", 'DISC Weight');
+        $ref->setCellValue("B{$row}", 'Isi D, I, S, atau C hanya untuk tipe LIKERT_1_5');
+        $row++;
+        $ref->setCellValue("A{$row}", 'Choices');
+        $ref->setCellValue("B{$row}", 'Untuk MCQ gunakan A=Pilihan A|B=Pilihan B atau JSON array [{"key":"A","text":"Pilihan A"}]');
+        $row++;
+        $ref->setCellValue("A{$row}", 'Correct Answer');
+        $ref->setCellValue("B{$row}", 'MCQ_SINGLE: A. MCQ_MULTI: A,C. TRUE_FALSE: true/false. NUMERIC: angka.');
+        $ref->getColumnDimension('A')->setWidth(24);
+        $ref->getColumnDimension('B')->setWidth(120);
+        $ref->getColumnDimension('C')->setWidth(80);
+        $ref->getStyle("A1:C{$row}")->getAlignment()->setVertical(Alignment::VERTICAL_TOP);
+        $ref->getStyle("B1:C{$row}")->getAlignment()->setWrapText(true);
+
+        $tmpDir = WRITEPATH . 'imports/templates';
+        if (! is_dir($tmpDir)) @mkdir($tmpDir, 0775, true);
+        $path = $tmpDir . DIRECTORY_SEPARATOR . 'online-test-question-bank-template-' . date('YmdHis') . '.xlsx';
+        (new XlsxWriter($ss))->save($path);
+        $ss->disconnectWorksheets();
+
+        $filename = 'online-test-question-bank-template.xlsx';
+        $body = file_get_contents($path);
+        @unlink($path);
+
+        return $this->response
+            ->setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->setHeader('Content-Disposition', "attachment; filename=\"{$filename}\"")
+            ->setHeader('X-Filename', $filename)
+            ->setBody($body);
+    }
+
+    public function importBankTemplate()
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+
+        $file = $this->request->getFile('file');
+        if (! $file || ! $file->isValid()) {
+            return $this->fail('File upload tidak valid: ' . ($file?->getErrorString() ?? 'tidak ada file'), 400);
+        }
+        if ($file->getSize() > XlsxImportService::MAX_BYTES) {
+            return $this->fail('Ukuran file melebihi batas 10 MB', 413);
+        }
+        $ext = strtolower(pathinfo($file->getClientName(), PATHINFO_EXTENSION) ?: '');
+        if ($ext !== 'xlsx') {
+            return $this->fail('Gunakan file .xlsx dari template bank soal.', 415);
+        }
+
+        try {
+            $ss = IOFactory::load($file->getTempName());
+            $rowsRaw = $ss->getSheet(0)->toArray(null, true, true, false);
+            $ss->disconnectWorksheets();
+        } catch (\Throwable $e) {
+            return $this->fail('Gagal membaca Excel: ' . $e->getMessage(), 422);
+        }
+
+        if (count($rowsRaw) < 2) {
+            return $this->fail('File tidak berisi data soal.', 422);
+        }
+
+        $headers = array_map(fn ($h) => $this->normalizeBankHeader((string) $h), array_shift($rowsRaw));
+        $db = \Config\Database::connect();
+        $now = date('Y-m-d H:i:s');
+        $inserted = 0;
+        $errors = [];
+
+        foreach ($rowsRaw as $idx => $row) {
+            $line = $idx + 2;
+            if (! array_filter($row, static fn ($v) => trim((string) $v) !== '')) continue;
+            $assoc = [];
+            foreach ($headers as $colIdx => $header) {
+                if ($header === '') continue;
+                $assoc[$header] = $row[$colIdx] ?? null;
+            }
+            try {
+                $payload = $this->normalizeBankImportPayload($assoc);
+            } catch (\RuntimeException $e) {
+                $errors[] = ['row' => $line, 'message' => $e->getMessage()];
+                continue;
+            }
+
+            $payload['company_id'] = $companyId;
+            $payload['is_active'] = 1;
+            $payload['created_by'] = $this->userId();
+            $payload['created_at'] = $now;
+            $payload['updated_at'] = $now;
+            $db->table('online_test_question_bank')->insert($payload);
+            $inserted++;
+        }
+
+        return $this->ok([
+            'inserted' => $inserted,
+            'errors' => $errors,
+        ], $errors ? 'Import selesai dengan sebagian error' : 'Import bank soal berhasil');
+    }
+
     public function listBank()
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
@@ -600,6 +772,9 @@ class OnlineTestController extends ApiController
         $candidate = $db->table('candidates')->where('id', (int) $body['candidate_id'])->get()->getRowArray();
         if (! $candidate || (int) $candidate['company_id'] !== $companyId) {
             return $this->fail('Kandidat tidak ditemukan', 404);
+        }
+        if (($candidate['current_stage'] ?? '') === 'HIRED' || ! empty($candidate['converted_employee_id'])) {
+            return $this->fail('Kandidat sudah HIRED dan tidak bisa ditugaskan online test lagi', 422, 'CANDIDATE_ALREADY_HIRED');
         }
 
         // Cegah double-assign test yang sama ke candidate yang sama (kecuali expired/cancelled)
@@ -822,6 +997,120 @@ class OnlineTestController extends ApiController
         $t = $this->tenant();
         if ($t->isSuperAdmin()) return true;
         return (int) $t->getCompanyId() === $rowCompanyId;
+    }
+
+    private function bankImportColumns(): array
+    {
+        return [
+            ['header' => 'category', 'required' => false, 'width' => 18, 'help' => 'Kategori bank soal. Contoh: GENERAL, TPA_NUMERIK, ENGLISH, DISC.'],
+            ['header' => 'difficulty', 'required' => false, 'width' => 16, 'help' => 'EASY, MEDIUM, atau HARD. Default MEDIUM.'],
+            ['header' => 'question_type', 'required' => true, 'width' => 22, 'help' => 'MCQ_SINGLE, MCQ_MULTI, TRUE_FALSE, LIKERT_1_5, NUMERIC, SHORT_ANSWER.'],
+            ['header' => 'prompt', 'required' => true, 'width' => 56, 'help' => 'Isi soal atau pernyataan.'],
+            ['header' => 'choices', 'required' => false, 'width' => 48, 'help' => 'Untuk MCQ: A=Pilihan A|B=Pilihan B atau JSON array. Kosong untuk non-MCQ.'],
+            ['header' => 'correct_answer', 'required' => false, 'width' => 22, 'help' => 'MCQ_SINGLE A, MCQ_MULTI A,C, TRUE_FALSE true/false, NUMERIC angka.'],
+            ['header' => 'disc_weight', 'required' => false, 'width' => 16, 'help' => 'D/I/S/C untuk LIKERT_1_5 DISC.'],
+            ['header' => 'explanation', 'required' => false, 'width' => 48, 'help' => 'Pembahasan atau referensi jawaban.'],
+            ['header' => 'tags', 'required' => false, 'width' => 28, 'help' => 'Pisahkan dengan koma atau pipe. Contoh: verbal,sinonim.'],
+        ];
+    }
+
+    private function normalizeBankHeader(string $header): string
+    {
+        return strtolower(trim(str_replace('*', '', $header)));
+    }
+
+    private function normalizeBankImportPayload(array $row): array
+    {
+        $type = strtoupper(trim((string) ($row['question_type'] ?? '')));
+        if ($type === '' || ! in_array($type, \App\Libraries\Recruitment\OnlineTestService::ALL_TYPES, true)) {
+            throw new \RuntimeException('question_type tidak valid');
+        }
+
+        $prompt = trim((string) ($row['prompt'] ?? ''));
+        if ($prompt === '') {
+            throw new \RuntimeException('prompt wajib diisi');
+        }
+
+        $difficulty = strtoupper(trim((string) ($row['difficulty'] ?? 'MEDIUM')));
+        if (! in_array($difficulty, ['EASY', 'MEDIUM', 'HARD'], true)) {
+            $difficulty = 'MEDIUM';
+        }
+
+        $category = strtoupper(trim((string) ($row['category'] ?? 'GENERAL'))) ?: 'GENERAL';
+        $discWeight = strtoupper(trim((string) ($row['disc_weight'] ?? '')));
+        if (! in_array($discWeight, ['D', 'I', 'S', 'C'], true)) {
+            $discWeight = null;
+        }
+
+        $choices = $this->parseBankChoices((string) ($row['choices'] ?? ''));
+        $correctAnswer = $this->parseBankCorrectAnswer($type, (string) ($row['correct_answer'] ?? ''));
+        $tags = array_values(array_filter(array_map(
+            static fn ($tag) => trim((string) $tag),
+            preg_split('/[,|]/', (string) ($row['tags'] ?? '')) ?: [],
+        )));
+
+        return [
+            'category'       => $category,
+            'difficulty'     => $difficulty,
+            'question_type'  => $type,
+            'prompt'         => $prompt,
+            'choices'        => $choices !== [] ? json_encode($choices, JSON_UNESCAPED_UNICODE) : null,
+            'correct_answer' => $correctAnswer !== null ? json_encode($correctAnswer, JSON_UNESCAPED_UNICODE) : null,
+            'disc_weight'    => $discWeight,
+            'explanation'    => trim((string) ($row['explanation'] ?? '')) ?: null,
+            'tags'           => $tags !== [] ? json_encode($tags, JSON_UNESCAPED_UNICODE) : null,
+        ];
+    }
+
+    private function parseBankChoices(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') return [];
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            $choices = [];
+            foreach ($decoded as $idx => $item) {
+                if (is_array($item)) {
+                    $text = trim((string) ($item['text'] ?? ''));
+                    if ($text === '') continue;
+                    $choices[] = [
+                        'key' => trim((string) ($item['key'] ?? chr(65 + $idx))),
+                        'text' => $text,
+                    ];
+                } else {
+                    $text = trim((string) $item);
+                    if ($text !== '') $choices[] = ['key' => chr(65 + $idx), 'text' => $text];
+                }
+            }
+            return $choices;
+        }
+
+        $choices = [];
+        foreach (explode('|', $raw) as $idx => $part) {
+            $part = trim($part);
+            if ($part === '') continue;
+            $segments = explode('=', $part, 2);
+            $choices[] = count($segments) === 2
+                ? ['key' => trim($segments[0]), 'text' => trim($segments[1])]
+                : ['key' => chr(65 + $idx), 'text' => $part];
+        }
+        return array_values(array_filter($choices, static fn ($c) => $c['key'] !== '' && $c['text'] !== ''));
+    }
+
+    private function parseBankCorrectAnswer(string $type, string $raw)
+    {
+        $raw = trim($raw);
+        if ($raw === '') return null;
+        if ($type === 'TRUE_FALSE') {
+            return in_array(strtolower($raw), ['1', 'true', 'ya', 'yes', 'benar'], true);
+        }
+        if ($type === 'NUMERIC') {
+            return is_numeric($raw) ? (float) $raw : $raw;
+        }
+        if ($type === 'MCQ_MULTI') {
+            return array_values(array_filter(array_map('trim', explode(',', $raw))));
+        }
+        return $raw;
     }
 
     /**

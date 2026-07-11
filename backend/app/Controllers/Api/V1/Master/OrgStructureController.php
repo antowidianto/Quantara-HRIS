@@ -377,6 +377,10 @@ class OrgStructureController extends ApiController
             if ((int) $pos['company_id'] !== (int) $emp['company_id']) {
                 return $this->fail('Posisi harus dalam perusahaan yang sama', 422, 'CROSS_TENANT');
             }
+            $posDeptId = $pos['department_id'] !== null ? (int) $pos['department_id'] : null;
+            if ($newDeptId !== null && $posDeptId !== $newDeptId) {
+                return $this->fail('Posisi tujuan harus berada di department tujuan', 422, 'POSITION_DEPARTMENT_MISMATCH');
+            }
             // Saran ringan: posisi harusnya nempel di department yang sama
             // dengan tujuan; tapi kita tidak hard-block — bolehkan kalau
             // posisi tsb cross-dept (mis. shared role), dengan catatan di
@@ -394,7 +398,11 @@ class OrgStructureController extends ApiController
             'department_id' => $newDeptId,
             'updated_at'    => date('Y-m-d H:i:s'),
         ];
-        if ($newPosId !== null) $update['position_id'] = $newPosId;
+        if ($newPosId !== null) {
+            $update['position_id'] = $newPosId;
+        } elseif ($oldDeptId !== $newDeptId) {
+            $update['position_id'] = null;
+        }
 
         $db->table('employees')->where('id', $empId)->update($update);
 
@@ -404,7 +412,7 @@ class OrgStructureController extends ApiController
                 'employee',
                 $empId,
                 ['department_id' => $oldDeptId, 'position_id' => $oldPosId],
-                ['department_id' => $newDeptId, 'position_id' => $newPosId ?? $oldPosId],
+                ['department_id' => $newDeptId, 'position_id' => $update['position_id'] ?? $oldPosId],
                 "Pindahkan {$emp['full_name']} antar department/posisi"
             );
 
@@ -416,7 +424,7 @@ class OrgStructureController extends ApiController
         return $this->ok([
             'employee_id'    => $empId,
             'department_id'  => $newDeptId,
-            'position_id'    => $newPosId ?? $oldPosId,
+            'position_id'    => $update['position_id'] ?? $oldPosId,
             'reports_synced' => $report,
         ], 'Karyawan berhasil dipindahkan, direct report disesuaikan');
     }
@@ -479,6 +487,17 @@ class OrgStructureController extends ApiController
      * juga disediakan sebagai endpoint manual untuk debugging /
      * maintenance.
      */
+    public function previewRecomputeReports()
+    {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+
+        $svc = new ReportingChainService();
+        $result = $svc->previewForCompany($companyId);
+
+        return $this->ok($result, 'Preview sinkron atasan berhasil dihitung');
+    }
+
     public function recomputeReports()
     {
         $companyId = $this->requireCompanyId();
@@ -490,12 +509,13 @@ class OrgStructureController extends ApiController
         Services::audit()
             ->forModule('MASTER')
             ->log(
-                'RECOMPUTE',
-                'reporting_chain',
-                $companyId,
-                null,
-                $result,
-                "Hitung ulang direct report: {$result['updated']} berubah, {$result['unchanged']} tetap"
+                action: 'reporting_chain.recompute',
+                entity: 'reporting_chain',
+                entityId: $companyId,
+                before: null,
+                after: $result,
+                description: "Hitung ulang direct report: {$result['updated']} berubah, {$result['unchanged']} tetap",
+                metadata: ['company_id' => $companyId]
             );
 
         return $this->ok($result, 'Direct report dihitung ulang');

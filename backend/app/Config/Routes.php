@@ -125,6 +125,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('tests',                                'Recruitment\CandidateOnlineTestController::listAssignments');
         $routes->get('tests/(:num)',                         'Recruitment\CandidateOnlineTestController::showAssignment/$1');
         $routes->post('tests/(:num)/start',                  'Recruitment\CandidateOnlineTestController::startAttempt/$1');
+        $routes->post('tests/(:num)/complete',               'Recruitment\CandidateOnlineTestController::completeAssignment/$1');
         $routes->get('attempts/(:num)',                      'Recruitment\CandidateOnlineTestController::attemptState/$1');
         $routes->post('attempts/(:num)/answer',              'Recruitment\CandidateOnlineTestController::saveAnswer/$1');
         $routes->post('attempts/(:num)/submit',              'Recruitment\CandidateOnlineTestController::submitAttempt/$1');
@@ -144,6 +145,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
     $routes->post('careers/(:segment)/jobs/(:segment)/apply', 'Recruitment\CareerPublicController::apply/$1/$2');
     $routes->get('careers/(:segment)/jobs/(:segment)',        'Recruitment\CareerPublicController::jobDetail/$1/$2');
     $routes->get('careers/(:segment)/jobs',                   'Recruitment\CareerPublicController::listJobs/$1');
+    $routes->get('careers/(:segment)/options',                'Recruitment\CareerPublicController::formOptions/$1');
     $routes->get('careers/(:segment)',                        'Recruitment\CareerPublicController::landing/$1');
 
     // ─── Horizon 2 / H2.5 — Referral slug resolver (PUBLIC) ────────
@@ -561,6 +563,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->post('org-structure/move-employee',        'Master\OrgStructureController::moveEmployee');
         $routes->post('org-structure/set-manager',          'Master\OrgStructureController::setManager');
         $routes->post('org-structure/bulk-reorder',         'Master\OrgStructureController::bulkReorder');
+        $routes->get('org-structure/recompute-reports/preview', 'Master\OrgStructureController::previewRecomputeReports');
         $routes->post('org-structure/recompute-reports',    'Master\OrgStructureController::recomputeReports');
 
         // Organization Roles — master jabatan kunci untuk lookup approver.
@@ -800,6 +803,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
 
         // Endpoint khusus didefinisikan SEBELUM (:num) supaya path
         // /categories tidak nyangkut sebagai resource id.
+        $routes->get('online-test-questions-bank/template',   'Recruitment\OnlineTestController::bankTemplate');
+        $routes->post('online-test-questions-bank/import',    'Recruitment\OnlineTestController::importBankTemplate');
         $routes->get('online-test-questions-bank/categories', 'Recruitment\OnlineTestController::bankCategories');
         $routes->get('online-test-questions-bank',            'Recruitment\OnlineTestController::listBank');
         $routes->post('online-test-questions-bank',           'Recruitment\OnlineTestController::createBank');

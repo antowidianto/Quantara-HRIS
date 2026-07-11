@@ -51,6 +51,20 @@ class ReportingChainService
      */
     public function recomputeForCompany(int $companyId): array
     {
+        return $this->computeForCompany($companyId, true);
+    }
+
+    /**
+     * Preview recompute tanpa menulis ke database. Dipakai UI sebelum user
+     * klik sinkron supaya dampaknya jelas.
+     */
+    public function previewForCompany(int $companyId): array
+    {
+        return $this->computeForCompany($companyId, false);
+    }
+
+    private function computeForCompany(int $companyId, bool $apply): array
+    {
         $db = Database::connect();
 
         // 1) Load department parent map (id => parent_id|null) sekali.
@@ -67,7 +81,7 @@ class ReportingChainService
 
         // 2) Load semua karyawan aktif + posisi/tier-nya. Sekali query.
         $emps = $db->table('employees e')
-            ->select('e.id, e.department_id, e.position_id, e.manager_id, p.tier')
+            ->select('e.id, e.employee_number, e.full_name, e.department_id, e.position_id, e.manager_id, e.supervisor_id, p.tier')
             ->join('positions p', 'p.id = e.position_id', 'left')
             ->where('e.company_id', $companyId)
             ->where('e.is_active', 1)
@@ -90,7 +104,7 @@ class ReportingChainService
         unset($tiers, $ids);
 
         // 4) Untuk tiap karyawan, resolve atasan baru.
-        $updated = 0; $unchanged = 0; $errors = [];
+        $updated = 0; $unchanged = 0; $managerUpdated = 0; $supervisorUpdated = 0; $errors = []; $sample = [];
         $now = date('Y-m-d H:i:s');
 
         foreach ($emps as $e) {
@@ -98,21 +112,55 @@ class ReportingChainService
             $did = $e['department_id'] !== null ? (int) $e['department_id'] : null;
             $tier = $e['tier'] ?: 'STAFF';
             $oldManager = $e['manager_id'] !== null ? (int) $e['manager_id'] : null;
+            $oldSupervisor = $e['supervisor_id'] !== null ? (int) $e['supervisor_id'] : null;
 
             $newManager = $this->resolveManager($eid, $tier, $did, $byDeptTier, $deptParent);
+            $update = [];
+            if ($newManager !== $oldManager) {
+                $update['manager_id'] = $newManager;
+                $managerUpdated++;
+            }
 
-            if ($newManager === $oldManager) {
+            // supervisor_id adalah approval-line manual. Ikut sinkron hanya
+            // jika masih kosong atau sebelumnya sama dengan manager_id lama.
+            if ($oldSupervisor === null || $oldSupervisor === $oldManager) {
+                if ($oldSupervisor !== $newManager) {
+                    $update['supervisor_id'] = $newManager;
+                    $supervisorUpdated++;
+                }
+            }
+
+            if (empty($update)) {
                 $unchanged++;
                 continue;
             }
-            $db->table('employees')->where('id', $eid)->update([
-                'manager_id' => $newManager,
-                'updated_at' => $now,
-            ]);
+            if (count($sample) < 10) {
+                $sample[] = [
+                    'employee_id' => $eid,
+                    'employee_number' => $e['employee_number'] ?? null,
+                    'employee_name' => $e['full_name'] ?? null,
+                    'department_id' => $did,
+                    'old_manager_id' => $oldManager,
+                    'new_manager_id' => $newManager,
+                    'old_supervisor_id' => $oldSupervisor,
+                    'new_supervisor_id' => $update['supervisor_id'] ?? $oldSupervisor,
+                ];
+            }
+            $update['updated_at'] = $now;
+            if ($apply) {
+                $db->table('employees')->where('id', $eid)->update($update);
+            }
             $updated++;
         }
 
-        return ['updated' => $updated, 'unchanged' => $unchanged, 'errors' => $errors];
+        return [
+            'updated' => $updated,
+            'unchanged' => $unchanged,
+            'manager_updated' => $managerUpdated,
+            'supervisor_updated' => $supervisorUpdated,
+            'sample' => $sample,
+            'errors' => $errors,
+        ];
     }
 
     /**
@@ -152,7 +200,7 @@ class ReportingChainService
         // Load semua employee di company (perlu untuk resolve atasan
         // yang mungkin di luar subtree, mis. ke parent dept).
         $emps = $db->table('employees e')
-            ->select('e.id, e.department_id, e.position_id, e.manager_id, p.tier')
+            ->select('e.id, e.department_id, e.position_id, e.manager_id, e.supervisor_id, p.tier')
             ->join('positions p', 'p.id = e.position_id', 'left')
             ->where('e.company_id', $companyId)
             ->where('e.is_active', 1)
@@ -173,7 +221,7 @@ class ReportingChainService
         unset($tiers, $ids);
 
         $deptSet = array_flip($deptIds);
-        $updated = 0; $unchanged = 0;
+        $updated = 0; $unchanged = 0; $supervisorUpdated = 0;
         $now = date('Y-m-d H:i:s');
 
         foreach ($emps as $e) {
@@ -184,20 +232,34 @@ class ReportingChainService
             $eid = (int) $e['id'];
             $tier = $e['tier'] ?: 'STAFF';
             $oldManager = $e['manager_id'] !== null ? (int) $e['manager_id'] : null;
+            $oldSupervisor = $e['supervisor_id'] !== null ? (int) $e['supervisor_id'] : null;
 
             $newManager = $this->resolveManager($eid, $tier, $did, $byDeptTier, $deptParent);
-            if ($newManager === $oldManager) {
+            $update = [];
+            if ($newManager !== $oldManager) {
+                $update['manager_id'] = $newManager;
+            }
+            if ($oldSupervisor === null || $oldSupervisor === $oldManager) {
+                if ($oldSupervisor !== $newManager) {
+                    $update['supervisor_id'] = $newManager;
+                    $supervisorUpdated++;
+                }
+            }
+            if (empty($update)) {
                 $unchanged++;
                 continue;
             }
-            $db->table('employees')->where('id', $eid)->update([
-                'manager_id' => $newManager,
-                'updated_at' => $now,
-            ]);
+            $update['updated_at'] = $now;
+            $db->table('employees')->where('id', $eid)->update($update);
             $updated++;
         }
 
-        return ['updated' => $updated, 'unchanged' => $unchanged, 'subtree_size' => count($deptIds)];
+        return [
+            'updated' => $updated,
+            'unchanged' => $unchanged,
+            'supervisor_updated' => $supervisorUpdated,
+            'subtree_size' => count($deptIds),
+        ];
     }
 
     /**
