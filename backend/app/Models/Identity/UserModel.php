@@ -2,6 +2,8 @@
 
 namespace App\Models\Identity;
 
+use App\Models\BaseModel;
+
 /**
  * UserModel — Sprint B / A1.
  *

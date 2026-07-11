@@ -10,9 +10,6 @@ D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/a
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/RNImagePickerSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/RNImagePickerSpec_autolinked_build/CMakeFiles/rebuild_cache.dir
-D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/reactnativemmkv_autolinked_build/CMakeFiles/react_codegen_reactnativemmkv.dir
-D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/reactnativemmkv_autolinked_build/CMakeFiles/edit_cache.dir
-D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/reactnativemmkv_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/RNPermissionsSpec_autolinked_build/CMakeFiles/react_codegen_RNPermissionsSpec.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/RNPermissionsSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/RNPermissionsSpec_autolinked_build/CMakeFiles/rebuild_cache.dir

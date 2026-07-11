@@ -87,31 +87,6 @@ if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   file(TOUCH_NOCREATE "D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/CMakeFiles/cmake.verify_globs")
 endif()
 
-# react_codegen_SRCS at D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
-file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/*.cpp")
-set(OLD_GLOB
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/reactnativemmkv-generated.cpp"
-  )
-if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
-  message("-- GLOB mismatch!")
-  file(TOUCH_NOCREATE "D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/CMakeFiles/cmake.verify_globs")
-endif()
-
-# react_codegen_SRCS at D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
-file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/*.cpp")
-set(OLD_GLOB
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/ComponentDescriptors.cpp"
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/EventEmitters.cpp"
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/Props.cpp"
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/ShadowNodes.cpp"
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/States.cpp"
-  "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-mmkv/android/build/generated/source/codegen/jni/react/renderer/components/reactnativemmkv/reactnativemmkvJSI-generated.cpp"
-  )
-if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
-  message("-- GLOB mismatch!")
-  file(TOUCH_NOCREATE "D:/Apps Project/hris-project-1/mobile/android/app/.cxx/RelWithDebInfo/3i1s3b32/arm64-v8a/CMakeFiles/cmake.verify_globs")
-endif()
-
 # react_codegen_SRCS at D:/Apps Project/hris-project-1/mobile/node_modules/react-native-permissions/android/build/generated/source/codegen/jni/CMakeLists.txt:9 (file)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "D:/Apps Project/hris-project-1/mobile/node_modules/react-native-permissions/android/build/generated/source/codegen/jni/*.cpp")
 set(OLD_GLOB

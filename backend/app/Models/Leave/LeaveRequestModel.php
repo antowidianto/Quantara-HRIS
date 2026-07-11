@@ -2,6 +2,8 @@
 
 namespace App\Models\Leave;
 
+use App\Models\BaseModel;
+
 /**
  * LeaveRequestModel — Sprint B+1 / A1 (lanjutan).
  *

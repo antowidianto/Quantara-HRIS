@@ -2,6 +2,8 @@
 
 namespace App\Models\Master;
 
+use App\Models\BaseModel;
+
 class DepartmentModel extends BaseModel
 {
     protected $table         = 'departments';

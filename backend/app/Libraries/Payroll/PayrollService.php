@@ -796,7 +796,7 @@ class PayrollService
             $details[] = $row;
         }
         foreach ($deductions as $d) {
-            $details[] = [
+            $row = [
                 'payslip_id' => $payslipId,
                 'code'       => $d['code'],
                 'name'       => $d['name'],
@@ -806,6 +806,10 @@ class PayrollService
                 'is_taxable' => 0,
                 'sort_order' => $sort++,
             ];
+            if ($payslipDetailsHasNatura) {
+                $row['is_natura'] = 0;
+            }
+            $details[] = $row;
         }
         if (! empty($details)) {
             $db->table('payslip_details')->insertBatch($details);

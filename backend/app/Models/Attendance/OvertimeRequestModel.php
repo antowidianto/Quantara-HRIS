@@ -2,6 +2,8 @@
 
 namespace App\Models\Attendance;
 
+use App\Models\BaseModel;
+
 /**
  * OvertimeRequestModel — Sprint B+1 / A1 (lanjutan).
  *
