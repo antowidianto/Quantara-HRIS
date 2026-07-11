@@ -13,10 +13,17 @@
  * Ownership sudah dijamin di server side (filter candidatejwt + check
  * candidate_account_id).
  */
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { useCandidateAuthStore, candidateApi } from '@/stores/candidateAuth'
+import {
+  INSTITUTION_OPTIONS as FALLBACK_INSTITUTION_OPTIONS,
+  LOCATION_OPTIONS as FALLBACK_LOCATION_OPTIONS,
+  onlyDigits,
+  toDisplayDate,
+  toIsoDate,
+} from '@/utils/careerFormOptions'
 
 const route = useRoute()
 const router = useRouter()
@@ -61,6 +68,7 @@ const form = reactive({
   driving_license: [], vehicle_owned: [],
   reference_contacts: [],
   referral_source_detail: '',
+  extra_answers: {},
 })
 
 const errors = ref({})
@@ -118,6 +126,15 @@ const PTKP_OPTIONS = [
   { value: 'HB3', label: 'HB/3' },
 ]
 const BANK_OPTIONS = ['BCA','MANDIRI','BNI','BRI','CIMB','PERMATA','DANAMON','BTN','BSI','OCBC','MAYBANK','PANIN','MEGA','BTPN','LAINNYA']
+const locationOptions = ref([...FALLBACK_LOCATION_OPTIONS])
+const institutionOptions = ref([...FALLBACK_INSTITUTION_OPTIONS])
+const provinceOptions = computed(() => locationOptions.value.map((item) => item.province))
+const cityOptions = computed(() => cityOptionsForValue(form.province))
+const postalCodeOptions = computed(() => postalOptionsForValue(form.province, form.city))
+const isSchoolLevel = computed(() => ['SMA', 'SMK'].includes(form.last_education_level))
+const showGradeField = computed(() => !!form.last_education_level)
+const gradeLabel = computed(() => isSchoolLevel.value ? 'Nilai rata-rata' : 'IPK')
+const gradePlaceholder = computed(() => isSchoolLevel.value ? '0 - 100' : '0.00 - 4.00')
 
 // Section anchors untuk sticky table-of-contents
 const SECTIONS = [
@@ -139,6 +156,7 @@ async function fetchData() {
   loading.value = true
   error.value = null
   try {
+    await loadCareerOptions()
     const res = await api.get(`/careers/account/applications/${candidateId.value}`)
     const data = res.data.data
     meta.value = {
@@ -158,7 +176,7 @@ async function fetchData() {
         } else if (typeof form[k] === 'number') {
           form[k] = v !== null && v !== undefined ? Number(v) : 0
         } else {
-          form[k] = v ?? ''
+          form[k] = (k === 'birth_date' || k === 'available_from') ? toDisplayDate(v) : (v ?? '')
         }
       }
     })
@@ -170,6 +188,40 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
+
+function cityOptionsForValue(province) {
+  return locationOptions.value.find((item) => item.province === province)?.cities || []
+}
+
+function postalOptionsForValue(province, city) {
+  return cityOptionsForValue(province).find((item) => item.city === city)?.postal_codes || []
+}
+
+async function loadCareerOptions() {
+  try {
+    const res = await api.get(`/careers/${slug.value}/options`)
+    const data = res.data?.data || {}
+    if (Array.isArray(data.locations) && data.locations.length) {
+      locationOptions.value = data.locations
+    }
+    if (Array.isArray(data.institutions) && data.institutions.length) {
+      institutionOptions.value = data.institutions
+    }
+  } catch (_) {
+    // Fallback tetap tersedia dari helper lokal.
+  }
+}
+
+watch(() => form.province, () => {
+  if (!cityOptionsForValue(form.province).some((item) => item.city === form.city)) {
+    form.city = ''
+    form.postal_code = ''
+  }
+})
+watch(() => form.city, () => {
+  const codes = postalOptionsForValue(form.province, form.city)
+  if (!codes.includes(form.postal_code)) form.postal_code = codes[0] || ''
+})
 
 // ─── Helpers: dynamic referensi ──────────────────────────────────
 function addReference() {
@@ -206,7 +258,8 @@ function validate() {
   }
   if (form.gpa !== '' && form.gpa !== null) {
     const g = parseFloat(form.gpa)
-    if (Number.isNaN(g) || g < 0 || g > 4) errors.value.gpa = 'IPK 0–4'
+    const maxGrade = isSchoolLevel.value ? 100 : 4
+    if (Number.isNaN(g) || g < 0 || g > maxGrade) errors.value.gpa = isSchoolLevel.value ? 'Nilai rata-rata 0 - 100' : 'IPK 0-4'
   }
   if (form.bank_account_number && ! /^\d{8,20}$/.test(form.bank_account_number.replace(/\D/g, ''))) {
     errors.value.bank_account_number = 'No rekening 8–20 digit'
@@ -241,7 +294,12 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { ...form }
+    const payload = {
+      ...form,
+      birth_date: toIsoDate(form.birth_date),
+      available_from: toIsoDate(form.available_from),
+      nik: onlyDigits(form.nik, 16),
+    }
     // Filter referensi kosong
     payload.reference_contacts = form.reference_contacts.filter(
       r => (r.name || '').trim() || (r.phone || '').trim(),
@@ -378,7 +436,7 @@ function scrollToSection(id) {
                 </div>
                 <div>
                   <label class="cp-label">Tanggal Lahir</label>
-                  <input v-model="form.birth_date" type="date" class="cp-input" />
+                  <input v-model="form.birth_date" type="text" class="cp-input" placeholder="dd/mm/yy" />
                 </div>
                 <div>
                   <label class="cp-label">Jenis Kelamin</label>
@@ -435,7 +493,7 @@ function scrollToSection(id) {
                 <div>
                   <label class="cp-label">NIK</label>
                   <input v-model="form.nik" type="text" class="cp-input"
-                    :class="errors.nik && 'cp-error-mark'" maxlength="20" inputmode="numeric" />
+                    :class="errors.nik && 'cp-error-mark'" maxlength="16" inputmode="numeric" @input="form.nik = onlyDigits(form.nik, 16)" />
                   <p v-if="errors.nik" class="cp-err">{{ errors.nik }}</p>
                 </div>
                 <div>
@@ -466,16 +524,25 @@ function scrollToSection(id) {
                 </div>
                 <div>
                   <label class="cp-label">Kota</label>
-                  <input v-model="form.city" type="text" class="cp-input" />
+                  <select v-model="form.city" class="cp-input" :disabled="!form.province">
+                    <option value="">Pilih kota</option>
+                    <option v-for="item in cityOptions" :key="item.city" :value="item.city">{{ item.city }}</option>
+                  </select>
                 </div>
                 <div>
                   <label class="cp-label">Provinsi</label>
-                  <input v-model="form.province" type="text" class="cp-input" />
+                  <select v-model="form.province" class="cp-input">
+                    <option value="">Pilih provinsi</option>
+                    <option v-for="p in provinceOptions" :key="p" :value="p">{{ p }}</option>
+                  </select>
                 </div>
                 <div>
                   <label class="cp-label">Kode Pos</label>
-                  <input v-model="form.postal_code" type="text" class="cp-input"
-                    :class="errors.postal_code && 'cp-error-mark'" maxlength="5" />
+                  <select v-model="form.postal_code" class="cp-input"
+                    :class="errors.postal_code && 'cp-error-mark'" :disabled="!form.city">
+                    <option value="">Pilih kode pos</option>
+                    <option v-for="code in postalCodeOptions" :key="code" :value="code">{{ code }}</option>
+                  </select>
                   <p v-if="errors.postal_code" class="cp-err">{{ errors.postal_code }}</p>
                 </div>
               </div>
@@ -594,7 +661,10 @@ function scrollToSection(id) {
                 </div>
                 <div class="sm:col-span-2">
                   <label class="cp-label">Institusi</label>
-                  <input v-model="form.last_education_institution" type="text" class="cp-input" />
+                  <input v-model="form.last_education_institution" type="text" class="cp-input" list="profile-institutions" />
+                  <datalist id="profile-institutions">
+                    <option v-for="name in institutionOptions" :key="name" :value="name" />
+                  </datalist>
                 </div>
                 <div class="sm:col-span-2">
                   <label class="cp-label">Jurusan</label>
@@ -605,10 +675,10 @@ function scrollToSection(id) {
                   <input v-model="form.last_education_year" type="number" :min="1980"
                     :max="new Date().getFullYear() + 1" class="cp-input" />
                 </div>
-                <div>
-                  <label class="cp-label">IPK</label>
-                  <input v-model="form.gpa" type="number" step="0.01" min="0" max="4"
-                    class="cp-input" :class="errors.gpa && 'cp-error-mark'" />
+                <div v-if="showGradeField">
+                  <label class="cp-label">{{ gradeLabel }}</label>
+                  <input v-model="form.gpa" type="number" step="0.01" min="0" :max="isSchoolLevel ? 100 : 4"
+                    class="cp-input" :class="errors.gpa && 'cp-error-mark'" :placeholder="gradePlaceholder" />
                   <p v-if="errors.gpa" class="cp-err">{{ errors.gpa }}</p>
                 </div>
               </div>
@@ -634,7 +704,7 @@ function scrollToSection(id) {
                   </div>
                   <div>
                     <label class="cp-label">Tanggal Bisa Mulai</label>
-                    <input v-model="form.available_from" type="date" class="cp-input" />
+                    <input v-model="form.available_from" type="text" class="cp-input" placeholder="dd/mm/yy" />
                   </div>
                 </div>
                 <div class="grid sm:grid-cols-3 gap-4 mt-4">

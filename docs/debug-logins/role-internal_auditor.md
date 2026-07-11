@@ -1,0 +1,14 @@
+# Role: Internal Auditor (`internal_auditor`)
+
+Generated from DB `hris_db` on 2026-07-11 11:34:15 +07.
+
+- Role ID: 22
+- System role: yes
+- Users: 1 total, 1 active
+- Permissions: 37
+
+Internal login accepts either `email` or `employee_number` as `identifier`.
+
+| User ID | Name | Email identifier | NIP identifier | Password | Active | Must change | 2FA | Lock | Branch | Dept | Position |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2 | Diah Pertiwi | komisaris.independen@quantara.id | EMP-0002 | Quantara@2026 | yes | yes | no | - | JKT | BOC | Komisaris Independen |

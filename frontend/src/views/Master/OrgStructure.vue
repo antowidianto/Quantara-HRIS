@@ -21,7 +21,7 @@
  *
  * Lihat docs/ORG_STRUCTURE.md.
  */
-import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -31,7 +31,7 @@ import {
   PlusIcon, BuildingOffice2Icon, UserGroupIcon, BriefcaseIcon,
   ArrowsRightLeftIcon, ArrowPathIcon, ArrowUturnLeftIcon,
   CheckCircleIcon, XMarkIcon, ClipboardDocumentListIcon,
-  QuestionMarkCircleIcon,
+  QuestionMarkCircleIcon, ChevronRightIcon, ChevronDownIcon,
 } from '@heroicons/vue/24/outline'
 import DepartmentNode from './DepartmentNode.vue'
 import DepartmentDetailModal from './DepartmentDetailModal.vue'
@@ -48,6 +48,11 @@ const tree = ref([])
 const stats = ref({ total_departments: 0, total_positions: 0, total_employees: 0, total_open_mpps: 0 })
 const collapsedIds = ref(new Set())
 const employees = ref([])
+const selectedDeptId = ref('')
+const viewMode = ref('chart')
+const chartViewport = ref(null)
+const pan = reactive({ x: 0, y: 0 })
+const panning = reactive({ active: false, pointerId: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 
 // Detail modal
 const detailDeptId = ref(null)
@@ -72,6 +77,12 @@ const editForm = reactive({
 const editingNew = ref(false)
 
 const flatDepartments = computed(() => flattenTree(tree.value))
+const departmentOptions = computed(() => flattenDepartmentOptions(tree.value))
+const selectedDept = computed(() => selectedDeptId.value ? findNode(Number(selectedDeptId.value)) : null)
+const visibleTree = computed(() => {
+  return selectedDept.value ? [selectedDept.value] : []
+})
+const visibleRows = computed(() => flattenRows(visibleTree.value))
 
 // ─── Fetch ─────────────────────────────────────────────────────────
 async function load() {
@@ -82,6 +93,9 @@ async function load() {
       api.get('/employees', { params: { per_page: 200 } }).catch(() => ({ data: { data: [] } })),
     ])
     tree.value = structRes.data.data.departments || []
+    if (selectedDeptId.value && !findNode(Number(selectedDeptId.value), tree.value)) {
+      selectedDeptId.value = ''
+    }
     stats.value = structRes.data.data.stats || stats.value
     employees.value = empRes.data.data || []
     pendingMoves.value = []
@@ -93,6 +107,10 @@ async function load() {
 }
 
 onMounted(load)
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onPanMove)
+  window.removeEventListener('pointerup', stopPan)
+})
 
 // Super admin bisa pindah-pindah company. Kalau tab/company yang aktif
 // berubah, draft pendingMoves dari company sebelumnya tidak relevan lagi
@@ -112,6 +130,28 @@ function flattenTree(nodes, out = []) {
   for (const n of nodes) {
     out.push(n)
     if (n.children?.length) flattenTree(n.children, out)
+  }
+  return out
+}
+function flattenDepartmentOptions(nodes, depth = 0, out = []) {
+  for (const n of nodes) {
+    const prefix = depth > 0 ? `${'-- '.repeat(Math.min(depth, 6))}` : ''
+    out.push({
+      ...n,
+      depth,
+      display_name: `${prefix}${n.name}`,
+      search_text: `${n.name} ${n.code || ''}`,
+    })
+    if (n.children?.length) flattenDepartmentOptions(n.children, depth + 1, out)
+  }
+  return out
+}
+function flattenRows(nodes, depth = 0, out = []) {
+  for (const n of nodes) {
+    out.push({ node: n, depth })
+    if (!collapsedIds.value.has(n.id) && n.children?.length) {
+      flattenRows(n.children, depth + 1, out)
+    }
   }
   return out
 }
@@ -150,6 +190,46 @@ function toggleCollapse(id) {
   if (collapsedIds.value.has(id)) collapsedIds.value.delete(id)
   else collapsedIds.value.add(id)
   collapsedIds.value = new Set(collapsedIds.value)
+}
+
+function startPan(e) {
+  if (viewMode.value !== 'chart' || e.button !== 0) return
+  if (e.target?.closest?.('.org-card, button, input, select, textarea, a')) return
+
+  panning.active = true
+  panning.pointerId = e.pointerId
+  panning.startX = e.clientX
+  panning.startY = e.clientY
+  panning.originX = pan.x
+  panning.originY = pan.y
+  chartViewport.value?.setPointerCapture?.(e.pointerId)
+  window.addEventListener('pointermove', onPanMove)
+  window.addEventListener('pointerup', stopPan)
+}
+
+function onPanMove(e) {
+  if (!panning.active) return
+  pan.x = panning.originX + (e.clientX - panning.startX)
+  pan.y = panning.originY + (e.clientY - panning.startY)
+}
+
+function stopPan(e) {
+  if (!panning.active) return
+  chartViewport.value?.releasePointerCapture?.(panning.pointerId)
+  panning.active = false
+  panning.pointerId = null
+  window.removeEventListener('pointermove', onPanMove)
+  window.removeEventListener('pointerup', stopPan)
+}
+
+function resetPan() {
+  pan.x = 0
+  pan.y = 0
+}
+
+function selectDepartment(id) {
+  selectedDeptId.value = String(id)
+  resetPan()
 }
 
 // ─── Drag-and-drop department (cuma move parent) ───────────────────
@@ -276,6 +356,49 @@ async function discardChanges() {
   await load()
 }
 
+async function recomputeReports() {
+  saving.value = true
+  let preview = null
+  try {
+    const res = await api.get('/org-structure/recompute-reports/preview')
+    preview = res.data?.data || {}
+  } catch (e) {
+    saving.value = false
+    toast.error(e.response?.data?.message || 'Gagal menghitung preview sinkron atasan')
+    return
+  }
+  saving.value = false
+
+  const updated = preview.updated || 0
+  const unchanged = preview.unchanged || 0
+  const managerUpdated = preview.manager_updated || 0
+  const supervisorUpdated = preview.supervisor_updated || 0
+  const sampleNames = (preview.sample || [])
+    .slice(0, 3)
+    .map(row => row.employee_name || row.employee_number || `Employee #${row.employee_id}`)
+    .join(', ')
+
+  const ok = await confirmDialog({
+    title: 'Sinkron atasan langsung?',
+    message: updated > 0
+      ? `Preview: ${updated} karyawan akan berubah (${managerUpdated} manager_id, ${supervisorUpdated} supervisor_id), ${unchanged} tetap.${sampleNames ? ` Contoh: ${sampleNames}.` : ''}`
+      : `Preview: belum ada karyawan yang perlu diubah. ${unchanged} karyawan sudah sesuai struktur saat ini.`,
+    okText: 'Sinkron',
+  })
+  if (!ok) return
+  saving.value = true
+  try {
+    const res = await api.post('/org-structure/recompute-reports')
+    const data = res.data?.data || {}
+    toast.success(`Atasan disinkronkan: ${data.updated || 0} karyawan berubah`)
+    await load()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal sinkron atasan')
+  } finally {
+    saving.value = false
+  }
+}
+
 // ─── Department CRUD ───────────────────────────────────────────────
 function openCreateDept(parentId = null) {
   Object.assign(editForm, {
@@ -374,12 +497,49 @@ async function deleteDept(dept) {
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="inline-flex h-9 rounded-md border border-slate-200 bg-white p-0.5">
+          <button
+            class="px-3 rounded text-sm font-medium"
+            :class="viewMode === 'chart' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'"
+            @click="viewMode = 'chart'"
+            title="Tampilan bagan compact"
+          >
+            <BuildingOffice2Icon class="w-4 h-4 inline-block mr-1" /> Bagan
+          </button>
+          <button
+            class="px-3 rounded text-sm font-medium"
+            :class="viewMode === 'list' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'"
+            @click="viewMode = 'list'"
+            title="Tampilan daftar hierarki"
+          >
+            <ClipboardDocumentListIcon class="w-4 h-4 inline-block mr-1" /> Daftar
+          </button>
+        </div>
+        <div v-if="tree.length" class="w-72 max-w-full">
+          <SearchableSelect
+            v-model="selectedDeptId"
+            :items="departmentOptions"
+            value-key="id"
+            label-key="display_name"
+            sub-label-key="code"
+            :search-keys="['name', 'code', 'search_text']"
+            placeholder="Pilih department..."
+            size="sm"
+            @change="resetPan"
+          />
+        </div>
         <button class="btn-secondary" @click="showHelp = true" title="Cara pakai halaman ini">
           <QuestionMarkCircleIcon class="w-4 h-4" /> Bantuan
         </button>
         <button class="btn-secondary" @click="load" :disabled="loading || saving">
           <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Muat ulang
+        </button>
+        <button v-if="viewMode === 'chart'" class="btn-secondary" @click="resetPan" :disabled="loading || saving">
+          <ArrowUturnLeftIcon class="w-4 h-4" /> Tengah
+        </button>
+        <button class="btn-secondary" @click="recomputeReports" :disabled="loading || saving">
+          <ArrowsRightLeftIcon class="w-4 h-4" /> Sinkron Atasan
         </button>
         <button class="btn-primary" @click="openCreateDept()">
           <PlusIcon class="w-4 h-4" /> Department Baru
@@ -411,7 +571,7 @@ async function deleteDept(dept) {
     </transition>
 
     <!-- ── Canvas bagan ─────────────────────────────────────────────── -->
-    <div class="card overflow-auto bg-slate-50/60 min-h-[60vh] p-6">
+    <div class="card bg-slate-50/60 min-h-[60vh] p-4 sm:p-6">
       <div v-if="loading" class="text-center text-slate-400 py-16">
         Memuat struktur...
       </div>
@@ -422,32 +582,154 @@ async function deleteDept(dept) {
           <PlusIcon class="w-4 h-4" /> Buat Department Pertama
         </button>
       </div>
-      <div v-else class="inline-flex items-start justify-center min-w-full pb-6">
-        <div class="flex items-start gap-8 px-2">
-          <DepartmentNode
-            v-for="d in tree"
-            :key="d.id"
-            :node="d"
-            :level="0"
-            :collapsed-ids="collapsedIds"
-            :drag-over-id="dragOverId"
-            @toggle="toggleCollapse"
-            @drop-on="onDrop"
-            @drag-over="(e, id) => onDragOver(e, id)"
-            @drag-leave="onDragLeave"
-            @drag-start="onDragStart"
-            @edit="openEditDept"
-            @delete="deleteDept"
-            @add-child="openCreateDept"
-            @view-detail="openDeptDetail"
+      <div v-else-if="!selectedDeptId" class="max-w-3xl mx-auto py-10">
+        <div class="text-center mb-6">
+          <BuildingOffice2Icon class="w-12 h-12 mx-auto text-primary-500 mb-3" />
+          <h2 class="text-lg font-semibold text-slate-900">Pilih department untuk melihat bagan</h2>
+          <p class="text-sm text-slate-500 mt-1">
+            Struktur besar akan ditampilkan per department supaya halaman tetap ringan dan tidak melebar.
+          </p>
+        </div>
+
+        <div class="mb-5">
+          <SearchableSelect
+            v-model="selectedDeptId"
+            :items="departmentOptions"
+            value-key="id"
+            label-key="display_name"
+            sub-label-key="code"
+            :search-keys="['name', 'code', 'search_text']"
+            placeholder="Cari dan pilih department..."
+            max-height="20rem"
+            @change="resetPan"
           />
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div class="px-4 py-2 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Department tersedia
+          </div>
+          <div class="max-h-72 overflow-y-auto divide-y divide-slate-100">
+            <button
+              v-for="node in departmentOptions"
+              :key="node.id"
+              class="w-full px-4 py-2.5 text-left hover:bg-primary-50/60 flex items-center justify-between gap-3"
+              :style="{ paddingLeft: `${16 + Math.min(node.depth, 6) * 18}px` }"
+              @click="selectDepartment(node.id)"
+            >
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-slate-900 truncate">{{ node.name }}</span>
+                <span class="block text-[11px] text-slate-400 font-mono truncate">{{ node.code || '-' }}</span>
+              </span>
+              <span class="text-xs text-slate-500 flex-shrink-0">
+                {{ node.employee_count || 0 }} karyawan
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="viewMode === 'list'" class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div class="grid grid-cols-12 gap-3 bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <div class="col-span-5">Department</div>
+          <div class="col-span-3">Manager</div>
+          <div class="col-span-2 text-right">Karyawan</div>
+          <div class="col-span-2 text-right">Aksi</div>
+        </div>
+        <div class="divide-y divide-slate-100">
+          <div
+            v-for="{ node, depth } in visibleRows"
+            :key="node.id"
+            class="grid grid-cols-12 gap-3 px-4 py-2.5 items-center bg-white hover:bg-primary-50/30 transition-colors"
+            :class="dragOverId === node.id ? 'ring-2 ring-primary-200 bg-primary-50' : ''"
+            draggable="true"
+            @dragstart.stop="onDragStart($event, 'department', node.id)"
+            @dragover.stop="onDragOver($event, node.id)"
+            @dragleave.stop="onDragLeave"
+            @drop.stop="onDrop($event, node.id)"
+          >
+            <div class="col-span-5 flex items-center min-w-0" :style="{ paddingLeft: `${Math.min(depth, 8) * 18}px` }">
+              <button
+                v-if="node.children?.length"
+                class="w-6 h-6 mr-1 rounded hover:bg-slate-100 text-slate-500 flex items-center justify-center flex-shrink-0"
+                @click.stop="toggleCollapse(node.id)"
+                :title="collapsedIds.has(node.id) ? 'Buka sub-department' : 'Tutup sub-department'"
+              >
+                <ChevronRightIcon v-if="collapsedIds.has(node.id)" class="w-4 h-4" />
+                <ChevronDownIcon v-else class="w-4 h-4" />
+              </button>
+              <span v-else class="w-7 flex-shrink-0"></span>
+              <div class="w-8 h-8 rounded bg-primary-50 text-primary-700 flex items-center justify-center flex-shrink-0 mr-2">
+                <BuildingOffice2Icon class="w-4 h-4" />
+              </div>
+              <div class="min-w-0">
+                <div class="font-medium text-sm text-slate-900 truncate">{{ node.name }}</div>
+                <div class="text-[10px] text-slate-400 font-mono truncate">{{ node.code || '-' }}</div>
+              </div>
+            </div>
+            <div class="col-span-3 min-w-0 text-sm text-slate-600 truncate">
+              <span v-if="node.manager_name">{{ node.manager_name }}</span>
+              <span v-else class="italic text-amber-600">Belum ada manager</span>
+            </div>
+            <div class="col-span-2 text-right text-sm text-slate-600">
+              <span class="font-semibold text-slate-900">{{ node.employee_count || 0 }}</span>
+              <span v-if="(node.open_mpps || []).length" class="ml-2 text-xs text-amber-700">
+                {{ node.open_mpps.length }} lowongan
+              </span>
+            </div>
+            <div class="col-span-2 flex justify-end gap-1">
+              <button class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
+                @click.stop="openDeptDetail(node)">
+                Atur
+              </button>
+              <button class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
+                @click.stop="openEditDept(node)">
+                Edit
+              </button>
+              <button class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
+                @click.stop="openCreateDept(node.id)">
+                Sub
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        v-else
+        ref="chartViewport"
+        class="org-chart-viewport"
+        :class="{ 'is-panning': panning.active }"
+        @pointerdown="startPan"
+      >
+        <div
+          class="org-pan-layer"
+          :style="{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)` }"
+        >
+          <div class="org-root-grid">
+            <DepartmentNode
+              v-for="d in visibleTree"
+              :key="d.id"
+              :node="d"
+              :level="0"
+              :collapsed-ids="collapsedIds"
+              :drag-over-id="dragOverId"
+              @toggle="toggleCollapse"
+              @drop-on="onDrop"
+              @drag-over="(e, id) => onDragOver(e, id)"
+              @drag-leave="onDragLeave"
+              @drag-start="onDragStart"
+              @edit="openEditDept"
+              @delete="deleteDept"
+              @add-child="openCreateDept"
+              @view-detail="openDeptDetail"
+            />
+          </div>
         </div>
       </div>
     </div>
 
     <!-- ── Footer hint (kecil, tidak ganggu) ────────────────────────── -->
     <p class="text-xs text-slate-500 text-center mt-3">
-      Klik <strong>Lihat & Atur Karyawan</strong> di kartu untuk pindah orang antar dept · Tarik kartu antar level untuk ubah hierarki
+      Geser area kosong bagan untuk melihat cabang lain. Ukuran halaman tetap mengikuti browser, bukan lebar struktur.
     </p>
 
     <!-- ── Modal: Detail department (drill-down) ─────────────────── -->
@@ -577,4 +859,35 @@ async function deleteDept(dept) {
 <style scoped>
 .slide-enter-active, .slide-leave-active { transition: all 0.2s ease; }
 .slide-enter-from, .slide-leave-to { opacity: 0; transform: translateY(-8px); }
+
+.org-chart-viewport {
+  max-width: 100%;
+  height: clamp(32rem, calc(100vh - 16rem), 46rem);
+  overflow: hidden;
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.org-chart-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.org-pan-layer {
+  min-width: 100%;
+  min-height: 100%;
+  padding: 0.5rem 0.5rem 2rem;
+  will-change: transform;
+}
+
+.org-root-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2.5rem 1.75rem;
+  width: 100%;
+  min-width: 0;
+}
 </style>

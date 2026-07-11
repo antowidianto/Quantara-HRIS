@@ -41,6 +41,7 @@ const responses = ref({})
 const timer = ref(0) // detik tersisa
 let timerInterval = null
 const submitting = ref(false)
+const completing = ref(false)
 const saveTimeouts = {}
 
 // ─── Anti-cheat state ────────────────────────────────────────
@@ -125,6 +126,10 @@ const formattedTime = computed(() => {
   const s = timer.value % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 })
+const canCompleteAssignment = computed(() => {
+  if (!['PENDING', 'IN_PROGRESS'].includes(assignment.value?.status)) return false
+  return previousAttempts.value.some((a) => ['SUBMITTED', 'GRADED', 'EXPIRED'].includes(a.status))
+})
 
 const currentQuestion = computed(() => questions.value[currentIdx.value] || null)
 const totalQuestions = computed(() => questions.value.length)
@@ -187,6 +192,22 @@ async function submit(force = false) {
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal submit')
     submitting.value = false
+  }
+}
+
+async function completeAssignment() {
+  if (completing.value) return
+  if (!confirm('Selesaikan test sekarang? HR akan memakai hasil terbaik yang sudah dikirim.')) return
+  completing.value = true
+  try {
+    await api.post(`/careers/account/tests/${assignmentId.value}/complete`)
+    toast.success('Test selesai')
+    await fetchAssignment()
+    stage.value = 'SUBMITTED'
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal menyelesaikan test')
+  } finally {
+    completing.value = false
   }
 }
 
@@ -317,7 +338,13 @@ watch(stage, (s) => {
           </ul>
         </div>
 
-        <div class="mt-6 flex justify-end">
+        <div class="mt-6 flex flex-wrap justify-end gap-2">
+          <button v-if="canCompleteAssignment"
+            @click="completeAssignment"
+            :disabled="completing"
+            class="px-6 py-3 border border-emerald-300 text-emerald-700 rounded-lg font-semibold hover:bg-emerald-50 disabled:opacity-50">
+            {{ completing ? 'Menyelesaikan...' : 'Selesaikan Test' }}
+          </button>
           <button v-if="['PENDING','IN_PROGRESS'].includes(assignment?.status)"
             @click="beginAttempt(false)"
             class="px-6 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700">

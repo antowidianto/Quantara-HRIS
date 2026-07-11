@@ -44,7 +44,7 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
   <div class="org-node flex flex-col items-center">
     <!-- Kartu department: minimalis. Klik = buka detail. -->
     <div
-      class="org-card group relative w-60 rounded-xl border bg-white shadow-sm transition-all overflow-visible"
+      class="org-card group relative rounded-xl border bg-white shadow-sm transition-all overflow-visible"
       :class="dragOverId === node.id
         ? 'border-primary-500 ring-2 ring-primary-200 shadow-lg'
         : 'border-slate-200 hover:border-primary-400 hover:shadow-md'"
@@ -134,13 +134,8 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
     <!-- Connector + children -->
     <template v-if="! isCollapsed() && hasChildren()">
       <div class="w-px h-7 bg-slate-300"></div>
-      <div class="org-children flex items-start gap-6 relative">
-        <div
-          v-if="(node.children || []).length > 1"
-          class="absolute top-0 h-px bg-slate-300"
-          :style="{ left: '7.5rem', right: '7.5rem' }"
-        ></div>
-        <div v-for="c in (node.children || [])" :key="c.id" class="flex flex-col items-center">
+      <div class="org-children relative">
+        <div v-for="c in (node.children || [])" :key="c.id" class="org-child flex flex-col items-center">
           <div class="w-px h-7 bg-slate-300"></div>
           <DepartmentNode
             :node="c"
@@ -164,6 +159,40 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
 </template>
 
 <style scoped>
-.org-card { flex-shrink: 0; }
+.org-node {
+  min-width: 0;
+}
+
+.org-card {
+  width: min(15rem, calc(100vw - 3rem));
+  flex-shrink: 0;
+}
+
+.org-children {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.75rem 1.25rem;
+  max-width: min(100%, 72rem);
+}
+
+.org-child {
+  flex: 0 1 15rem;
+  min-width: min(15rem, calc(100vw - 3rem));
+  position: relative;
+}
+
+.org-child::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(8rem, 45%);
+  height: 1px;
+  transform: translateX(-50%);
+  background: rgb(203 213 225);
+}
+
 [draggable="true"]:active { cursor: grabbing; }
 </style>

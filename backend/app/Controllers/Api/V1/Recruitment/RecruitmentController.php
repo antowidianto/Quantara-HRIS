@@ -266,6 +266,7 @@ class RecruitmentController extends ApiController
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $q = trim((string) ($this->request->getGet('q') ?? ''));
         $stage = strtoupper((string) ($this->request->getGet('stage') ?? ''));
+        $excludeStagesRaw = strtoupper((string) ($this->request->getGet('exclude_stages') ?? ''));
         $jobId = (int) ($this->request->getGet('job_posting_id') ?? 0);
 
         $builder = $db->table('candidates c')
@@ -283,6 +284,15 @@ class RecruitmentController extends ApiController
                 ->groupEnd();
         }
         if ($stage !== '') $builder->where('c.current_stage', $stage);
+        if ($excludeStagesRaw !== '') {
+            $excludeStages = array_values(array_intersect(
+                array_map('trim', explode(',', $excludeStagesRaw)),
+                self::STAGES,
+            ));
+            if ($excludeStages !== []) {
+                $builder->whereNotIn('c.current_stage', $excludeStages);
+            }
+        }
         if ($jobId) $builder->where('c.job_posting_id', $jobId);
 
         $total = $builder->countAllResults(false);

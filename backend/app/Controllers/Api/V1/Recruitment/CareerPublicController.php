@@ -111,6 +111,139 @@ class CareerPublicController extends BaseController
     }
 
     /**
+     * GET /careers/{slug}/options
+     *
+     * Opsi form kandidat:
+     * - prioritas dari tabel master lokal hasil sync online
+     * - fallback ke data tenant existing kalau master belum terisi
+     */
+    public function formOptions(?string $slug = null)
+    {
+        $slug = $this->normalizeSlug($slug);
+        if (! $slug) return $this->fail('Slug perusahaan tidak valid', 400);
+
+        $company = $this->resolveCompanyOrFail($slug);
+        if (! $company) return $this->response;
+
+        $db = \Config\Database::connect();
+        $locations = [];
+
+        if ($db->tableExists('career_master_locations')) {
+            $rows = $db->table('career_master_locations')
+                ->select('province, city, postal_code')
+                ->where('is_active', 1)
+                ->orderBy('province', 'ASC')
+                ->orderBy('city', 'ASC')
+                ->orderBy('postal_code', 'ASC')
+                ->get()->getResultArray();
+
+            foreach ($rows as $row) {
+                $province = trim((string) ($row['province'] ?? ''));
+                $city = trim((string) ($row['city'] ?? ''));
+                $postal = trim((string) ($row['postal_code'] ?? ''));
+                if ($province === '' || $city === '' || $postal === '') continue;
+                $locations[$province][$city] ??= [];
+                if (! in_array($postal, $locations[$province][$city], true)) {
+                    $locations[$province][$city][] = $postal;
+                }
+            }
+        }
+
+        if (empty($locations) && $db->tableExists('candidates')) {
+            $rows = $db->table('candidates')
+                ->select('province, city, postal_code')
+                ->where('company_id', (int) $company['id'])
+                ->where('deleted_at IS NULL')
+                ->groupStart()
+                    ->where('province IS NOT NULL')
+                    ->orWhere('city IS NOT NULL')
+                    ->orWhere('postal_code IS NOT NULL')
+                ->groupEnd()
+                ->get()->getResultArray();
+
+            foreach ($rows as $row) {
+                $province = trim((string) ($row['province'] ?? ''));
+                $city = trim((string) ($row['city'] ?? ''));
+                $postal = trim((string) ($row['postal_code'] ?? ''));
+                if ($province === '' && $city === '' && $postal === '') continue;
+                $provinceKey = $province !== '' ? $province : 'Lainnya';
+                $cityKey = $city !== '' ? $city : 'Lainnya';
+                $locations[$provinceKey][$cityKey] ??= [];
+                if ($postal !== '' && ! in_array($postal, $locations[$provinceKey][$cityKey], true)) {
+                    $locations[$provinceKey][$cityKey][] = $postal;
+                }
+            }
+        }
+
+        if (empty($locations) && $db->tableExists('job_postings')) {
+            $jobCities = $db->table('job_postings')
+                ->select('city')
+                ->where('company_id', (int) $company['id'])
+                ->where('deleted_at IS NULL')
+                ->where('city IS NOT NULL')
+                ->groupBy('city')
+                ->get()->getResultArray();
+            foreach ($jobCities as $row) {
+                $city = trim((string) ($row['city'] ?? ''));
+                if ($city === '') continue;
+                $locations['Lainnya'][$city] ??= [];
+            }
+        }
+
+        $locationOptions = [];
+        ksort($locations, SORT_NATURAL | SORT_FLAG_CASE);
+        foreach ($locations as $province => $cities) {
+            ksort($cities, SORT_NATURAL | SORT_FLAG_CASE);
+            $cityOptions = [];
+            foreach ($cities as $city => $postalCodes) {
+                sort($postalCodes, SORT_NATURAL);
+                $cityOptions[] = [
+                    'city' => $city,
+                    'postal_codes' => array_values($postalCodes),
+                ];
+            }
+            $locationOptions[] = [
+                'province' => $province,
+                'cities' => $cityOptions,
+            ];
+        }
+
+        $institutions = [];
+        if ($db->tableExists('career_master_institutions')) {
+            $institutionRows = $db->table('career_master_institutions')
+                ->select('name')
+                ->where('is_active', 1)
+                ->orderBy('name', 'ASC')
+                ->limit(5000)
+                ->get()->getResultArray();
+            foreach ($institutionRows as $row) {
+                $name = trim((string) ($row['name'] ?? ''));
+                if ($name !== '') $institutions[] = $name;
+            }
+        }
+
+        if (empty($institutions) && $db->tableExists('candidates')) {
+            $institutionRows = $db->table('candidates')
+                ->select('last_education_institution')
+                ->where('company_id', (int) $company['id'])
+                ->where('deleted_at IS NULL')
+                ->where('last_education_institution IS NOT NULL')
+                ->groupBy('last_education_institution')
+                ->orderBy('last_education_institution', 'ASC')
+                ->get()->getResultArray();
+            foreach ($institutionRows as $row) {
+                $name = trim((string) ($row['last_education_institution'] ?? ''));
+                if ($name !== '') $institutions[] = $name;
+            }
+        }
+
+        return $this->ok([
+            'locations' => $locationOptions,
+            'institutions' => array_values(array_unique($institutions)),
+        ]);
+    }
+
+    /**
      * POST /careers/{slug}/jobs/{jobSlug}/apply
      * Submit lamaran. Body JSON / multipart: profile + path file (sudah
      * di-upload via /careers/upload).

@@ -73,22 +73,68 @@ function openCreate() {
 
 function openEdit(row) {
   editing.value = JSON.parse(JSON.stringify(row))
+  editing.value.opened_at = toDisplayDate(editing.value.opened_at)
+  editing.value.closed_at = toDisplayDate(editing.value.closed_at)
   loadPipelineTemplates()
   showForm.value = true
 }
 
 async function save() {
   try {
+    const payload = {
+      ...editing.value,
+      opened_at: toIsoDate(editing.value.opened_at),
+      closed_at: toIsoDate(editing.value.closed_at),
+      description: textToHtmlList(editing.value.description),
+      requirements: textToHtmlList(editing.value.requirements),
+    }
     if (editing.value.id) {
-      await api.put(`/job-postings/${editing.value.id}`, editing.value)
+      await api.put(`/job-postings/${editing.value.id}`, payload)
       toast.success('Diupdate')
     } else {
-      await api.post('/job-postings', editing.value)
+      await api.post('/job-postings', payload)
       toast.success('Posting dibuat')
     }
     showForm.value = false
     fetchData()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+}
+
+function toDisplayDate(value) {
+  if (!value) return ''
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return value
+  return `${m[3]}/${m[2]}/${m[1]}`
+}
+
+function toIsoDate(value) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) return text
+  const m = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/)
+  if (!m) return text
+  const year = m[3].length === 2 ? `20${m[3]}` : m[3]
+  return `${year}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function textToHtmlList(value) {
+  const text = String(value || '').trim()
+  if (!text || /<(ul|ol|p|br|li)\b/i.test(text)) return text
+  const items = text.split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean)
+  if (!items.length) return ''
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
 }
 
 async function openJob(row) {
@@ -305,11 +351,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </div>
           <div>
             <label class="label">Tgl Buka</label>
-            <input type="date" v-model="editing.opened_at" class="input" />
+            <input type="text" v-model="editing.opened_at" class="input" placeholder="dd/mm/yy" />
           </div>
           <div>
             <label class="label">Tgl Tutup (deadline)</label>
-            <input type="date" v-model="editing.closed_at" class="input" />
+            <input type="text" v-model="editing.closed_at" class="input" placeholder="dd/mm/yy" />
           </div>
           <div class="md:col-span-2">
             <label class="label">Pipeline Rekrutmen</label>
@@ -341,10 +387,12 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           <div class="md:col-span-2">
             <label class="label">Deskripsi Pekerjaan</label>
             <textarea v-model="editing.description" rows="4" class="input"></textarea>
+            <p class="text-xs text-gray-500 mt-1">Tulis satu poin per baris. Sistem akan menampilkan sebagai list di Career Portal.</p>
           </div>
           <div class="md:col-span-2">
             <label class="label">Persyaratan Kandidat</label>
             <textarea v-model="editing.requirements" rows="3" class="input"></textarea>
+            <p class="text-xs text-gray-500 mt-1">Contoh: Pendidikan minimal S1, pengalaman 2 tahun, skill wajib. Satu baris = satu bullet.</p>
           </div>
           <div class="md:col-span-2">
             <label class="label">Catatan internal</label>
