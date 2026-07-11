@@ -70,7 +70,7 @@ class RedisRateLimiter
      * @param int    $now         Current timestamp
      * @param int    $cost        Berapa token yang akan di-consume
      *
-     * @return array{allowed:bool, remaining:int, retry_after:int, reset_at:int}
+     * @return array{allowed:bool, remaining:int, retry_after:int, reset_at:int, last_refill:int, new_value:int}
      */
     public static function consumePure(
         int $current,
@@ -160,8 +160,12 @@ class RedisRateLimiter
             ]);
             $this->redis->expire($key, $windowSec * 2); // TTL 2× window untuk safety
 
-            unset($result['new_value'], $result['last_refill']);
-            return $result;
+            return [
+                'allowed'     => $result['allowed'],
+                'remaining'   => $result['remaining'],
+                'retry_after' => $result['retry_after'],
+                'reset_at'    => $result['reset_at'],
+            ];
         } catch (\Throwable $e) {
             log_message('warning', '[RedisRateLimiter] consume failed: ' . $e->getMessage());
             return [

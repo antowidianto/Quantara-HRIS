@@ -2,6 +2,8 @@
 
 namespace App\Models\System;
 
+use App\Models\BaseModel;
+
 /**
  * IdempotencyKeyModel — Mobile Prep / MOB-3
  *

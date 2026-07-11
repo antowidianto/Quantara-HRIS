@@ -274,6 +274,7 @@ class PulseSurveyService
             ->where('scope_type', $scopeType)
             ->where('scope_id', $scopeId, $scopeId === null)
             ->get()->getRowArray();
+        /** @var array<string, mixed> $payload */
         $payload = $result + ['computed_at' => $now];
         unset($payload['suppressed'], $payload['suppression_reason']);
         if ($existing) {

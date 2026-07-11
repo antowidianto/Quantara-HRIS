@@ -54,7 +54,7 @@ class ExceptionLogger
                     'release'              => (string) (env('app.version') ?? 'unknown'),
                     // Strip request body & query string supaya tidak kirim PII
                     'send_default_pii'     => false,
-                    'before_send' => static function (\Sentry\Event $event) {
+                    'before_send' => static function ($event) {
                         // Redact field yang berpotensi PII di request data
                         return $event;
                     },
@@ -76,13 +76,13 @@ class ExceptionLogger
         if (self::$sentryEnabled) {
             try {
                 if (! empty($context)) {
-                    \Sentry\configureScope(function (\Sentry\State\Scope $scope) use ($context) {
+                    \call_user_func('Sentry\\configureScope', function ($scope) use ($context) {
                         foreach ($context as $key => $val) {
                             $scope->setExtra($key, $val);
                         }
                     });
                 }
-                \Sentry\captureException($e);
+                \call_user_func('Sentry\\captureException', $e);
             } catch (\Throwable $sentryError) {
                 log_message('warning', 'Sentry capture failed: ' . $sentryError->getMessage());
             }
@@ -126,7 +126,12 @@ class ExceptionLogger
     {
         if (! self::$sentryEnabled) return;
         try {
-            \Sentry\addBreadcrumb(new \Sentry\Breadcrumb(
+            $breadcrumbClass = 'Sentry\\Breadcrumb';
+            if (! class_exists($breadcrumbClass)) {
+                return;
+            }
+
+            \call_user_func('Sentry\\addBreadcrumb', new $breadcrumbClass(
                 level: $level,
                 type: 'default',
                 category: 'app',
@@ -141,7 +146,7 @@ class ExceptionLogger
     {
         if (! self::$sentryEnabled || $userId === null) return;
         try {
-            \Sentry\configureScope(function (\Sentry\State\Scope $scope) use ($userId, $email, $name) {
+            \call_user_func('Sentry\\configureScope', function ($scope) use ($userId, $email, $name) {
                 $scope->setUser([
                     'id'       => (string) $userId,
                     'email'    => $email,

@@ -2,6 +2,8 @@
 
 namespace App\Models\Master;
 
+use App\Models\BaseModel;
+
 /**
  * CompanyModel — Sprint B / A1.
  *

@@ -10,9 +10,6 @@ D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNCNet
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNImagePickerSpec_autolinked_build/CMakeFiles/react_codegen_RNImagePickerSpec.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNImagePickerSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNImagePickerSpec_autolinked_build/CMakeFiles/rebuild_cache.dir
-D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/reactnativemmkv_autolinked_build/CMakeFiles/react_codegen_reactnativemmkv.dir
-D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/reactnativemmkv_autolinked_build/CMakeFiles/edit_cache.dir
-D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/reactnativemmkv_autolinked_build/CMakeFiles/rebuild_cache.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNPermissionsSpec_autolinked_build/CMakeFiles/react_codegen_RNPermissionsSpec.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNPermissionsSpec_autolinked_build/CMakeFiles/edit_cache.dir
 D:/Apps Project/hris-project-1/mobile/android/app/.cxx/Debug/4h471435/x86/RNPermissionsSpec_autolinked_build/CMakeFiles/rebuild_cache.dir

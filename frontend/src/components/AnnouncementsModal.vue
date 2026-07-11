@@ -104,6 +104,7 @@ onMounted(loadAnnouncements)
         enter-to-class="opacity-100 scale-100"
       >
         <div
+          v-if="showModal"
           class="relative w-full max-w-lg bg-white dark:bg-gray-800 rounded-xl shadow-2xl overflow-hidden"
           @click.stop
         >

@@ -2,6 +2,8 @@
 
 namespace App\Models\Master;
 
+use App\Models\BaseModel;
+
 /**
  * PositionModel — Sprint B+1 / A1 (lanjutan).
  *

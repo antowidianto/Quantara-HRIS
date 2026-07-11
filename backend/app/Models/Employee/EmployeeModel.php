@@ -2,6 +2,8 @@
 
 namespace App\Models\Employee;
 
+use App\Models\BaseModel;
+
 /**
  * EmployeeModel — Sprint B / A1.
  *

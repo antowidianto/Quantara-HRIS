@@ -2,6 +2,8 @@
 
 namespace App\Models\Master;
 
+use App\Models\BaseModel;
+
 class BranchModel extends BaseModel
 {
     protected $table         = 'branches';

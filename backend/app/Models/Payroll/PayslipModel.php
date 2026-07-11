@@ -2,6 +2,8 @@
 
 namespace App\Models\Payroll;
 
+use App\Models\BaseModel;
+
 /**
  * PayslipModel — Sprint B+1 / A1 (lanjutan).
  *

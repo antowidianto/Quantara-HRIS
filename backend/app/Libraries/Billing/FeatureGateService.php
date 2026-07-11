@@ -23,7 +23,7 @@ use Config\Database;
  */
 class FeatureGateService
 {
-    /** @var array<string, array<string, bool>> Cached resolution per company_id */
+    /** @var array<int, array<string, bool>> Cached resolution per company_id */
     private array $cache = [];
 
     /**
