@@ -75,10 +75,12 @@ watch(() => props.departmentId, (id) => { if (id) load() }, { immediate: true })
 // ─── Move karyawan ──────────────────────────────────────────────────
 const moveEmp = ref(null)        // employee yang sedang dipindah
 const moveTarget = ref('')
+const movePositionTarget = ref('')
 
 function openMove(emp) {
   moveEmp.value = emp
   moveTarget.value = ''
+  movePositionTarget.value = ''
 }
 
 async function confirmMove() {
@@ -86,6 +88,10 @@ async function confirmMove() {
   const targetId = moveTarget.value ? Number(moveTarget.value) : null
   if (! emp || targetId === department.value.id) {
     moveEmp.value = null; return
+  }
+  if (targetPositionOptions.value.length && !movePositionTarget.value) {
+    toast.warning('Pilih jabatan di department tujuan')
+    return
   }
   const targetName = props.allDepartments.find(d => d.id === targetId)?.name || 'Tanpa department'
   const ok = await confirmDialog({
@@ -99,7 +105,7 @@ async function confirmMove() {
     await api.post('/org-structure/move-employee', {
       employee_id: emp.id,
       new_department_id: targetId,
-      new_position_id: null,
+      new_position_id: movePositionTarget.value ? Number(movePositionTarget.value) : null,
     })
     toast.success(`${emp.full_name} dipindahkan ke ${targetName}`)
     moveEmp.value = null
@@ -146,6 +152,21 @@ const moveTargetOptions = computed(() => {
   return [...(props.allDepartments || [])]
     .filter(d => d.id !== department.value.id)
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+})
+
+const selectedTargetDepartment = computed(() => {
+  const targetId = moveTarget.value ? Number(moveTarget.value) : null
+  if (!targetId) return null
+  return props.allDepartments.find(d => d.id === targetId) || null
+})
+
+const targetPositionOptions = computed(() => {
+  return [...(selectedTargetDepartment.value?.positions || [])]
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+})
+
+watch(moveTarget, () => {
+  movePositionTarget.value = ''
 })
 
 // MPP status badge color (subtle)
@@ -388,13 +409,29 @@ function tierLabel(t) { return TIER_LABEL[t] || 'Staff' }
               placeholder="- Pilih department tujuan -"
             />
           </div>
+          <div v-if="moveTarget">
+            <label class="label">Jabatan di department tujuan</label>
+            <SearchableSelect
+              v-model="movePositionTarget"
+              :items="targetPositionOptions"
+              value-key="id"
+              label-key="name"
+              sub-label-key="code"
+              :search-keys="['name','code','tier']"
+              :placeholder="targetPositionOptions.length ? '- Pilih jabatan tujuan -' : 'Belum ada jabatan di department ini'"
+              :disabled="!targetPositionOptions.length"
+            />
+            <p v-if="!targetPositionOptions.length" class="text-xs text-amber-600 mt-1">
+              Karyawan akan dipindahkan tanpa jabatan sampai posisi department tujuan dibuat.
+            </p>
+          </div>
           <div class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
             Atasan langsung karyawan akan disesuaikan otomatis berdasarkan struktur dept tujuan.
           </div>
         </div>
         <div class="px-5 py-3 border-t flex justify-end gap-2">
           <button class="btn-secondary" @click="moveEmp = null">Batal</button>
-          <button class="btn-primary" :disabled="!moveTarget" @click="confirmMove">
+          <button class="btn-primary" :disabled="!moveTarget || (targetPositionOptions.length && !movePositionTarget)" @click="confirmMove">
             Pindahkan
           </button>
         </div>

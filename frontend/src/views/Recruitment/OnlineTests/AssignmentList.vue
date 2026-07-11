@@ -54,8 +54,8 @@ async function loadAssignments() {
 
 async function loadCandidates() {
   try {
-    const res = await api.get('/candidates', { params: { per_page: 100 } })
-    candidates.value = res.data.data || []
+    const res = await api.get('/candidates', { params: { per_page: 100, exclude_stages: 'HIRED' } })
+    candidates.value = (res.data.data || []).filter((c) => c.current_stage !== 'HIRED' && !c.converted_employee_id)
   } catch (_) {}
 }
 

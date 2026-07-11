@@ -21,6 +21,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import careerApi from '@/api/careerPublic'
 import { useCandidateAuthStore } from '@/stores/candidateAuth'
+import {
+  INSTITUTION_OPTIONS as FALLBACK_INSTITUTION_OPTIONS,
+  LOCATION_OPTIONS as FALLBACK_LOCATION_OPTIONS,
+  joinList,
+  onlyDigits,
+  splitList,
+  toDisplayDate,
+  toIsoDate,
+} from '@/utils/careerFormOptions'
 
 const candidateAuth = useCandidateAuthStore()
 
@@ -135,6 +144,10 @@ const form = reactive({
   linkedin_url: '', portfolio_url: '', github_url: '',
   // Skills, sertifikasi, bahasa
   languages: '', professional_skills: '', certifications: '',
+  work_experiences: [],
+  language_items: [],
+  skill_items: [],
+  certification_items: [],
   // Mobilitas (relevan untuk role lapangan / sales)
   driving_license: [], vehicle_owned: [],
   // Referensi profesional
@@ -191,6 +204,15 @@ const dragOver = reactive({ cv: false, ktp: false, ijazah: false, photo: false }
 const showConfirmModal = ref(false)
 const showRestoreBanner = ref(false)
 const draftSavedAt = ref(null)
+const locationOptions = ref([...FALLBACK_LOCATION_OPTIONS])
+const institutionOptions = ref([...FALLBACK_INSTITUTION_OPTIONS])
+const provinceOptions = computed(() => locationOptions.value.map((item) => item.province))
+const cityOptions = computed(() => cityOptionsForValue(form.province))
+const postalCodeOptions = computed(() => postalOptionsForValue(form.province, form.city))
+const isSchoolLevel = computed(() => ['SMA', 'SMK'].includes(form.last_education_level))
+const showGradeField = computed(() => !!form.last_education_level)
+const gradeLabel = computed(() => isSchoolLevel.value ? 'Nilai rata-rata' : 'IPK')
+const gradePlaceholder = computed(() => isSchoolLevel.value ? '0 - 100' : '0.00 - 4.00')
 
 // ─── Draft persistence (localStorage) ───────────────────────────
 function draftKey() {
@@ -228,9 +250,94 @@ function applyDraft(draft) {
       form[k] = draft[k]
     }
   })
+  hydrateMultiRows()
   if (draft._step >= 1 && draft._step <= STEPS.length) step.value = draft._step
   draftSavedAt.value = draft._saved_at
   toast.success('Draft sebelumnya dipulihkan')
+}
+
+function hydrateMultiRows() {
+  if (!Array.isArray(form.work_experiences) || form.work_experiences.length === 0) {
+    form.work_experiences = form.extra_answers?.work_experiences || []
+    if (!form.work_experiences.length && (form.current_position || form.current_company)) {
+      form.work_experiences = [{ position: form.current_position, company: form.current_company, years: form.years_experience }]
+    }
+  }
+  if (!Array.isArray(form.language_items) || form.language_items.length === 0) form.language_items = splitList(form.languages)
+  if (!Array.isArray(form.skill_items) || form.skill_items.length === 0) form.skill_items = splitList(form.professional_skills)
+  if (!Array.isArray(form.certification_items) || form.certification_items.length === 0) form.certification_items = splitList(form.certifications)
+}
+
+function addWorkExperience() { form.work_experiences.push({ position: '', company: '', years: '' }) }
+function removeWorkExperience(idx) { form.work_experiences.splice(idx, 1) }
+function addSimpleItem(key) { form[key].push('') }
+function removeSimpleItem(key, idx) { form[key].splice(idx, 1) }
+
+function normalizeDateField(field) {
+  form[field] = toDisplayDate(toIsoDate(form[field]) || form[field])
+}
+
+function cityOptionsForValue(province) {
+  return locationOptions.value.find((item) => item.province === province)?.cities || []
+}
+
+function postalOptionsForValue(province, city) {
+  return cityOptionsForValue(province).find((item) => item.city === city)?.postal_codes || []
+}
+
+function syncLocationAfterProvince() {
+  if (!cityOptionsForValue(form.province).some((item) => item.city === form.city)) {
+    form.city = ''
+    form.postal_code = ''
+  }
+}
+
+function syncLocationAfterCity() {
+  const codes = postalOptionsForValue(form.province, form.city)
+  if (!codes.includes(form.postal_code)) form.postal_code = codes[0] || ''
+}
+
+async function loadCareerOptions() {
+  try {
+    const res = await careerApi.get(`/careers/${slug.value}/options`)
+    const data = res.data?.data || {}
+    if (Array.isArray(data.locations) && data.locations.length) {
+      locationOptions.value = data.locations
+    }
+    if (Array.isArray(data.institutions) && data.institutions.length) {
+      institutionOptions.value = data.institutions
+    }
+  } catch (_) {
+    // Fallback tetap tersedia dari helper lokal.
+  }
+}
+
+function buildPayload() {
+  hydrateMultiRows()
+  const workRows = form.work_experiences.filter((item) => item.position || item.company || item.years)
+  const payload = {
+    ...form,
+    birth_date: toIsoDate(form.birth_date),
+    available_from: toIsoDate(form.available_from),
+    nik: onlyDigits(form.nik, 16),
+    languages: joinList(form.language_items),
+    professional_skills: joinList(form.skill_items),
+    certifications: joinList(form.certification_items),
+    current_position: workRows[0]?.position || form.current_position,
+    current_company: workRows[0]?.company || form.current_company,
+    years_experience: workRows[0]?.years || form.years_experience,
+    extra_answers: { ...(form.extra_answers || {}), work_experiences: workRows },
+  }
+  delete payload.cv_name
+  delete payload.ktp_name
+  delete payload.ijazah_name
+  delete payload.photo_name
+  delete payload.consent
+  delete payload.work_experiences
+  delete payload.language_items
+  delete payload.skill_items
+  delete payload.certification_items
+  return payload
 }
 
 function clearDraft() {
@@ -247,6 +354,8 @@ watch(form, () => {
 }, { deep: true })
 
 watch(step, () => { if (! loading.value) saveDraft() })
+watch(() => form.province, syncLocationAfterProvince)
+watch(() => form.city, syncLocationAfterCity)
 
 // ─── Fetch ──────────────────────────────────────────────────────
 async function fetchJob() {
@@ -258,6 +367,7 @@ async function fetchJob() {
     company.value = data.company
     job.value = data.job
     extraQuestions.value = data.extra_questions || []
+    await loadCareerOptions()
     const brandColor = company.value?.brand_color || '#0F62FE'
     document.documentElement.style.setProperty('--brand-color', brandColor)
     if (careerBrand) {
@@ -292,8 +402,9 @@ async function fetchJob() {
     // Default available_from H+14
     if (! form.available_from) {
       const d = new Date(); d.setDate(d.getDate() + 14)
-      form.available_from = d.toISOString().slice(0, 10)
+      form.available_from = toDisplayDate(d.toISOString().slice(0, 10))
     }
+    hydrateMultiRows()
 
     // Cek draft
     const draft = loadDraft()
@@ -383,7 +494,10 @@ function validateStep(s) {
     }
     if (! form.birth_date) errors.value.birth_date = 'Tanggal lahir wajib diisi'
     else {
-      const age = (Date.now() - new Date(form.birth_date).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
+      const birthDate = toIsoDate(form.birth_date)
+      const birthMs = new Date(birthDate).getTime()
+      const age = (Date.now() - birthMs) / (1000 * 60 * 60 * 24 * 365.25)
+      if (Number.isNaN(birthMs)) errors.value.birth_date = 'Format tanggal dd/mm/yy'
       if (age < 14 || age > 80) errors.value.birth_date = 'Tanggal lahir tidak valid'
     }
     if (! form.gender) errors.value.gender = 'Jenis kelamin wajib diisi'
@@ -432,7 +546,10 @@ function validateStep(s) {
     if (! form.last_education_level) errors.value.last_education_level = 'Pendidikan terakhir wajib diisi'
     if (form.gpa !== '' && form.gpa !== null) {
       const g = parseFloat(form.gpa)
-      if (Number.isNaN(g) || g < 0 || g > 4) errors.value.gpa = 'IPK 0.00 – 4.00'
+      const maxGrade = isSchoolLevel.value ? 100 : 4
+      if (Number.isNaN(g) || g < 0 || g > maxGrade) {
+        errors.value.gpa = isSchoolLevel.value ? 'Nilai rata-rata 0 - 100' : 'IPK 0.00 - 4.00'
+      }
     }
     if (job.value?.min_education && form.last_education_level) {
       const order = EDU_LEVELS.indexOf(form.last_education_level)
@@ -513,12 +630,7 @@ async function submit() {
   showConfirmModal.value = false
   submitting.value = true
   try {
-    const payload = { ...form }
-    delete payload.cv_name
-    delete payload.ktp_name
-    delete payload.ijazah_name
-    delete payload.photo_name
-    delete payload.consent
+    const payload = buildPayload()
     const res = await careerApi.post(
       `/careers/${slug.value}/jobs/${jobSlug.value}/apply`,
       payload,
@@ -680,7 +792,7 @@ function fmtSize(bytes) {
             </div>
             <div>
               <label class="cp-label">Tanggal Lahir <span class="text-red-500">*</span></label>
-              <input v-model="form.birth_date" type="date" class="cp-input" :class="errors.birth_date && 'cp-error-mark'" />
+              <input v-model="form.birth_date" type="text" class="cp-input" :class="errors.birth_date && 'cp-error-mark'" placeholder="dd/mm/yy" @blur="normalizeDateField('birth_date')" />
               <p v-if="errors.birth_date" class="cp-err">{{ errors.birth_date }}</p>
             </div>
           </div>
@@ -761,7 +873,7 @@ function fmtSize(bytes) {
           <div class="grid sm:grid-cols-2 gap-4">
             <div>
               <label class="cp-label">NIK / Nomor KTP</label>
-              <input v-model="form.nik" type="text" class="cp-input" :class="errors.nik && 'cp-error-mark'" placeholder="16 digit" maxlength="20" inputmode="numeric" />
+              <input v-model="form.nik" type="text" class="cp-input" :class="errors.nik && 'cp-error-mark'" placeholder="16 digit" maxlength="16" inputmode="numeric" @input="form.nik = onlyDigits(form.nik, 16)" />
               <p v-if="errors.nik" class="cp-err">{{ errors.nik }}</p>
             </div>
             <div>
@@ -794,16 +906,25 @@ function fmtSize(bytes) {
           <div class="grid sm:grid-cols-3 gap-4">
             <div class="sm:col-span-1">
               <label class="cp-label">Kota <span class="text-red-500">*</span></label>
-              <input v-model="form.city" type="text" class="cp-input" :class="errors.city && 'cp-error-mark'" placeholder="mis. Jakarta Selatan" />
+              <select v-model="form.city" class="cp-input" :class="errors.city && 'cp-error-mark'" :disabled="!form.province">
+                <option value="">Pilih kota</option>
+                <option v-for="item in cityOptions" :key="item.city" :value="item.city">{{ item.city }}</option>
+              </select>
               <p v-if="errors.city" class="cp-err">{{ errors.city }}</p>
             </div>
             <div class="sm:col-span-1">
               <label class="cp-label">Provinsi</label>
-              <input v-model="form.province" type="text" class="cp-input" placeholder="mis. DKI Jakarta" />
+              <select v-model="form.province" class="cp-input">
+                <option value="">Pilih provinsi</option>
+                <option v-for="p in provinceOptions" :key="p" :value="p">{{ p }}</option>
+              </select>
             </div>
             <div class="sm:col-span-1">
               <label class="cp-label">Kode Pos</label>
-              <input v-model="form.postal_code" type="text" class="cp-input" :class="errors.postal_code && 'cp-error-mark'" placeholder="5 digit" maxlength="5" inputmode="numeric" />
+              <select v-model="form.postal_code" class="cp-input" :class="errors.postal_code && 'cp-error-mark'" :disabled="!form.city">
+                <option value="">Pilih kode pos</option>
+                <option v-for="code in postalCodeOptions" :key="code" :value="code">{{ code }}</option>
+              </select>
               <p v-if="errors.postal_code" class="cp-err">{{ errors.postal_code }}</p>
             </div>
           </div>
@@ -1011,7 +1132,10 @@ function fmtSize(bytes) {
             </div>
             <div class="sm:col-span-2">
               <label class="cp-label">Institusi</label>
-              <input v-model="form.last_education_institution" type="text" class="cp-input" placeholder="mis. Universitas Indonesia" />
+              <input v-model="form.last_education_institution" type="text" class="cp-input" list="career-institutions" placeholder="mis. Universitas Indonesia" />
+              <datalist id="career-institutions">
+                <option v-for="name in institutionOptions" :key="name" :value="name" />
+              </datalist>
             </div>
           </div>
           <div class="grid sm:grid-cols-3 gap-4">
@@ -1025,9 +1149,9 @@ function fmtSize(bytes) {
               <p v-if="errors.last_education_year" class="cp-err">{{ errors.last_education_year }}</p>
             </div>
           </div>
-          <div>
-            <label class="cp-label">IPK</label>
-            <input v-model="form.gpa" type="number" step="0.01" min="0" max="4" class="cp-input max-w-xs" :class="errors.gpa && 'cp-error-mark'" placeholder="0.00 – 4.00" />
+          <div v-if="showGradeField">
+            <label class="cp-label">{{ gradeLabel }}</label>
+            <input v-model="form.gpa" type="number" step="0.01" min="0" :max="isSchoolLevel ? 100 : 4" class="cp-input max-w-xs" :class="errors.gpa && 'cp-error-mark'" :placeholder="gradePlaceholder" />
             <p v-if="errors.gpa" class="cp-err">{{ errors.gpa }}</p>
           </div>
 
@@ -1052,7 +1176,19 @@ function fmtSize(bytes) {
               </div>
               <div>
                 <label class="cp-label">Tanggal Bisa Mulai</label>
-                <input v-model="form.available_from" type="date" class="cp-input" />
+                <input v-model="form.available_from" type="text" class="cp-input" placeholder="dd/mm/yy" @blur="normalizeDateField('available_from')" />
+              </div>
+            </div>
+            <div class="mt-4">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-sm font-medium text-slate-700">Riwayat Pengalaman Tambahan</p>
+                <button type="button" class="text-sm text-[var(--brand-color,#0F62FE)] hover:underline" @click="addWorkExperience">Tambah Pengalaman</button>
+              </div>
+              <div v-for="(work, idx) in form.work_experiences" :key="idx" class="grid sm:grid-cols-[1fr_1fr_8rem_auto] gap-2 mb-2 items-end">
+                <input v-model="work.position" type="text" class="cp-input" placeholder="Jabatan" />
+                <input v-model="work.company" type="text" class="cp-input" placeholder="Perusahaan" />
+                <input v-model="work.years" type="number" min="0" max="40" step="0.5" class="cp-input" placeholder="Tahun" />
+                <button type="button" class="px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-600 hover:bg-slate-50" @click="removeWorkExperience(idx)">Hapus</button>
               </div>
             </div>
             <div class="grid sm:grid-cols-3 gap-4 mt-4">
@@ -1084,11 +1220,25 @@ function fmtSize(bytes) {
                 <p class="text-xs text-slate-500 mt-1">
                   Sebutkan bahasa + tingkat (native / fluent / advanced / intermediate / basic).
                 </p>
+                <div class="mt-2 space-y-2">
+                  <div v-for="(item, idx) in form.language_items" :key="`lang-${idx}`" class="flex gap-2">
+                    <input v-model="form.language_items[idx]" type="text" class="cp-input" placeholder="mis. English (advanced)" />
+                    <button type="button" class="px-3 py-2 border border-slate-300 rounded-md text-sm" @click="removeSimpleItem('language_items', idx)">Hapus</button>
+                  </div>
+                  <button type="button" class="text-sm text-[var(--brand-color,#0F62FE)] hover:underline" @click="addSimpleItem('language_items')">Tambah Bahasa</button>
+                </div>
               </div>
               <div>
                 <label class="cp-label">Keahlian / Skills</label>
                 <textarea v-model="form.professional_skills" rows="2" class="cp-input"
                   placeholder="mis. Excel advanced, presentasi publik, leadership, AutoCAD"></textarea>
+                <div class="mt-2 space-y-2">
+                  <div v-for="(item, idx) in form.skill_items" :key="`skill-${idx}`" class="flex gap-2">
+                    <input v-model="form.skill_items[idx]" type="text" class="cp-input" placeholder="mis. Leadership" />
+                    <button type="button" class="px-3 py-2 border border-slate-300 rounded-md text-sm" @click="removeSimpleItem('skill_items', idx)">Hapus</button>
+                  </div>
+                  <button type="button" class="text-sm text-[var(--brand-color,#0F62FE)] hover:underline" @click="addSimpleItem('skill_items')">Tambah Skill</button>
+                </div>
               </div>
               <div>
                 <label class="cp-label">Sertifikasi Profesional</label>
@@ -1097,6 +1247,13 @@ function fmtSize(bytes) {
                 <p class="text-xs text-slate-500 mt-1">
                   Cantumkan nama sertifikasi + tahun terbit / berakhir.
                 </p>
+                <div class="mt-2 space-y-2">
+                  <div v-for="(item, idx) in form.certification_items" :key="`cert-${idx}`" class="flex gap-2">
+                    <input v-model="form.certification_items[idx]" type="text" class="cp-input" placeholder="mis. Brevet Pajak A&B (2022)" />
+                    <button type="button" class="px-3 py-2 border border-slate-300 rounded-md text-sm" @click="removeSimpleItem('certification_items', idx)">Hapus</button>
+                  </div>
+                  <button type="button" class="text-sm text-[var(--brand-color,#0F62FE)] hover:underline" @click="addSimpleItem('certification_items')">Tambah Sertifikasi</button>
+                </div>
               </div>
             </div>
           </div>
