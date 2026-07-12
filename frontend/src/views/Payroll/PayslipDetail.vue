@@ -125,7 +125,7 @@ async function downloadBlob(url, filename, expectedMime) {
                   <span>{{ d.name }}</span>
                   <span v-if="d.is_natura"
                         class="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700"
-                        :title="t('payroll.slip_detail.natura_hint', 'Benefit Fasilitas/Natura (Non-Tunai) - PMK 66/2023')">
+                        :title="t('payroll.slip_detail.natura_hint')">
                     Natura
                   </span>
                 </td>
@@ -185,14 +185,8 @@ async function downloadBlob(url, filename, expectedMime) {
           <!-- H2.10 — Disclaimer natura PMK 66/2023 -->
           <div v-if="hasNatura"
                class="mb-4 rounded-md border border-purple-200 bg-purple-50 p-3 text-xs text-purple-900">
-            <div class="font-semibold mb-1">Catatan Natura / Kenikmatan (PMK 66/2023)</div>
-            <p>
-              Slip ini memuat komponen non-tunai senilai
-              <strong>{{ fmtCurrency(naturaTotal) }}</strong>. Komponen
-              tersebut termasuk dalam Penghasilan Bruto sebagai basis perhitungan
-              PPh21, namun tidak dibayar tunai. Sehingga Take Home Pay yang
-              diterima lebih kecil dari Total Earnings.
-            </p>
+            <div class="font-semibold mb-1">{{ t('payroll.slip_detail.natura_title') }}</div>
+            <p>{{ t('payroll.slip_detail.natura_description', { amount: fmtCurrency(naturaTotal) }) }}</p>
           </div>
 
           <div class="bg-primary-50 p-4 rounded flex items-center justify-between">

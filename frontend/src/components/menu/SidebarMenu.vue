@@ -86,11 +86,12 @@ watch(storageKey, () => { expanded.value = readExpanded() })
 // Resolusi label: pakai translation_key kalau ada; fallback ke `label`.
 const label = computed(() => {
   void locale.value // touch untuk reactive
-  if (props.node.translation_key) {
-    const tx = t(props.node.translation_key)
-    // Kalau t() tidak ketemu, dia kembalikan key apa adanya — pakai
-    // label hardcoded supaya tidak nampilin "nav.items.foo".
-    if (tx && tx !== props.node.translation_key) return tx
+  const keys = []
+  if (props.node.translation_key) keys.push(props.node.translation_key)
+  if (props.node.code) keys.push(`nav.menu.${props.node.code.replaceAll('.', '_')}`)
+  for (const key of keys) {
+    const tx = t(key)
+    if (tx && tx !== key) return tx
   }
   return props.node.label
 })
@@ -100,8 +101,15 @@ const iconCmp = computed(() => resolveIcon(props.node.icon))
 // Cek apakah path aktif match dengan ITEM ini.
 function pathMatches(node) {
   if (! node?.route_path) return false
-  const target = node.route_path.split('?')[0]
-  return route.path === target || route.path.startsWith(target + '/')
+  const [target, queryString = ''] = node.route_path.split('?')
+  const pathMatched = route.path === target || route.path.startsWith(target + '/')
+  if (! pathMatched) return false
+
+  // `scope` membedakan dua menu yang memakai component/path yang sama,
+  // misalnya Lembur Saya dan Kelola Lembur. Query lain seperti status hanya
+  // filter awal dan tidak menentukan identitas menu.
+  const targetScope = new URLSearchParams(queryString).get('scope')
+  return ! targetScope || route.query.scope === targetScope
 }
 
 // Cek apakah salah satu descendant ITEM match → parent harus auto-expand.
