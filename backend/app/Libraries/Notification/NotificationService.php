@@ -149,11 +149,30 @@ class NotificationService
             }
         }
 
+        if ($this->isWithinQuietHours($userId)) {
+            $enabledSlugs = ['in_app'];
+        }
+
         // Filter ke instance channel sesuai enabled slugs.
         return array_values(array_filter(
             $this->channels(),
             fn ($c) => in_array($c->slug(), $enabledSlugs, true),
         ));
+    }
+
+    private function isWithinQuietHours(int $userId): bool
+    {
+        $db = \Config\Database::connect();
+        if (! $db->fieldExists('quiet_hours_start', 'users')) return false;
+        $user = $db->table('users')->select('quiet_hours_start, quiet_hours_end')
+            ->where('id', $userId)->get()->getRowArray();
+        $start = substr((string) ($user['quiet_hours_start'] ?? ''), 0, 5);
+        $end = substr((string) ($user['quiet_hours_end'] ?? ''), 0, 5);
+        if ($start === '' || $end === '' || $start === $end) return false;
+        $now = date('H:i');
+        return $start < $end
+            ? ($now >= $start && $now < $end)
+            : ($now >= $start || $now < $end);
     }
 
     /**

@@ -87,6 +87,8 @@ export default {
     delete_warning: 'This action cannot be undone.',
     not_set: 'Not set',
     not_available: 'Not available',
+    open_link: 'Open details',
+    mark_read: 'Mark as read',
   },
 
   nav: {

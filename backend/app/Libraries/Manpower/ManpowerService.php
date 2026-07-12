@@ -47,9 +47,39 @@ class ManpowerService
         ],
         'UNBUDGET' => [
             ['step' => 1, 'approver_role' => 'HRD_MANAGER'],
-            ['step' => 2, 'approver_role' => 'DIRECTOR'],
+            ['step' => 2, 'approver_role' => 'DIRECTOR_HR'],
         ],
     ];
+
+    public function approvalPreview(int $companyId, string $requestType): array
+    {
+        $requestType = strtoupper($requestType);
+        $steps = self::DEFAULT_APPROVAL_STEPS[$requestType] ?? self::DEFAULT_APPROVAL_STEPS['BUDGET'];
+        $orgSvc = Services::orgStructure();
+        $db = Database::connect();
+        $out = [];
+        $ready = true;
+        foreach ($steps as $step) {
+            $roleKey = (string) $step['approver_role'];
+            $userId = $orgSvc->resolveApproverUser($companyId, $roleKey);
+            $employeeId = $orgSvc->resolveApproverEmployee($companyId, $roleKey);
+            $employee = $employeeId ? $db->table('employees')
+                ->select('full_name, employee_number')
+                ->where('id', $employeeId)
+                ->get()->getRowArray() : null;
+            if (! $userId || ! $employeeId || ! $employee) $ready = false;
+            $out[] = [
+                'step' => (int) $step['step'],
+                'role_key' => $roleKey,
+                'employee_id' => $employeeId,
+                'user_id' => $userId,
+                'employee_name' => $employee['full_name'] ?? null,
+                'employee_number' => $employee['employee_number'] ?? null,
+                'assigned' => (bool) ($userId && $employeeId && $employee),
+            ];
+        }
+        return ['request_type' => $requestType, 'ready' => $ready, 'steps' => $out];
+    }
 
     public function nextReferenceNumber(int $companyId): string
     {
@@ -93,6 +123,18 @@ class ManpowerService
             throw new \RuntimeException('Headcount harus minimal 1');
         }
 
+        $preview = $this->approvalPreview((int) $mpp['company_id'], (string) $mpp['request_type']);
+        if (! $preview['ready']) {
+            $missing = array_map(
+                static fn (array $step): string => $step['role_key'],
+                array_filter($preview['steps'], static fn (array $step): bool => ! $step['assigned']),
+            );
+            throw new \RuntimeException(
+                'MPP belum dapat diajukan. Penjabat wajib belum ditentukan: ' . implode(', ', $missing)
+                . '. Atur melalui Master Data > Jabatan Kunci.'
+            );
+        }
+
         $now = date('Y-m-d H:i:s');
         $db->table('manpower_requests')->where('id', $mppId)->update([
             'status'       => 'SUBMITTED',
@@ -107,8 +149,6 @@ class ManpowerService
         $db->table('manpower_request_approvals')->where('manpower_request_id', $mppId)->delete();
 
         // Resolve expected approver dari organization_structures by role_key.
-        // Best-effort: kalau role belum di-assign / vacant, kolom expected_*
-        // null dan caller harus fallback ke permission-based routing.
         $orgSvc = Services::orgStructure();
         $companyId = (int) $mpp['company_id'];
         $hasExpectedCols = in_array('expected_approver_user_id',
@@ -244,6 +284,19 @@ class ManpowerService
             throw new \RuntimeException('Tidak ada langkah approval yang menunggu');
         }
 
+        $expected = isset($pending['expected_approver_user_id'])
+            ? (int) $pending['expected_approver_user_id']
+            : null;
+        if ($expected) {
+            $resolver = Services::approvalDelegationResolver();
+            if (! $resolver->canApproveOnBehalfOf($userId, $expected, (int) $mpp['company_id'], 'MPP')) {
+                throw new \RuntimeException(
+                    "Hanya {$pending['approver_role']} (user #{$expected}) atau delegate aktif-nya "
+                    . 'yang berhak reject step ini.'
+                );
+            }
+        }
+
         $now = date('Y-m-d H:i:s');
         // Mark current step REJECTED
         $db->table('manpower_request_approvals')->where('id', (int) $pending['id'])->update([
@@ -365,6 +418,7 @@ class ManpowerService
             'created_at'      => $now,
             'updated_at'      => $now,
         ];
+        $db->transStart();
         $db->table('job_postings')->insert($insert);
         $postingId = (int) $db->insertID();
 
@@ -384,6 +438,11 @@ class ManpowerService
                 'updated_by' => $userId,
                 'updated_at' => $now,
             ]);
+        }
+
+        $db->transComplete();
+        if ($db->transStatus() === false) {
+            throw new \RuntimeException('Gagal membuat lowongan dari MPP');
         }
 
         // Sprint 5 — Onboarding planning: copy job_grade, default supervisor/

@@ -35,6 +35,7 @@ import {
 const props = defineProps({
   employeeId: { type: [Number, String, null], default: null },
   mode: { type: String, default: 'view' },
+  teamView: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'saved'])
 
@@ -122,10 +123,10 @@ const isCreating = computed(() => ! props.employeeId)
 const isEditing = computed(() => internalMode.value === 'edit' || isCreating.value)
 
 const canEdit = computed(() =>
-  auth.isSuperAdmin || auth.permissions.includes('employee.update') || auth.permissions.includes('employee.create')
+  !props.teamView && (auth.isSuperAdmin || auth.permissions.includes('employee.update') || auth.permissions.includes('employee.create'))
 )
 const canDelete = computed(() =>
-  auth.isSuperAdmin || auth.permissions.includes('employee.delete')
+  !props.teamView && (auth.isSuperAdmin || auth.permissions.includes('employee.delete'))
 )
 
 const blankForm = () => ({
@@ -155,6 +156,17 @@ const blankForm = () => ({
 const form = ref(blankForm())
 
 async function loadMasters() {
+  if (props.teamView) {
+    const [d, p, b] = await Promise.allSettled([
+      api.get('/departments', { params: { per_page: 200 } }),
+      api.get('/positions', { params: { per_page: 200 } }),
+      api.get('/branches', { params: { per_page: 200 } }),
+    ])
+    if (d.status === 'fulfilled') departments.value = d.value.data.data
+    if (p.status === 'fulfilled') positions.value = p.value.data.data
+    if (b.status === 'fulfilled') branches.value = b.value.data.data
+    return
+  }
   try {
     const [d, p, b, j, wl, emp, tpl, cl, co, ca] = await Promise.allSettled([
       api.get('/departments', { params: { per_page: 200 } }),
@@ -189,6 +201,12 @@ async function loadEmployee() {
   }
   loading.value = true
   try {
+    if (props.teamView) {
+      const emp = await api.get(`/employees/${props.employeeId}`, { params: { team_view: 1 } })
+      employee.value = emp.data.data
+      form.value = { ...blankForm(), ...employee.value }
+      return
+    }
     const [emp, bal, ctr, alw, gen] = await Promise.allSettled([
       api.get(`/employees/${props.employeeId}`),
       api.get(`/leave-balances/${props.employeeId}`),
@@ -404,6 +422,18 @@ async function deactivateEmployee() {
 
 // ─── Tab structure: grouped + iconified ─────────────────────────
 const tabGroups = computed(() => {
+  if (props.teamView) {
+    return [
+      {
+        label: 'Profil',
+        tabs: [
+          { id: 'general', label: 'Identitas', icon: IdentificationIcon },
+          { id: 'address', label: 'Alamat', icon: MapPinIcon },
+          { id: 'employment', label: 'Kepegawaian', icon: BriefcaseIcon },
+        ],
+      },
+    ]
+  }
   const groups = [
     {
       label: 'Personal',

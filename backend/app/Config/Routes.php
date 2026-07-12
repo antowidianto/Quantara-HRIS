@@ -306,6 +306,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // didaftarkan SETELAH resource. Tanpa ini, GET ke sub-route
         // tersebut salah ke `Employee\EmployeeController::show("1/bonus-history")`
         // dan mengembalikan data karyawan, bukan data sub-resource.
+        $routes->get('employees/my-team', 'Employee\EmployeeController::myTeam');
         $routes->resource('employees', [
             'controller' => 'Employee\EmployeeController',
             'placeholder' => '(:num)',
@@ -508,6 +509,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->put('notification-preferences/quiet-hours', 'Notification\NotificationPreferenceController::updateQuietHours');
         $routes->get('notification-preferences',  'Notification\NotificationPreferenceController::index');
         $routes->put('notification-preferences',  'Notification\NotificationPreferenceController::update');
+        $routes->get('notification-broadcast/options', 'Notification\NotificationBroadcastController::options');
+        $routes->post('notification-broadcast/preview', 'Notification\NotificationBroadcastController::preview');
+        $routes->post('notification-broadcast/send', 'Notification\NotificationBroadcastController::send');
 
         // Roles & Permissions (admin)
         $routes->resource('roles', ['controller' => 'Identity\RoleController']);
@@ -698,6 +702,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('manpower-requests/inbox',                  'Manpower\ManpowerController::inbox');
         // Migration #066 — MPP yg vacancy_started_at sudah lewat / mendekati
         $routes->get('manpower-requests/overdue',                'Manpower\ManpowerController::overdue');
+        $routes->get('manpower-requests/approval-preview',       'Manpower\ManpowerController::approvalPreview');
         $routes->get('manpower-requests',                        'Manpower\ManpowerController::index');
         $routes->post('manpower-requests',                       'Manpower\ManpowerController::create');
         $routes->get('manpower-requests/(:num)',                 'Manpower\ManpowerController::show/$1');

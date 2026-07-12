@@ -133,6 +133,12 @@ const canSubmit  = computed(() => auth.can('mpp.submit'))
 const canApprove = computed(() => auth.can('mpp.approve'))
 const canFulfill = computed(() => auth.can('mpp.fulfill') || auth.can('recruitment.manage'))
 
+function canApproveRow(row) {
+  return row?.can_current_user_approve === true
+    || row?.can_current_user_approve === 1
+    || row?.can_current_user_approve === '1'
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────
 function progressIndex(status) {
   // Hitung urutan tahap saat ini di STAGES_ORDER. REJECTED/CANCELLED:
@@ -248,6 +254,16 @@ async function save() {
   if (editing.value.request_type === 'UNBUDGET' && ! (editing.value.justification || '').trim()) {
     toast.warning('Justifikasi wajib diisi untuk pengajuan UNBUDGET'); return
   }
+  if (editing.value.submit_now) {
+    const preview = await loadApprovalPreview(editing.value.request_type)
+    if (! preview) return
+    const ok = await confirmDialog({
+      title: 'Buat dan ajukan MPP?',
+      message: approvalPreviewMessage(preview),
+      okText: 'Buat & Ajukan',
+    })
+    if (! ok) return
+  }
   saving.value = true
   try {
     if (editing.value.id) {
@@ -270,9 +286,11 @@ async function save() {
 
 // ─── Lifecycle actions ──────────────────────────────────────────────
 async function submitMpp(row) {
+  const preview = await loadApprovalPreview(row.request_type)
+  if (! preview) return
   const ok = await confirmDialog({
     title: 'Ajukan MPP?',
-    message: `${row.reference_number} akan diajukan untuk approval. Setelah ini tidak bisa di-edit.`,
+    message: `${row.reference_number} akan diajukan dan tidak bisa diedit.\n\n${approvalPreviewMessage(preview)}`,
     okText: 'Ajukan',
   })
   if (! ok) return
@@ -281,6 +299,31 @@ async function submitMpp(row) {
     toast.success('MPP diajukan, menunggu approval')
     fetchData()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
+}
+
+async function loadApprovalPreview(requestType) {
+  try {
+    const res = await api.get('/manpower-requests/approval-preview', {
+      params: { request_type: requestType },
+    })
+    const preview = res.data.data
+    if (! preview?.ready) {
+      const missing = (preview?.steps || []).filter(s => !s.assigned).map(s => s.role_key).join(', ')
+      toast.error(`MPP belum bisa diajukan. Penjabat belum ditentukan: ${missing}`, { timeout: 8000 })
+      return null
+    }
+    return preview
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal memeriksa jalur approval')
+    return null
+  }
+}
+
+function approvalPreviewMessage(preview) {
+  const lines = (preview.steps || []).map((step) =>
+    `Step ${step.step}: ${step.role_key} - ${step.employee_name || 'Belum ditentukan'}`,
+  )
+  return `Approval akan dikirim kepada:\n${lines.join('\n')}`
 }
 
 async function approveMpp(row) {
@@ -630,11 +673,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                     title="Ajukan untuk approval" @click="submitMpp(r)">
                     <PaperAirplaneIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canApprove && r.status === 'SUBMITTED'" class="text-emerald-600 hover:text-emerald-800 p-1"
+                  <button v-if="canApproveRow(r) && r.status === 'SUBMITTED'" class="text-emerald-600 hover:text-emerald-800 p-1"
                     title="Approve" @click="approveMpp(r)">
                     <CheckCircleIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canApprove && r.status === 'SUBMITTED'" class="text-red-600 hover:text-red-800 p-1"
+                  <button v-if="canApproveRow(r) && r.status === 'SUBMITTED'" class="text-red-600 hover:text-red-800 p-1"
                     title="Reject" @click="rejectMpp(r)">
                     <XCircleIcon class="w-4 h-4" />
                   </button>
@@ -1076,10 +1119,10 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
             <button v-if="canSubmit && detail.status === 'DRAFT'" class="btn-secondary" @click="submitMpp(detail)">
               <PaperAirplaneIcon class="w-4 h-4" /> Ajukan
             </button>
-            <button v-if="canApprove && detail.status === 'SUBMITTED'" class="btn-secondary text-red-600" @click="rejectMpp(detail)">
+            <button v-if="canApproveRow(detail) && detail.status === 'SUBMITTED'" class="btn-secondary text-red-600" @click="rejectMpp(detail)">
               <XCircleIcon class="w-4 h-4" /> Reject
             </button>
-            <button v-if="canApprove && detail.status === 'SUBMITTED'" class="btn-primary" @click="approveMpp(detail)">
+            <button v-if="canApproveRow(detail) && detail.status === 'SUBMITTED'" class="btn-primary" @click="approveMpp(detail)">
               <CheckCircleIcon class="w-4 h-4" /> Approve
             </button>
             <button v-if="canFulfill && ['APPROVED','HIRING'].includes(detail.status) && detail.remaining_headcount > 0"

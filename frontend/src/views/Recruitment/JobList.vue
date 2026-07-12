@@ -22,6 +22,20 @@ const filters = reactive({ q: '', status: '', page: 1, per_page: 20 })
 
 const showForm = ref(false)
 const editing = ref(null)
+const departments = ref([])
+const positions = ref([])
+const filteredPositions = computed(() => positions.value.filter((p) =>
+  !editing.value?.department_id || Number(p.department_id) === Number(editing.value.department_id),
+))
+
+async function loadOrganizationOptions() {
+  const [deptRes, positionRes] = await Promise.all([
+    api.get('/departments', { params: { per_page: 200 } }).catch(() => ({ data: { data: [] } })),
+    api.get('/positions', { params: { per_page: 200 } }).catch(() => ({ data: { data: [] } })),
+  ])
+  departments.value = deptRes.data.data || []
+  positions.value = positionRes.data.data || []
+}
 
 // Migration #065 — pipeline templates picker untuk pilih urutan stages
 // custom (mis. Sales Pipeline, Eksekutif, dll). Kalau kosong / tidak
@@ -65,9 +79,11 @@ function openCreate() {
     title: '', employment_type: 'PKWTT', description: '', requirements: '',
     salary_min: 0, salary_max: 0, salary_visible: 0, headcount: 1,
     opened_at: '', closed_at: '', notes: '',
-    pipeline_template_id: null,
+    mpp_bypass_reason: '',
+    pipeline_template_id: null, department_id: null, position_id: null,
   }
   loadPipelineTemplates()
+  loadOrganizationOptions()
   showForm.value = true
 }
 
@@ -76,10 +92,23 @@ function openEdit(row) {
   editing.value.opened_at = toDisplayDate(editing.value.opened_at)
   editing.value.closed_at = toDisplayDate(editing.value.closed_at)
   loadPipelineTemplates()
+  loadOrganizationOptions()
   showForm.value = true
 }
 
 async function save() {
+  if (!editing.value.department_id || !editing.value.position_id) {
+    toast.error('Department dan posisi wajib dipilih')
+    return
+  }
+  if (! editing.value.id && String(editing.value.mpp_bypass_reason || '').trim().length < 10) {
+    toast.error('Alasan membuat lowongan tanpa MPP wajib diisi minimal 10 karakter')
+    return
+  }
+  if (Number(editing.value.salary_min || 0) > Number(editing.value.salary_max || 0)) {
+    toast.error('Salary minimum tidak boleh lebih besar dari salary maximum')
+    return
+  }
   try {
     const payload = {
       ...editing.value,
@@ -350,6 +379,20 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
             <input type="number" v-model="editing.headcount" class="input" min="1" />
           </div>
           <div>
+            <label class="label">Department *</label>
+            <select v-model="editing.department_id" class="input" @change="editing.position_id = null">
+              <option :value="null">- Pilih department -</option>
+              <option v-for="d in departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Posisi *</label>
+            <select v-model="editing.position_id" class="input" :disabled="!editing.department_id">
+              <option :value="null">- Pilih posisi -</option>
+              <option v-for="p in filteredPositions" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+          </div>
+          <div>
             <label class="label">Tgl Buka</label>
             <input type="text" v-model="editing.opened_at" class="input" placeholder="dd/mm/yy" />
           </div>
@@ -397,6 +440,14 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           <div class="md:col-span-2">
             <label class="label">Catatan internal</label>
             <textarea v-model="editing.notes" rows="2" class="input"></textarea>
+          </div>
+          <div v-if="!editing.id" class="md:col-span-2 border border-amber-200 bg-amber-50 p-3 rounded">
+            <label class="label text-amber-900">Alasan tanpa MPP *</label>
+            <textarea v-model="editing.mpp_bypass_reason" rows="2" class="input"
+              placeholder="Contoh: confidential replacement yang disetujui Direktur HR"></textarea>
+            <p class="text-xs text-amber-700 mt-1">
+              Alur normal dimulai dari MPP approved. Pembuatan langsung dicatat sebagai bypass untuk audit.
+            </p>
           </div>
           <p class="md:col-span-2 text-xs text-gray-500">
             Posting dibuat sebagai DRAFT. Klik tombol "Buka" di list untuk publish.

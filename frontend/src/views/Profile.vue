@@ -70,9 +70,27 @@ async function fetchData() {
     tasks.push(
       api.get(`/employees/${empId}`).then(r => { employee.value = r.data?.data || null }).catch(() => {}),
       api.get('/attendance/my').then(r => { attendance.value = r.data?.data || null }).catch(() => {}),
-      api.get(`/leave-balances/${empId}`).then(r => { leaveBalance.value = r.data?.data || [] }).catch(() => {}),
-      api.get('/payslips/my', { params: { per_page: 3 } }).then(r => { payslips.value = r.data?.data || [] }).catch(() => {}),
-      api.get('/performance/my').then(r => { performance.value = r.data?.data || { goals: [], reviews: [] } }).catch(() => {}),
+      api.get(`/leave-balances/${empId}`).then(r => {
+        const data = r.data?.data
+        const balances = Array.isArray(data) ? data : (Array.isArray(data?.balances) ? data.balances : [])
+        leaveBalance.value = balances.map(balance => ({
+          ...balance,
+          leave_name: balance.leave_name || balance.name,
+          leave_code: balance.leave_code || balance.code,
+          entitled: Number(balance.entitled ?? balance.allocated ?? 0) + Number(balance.carried_over ?? 0),
+          taken: Number(balance.taken ?? balance.used ?? 0),
+        }))
+      }).catch(() => { leaveBalance.value = [] }),
+      api.get('/payslips/my', { params: { per_page: 3 } }).then(r => {
+        payslips.value = Array.isArray(r.data?.data) ? r.data.data : []
+      }).catch(() => { payslips.value = [] }),
+      api.get('/performance/my').then(r => {
+        const data = r.data?.data || {}
+        performance.value = {
+          goals: Array.isArray(data.goals) ? data.goals : [],
+          reviews: Array.isArray(data.reviews) ? data.reviews : [],
+        }
+      }).catch(() => { performance.value = { goals: [], reviews: [] } }),
     )
   }
   await Promise.all(tasks)

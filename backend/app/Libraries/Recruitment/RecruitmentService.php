@@ -448,7 +448,7 @@ class RecruitmentService
     }
 
     /**
-     * Convert candidate HIRED ke employees row baru.
+     * Convert candidate dengan offer ACCEPTED ke employee dan stage HIRED.
      *
      * @return array{employee_id: int, user_id: ?int, user_email: ?string, temp_password: ?string, auto_completed_tasks: int}
      *     employee_id baru, plus credential ONE-TIME (kalau auto-create
@@ -458,14 +458,30 @@ class RecruitmentService
     public function convertToEmployee(int $candidateId, array $employeeOverrides = []): array
     {
         $db = \Config\Database::connect();
-        $cand = $db->table('candidates')->where('id', $candidateId)->where('deleted_at IS NULL')->get()->getRowArray();
-        if (! $cand) throw new \InvalidArgumentException("Candidate not found");
-        if ($cand['current_stage'] !== 'HIRED') {
-            throw new \RuntimeException("Hanya kandidat dengan stage HIRED yang bisa di-convert. Stage saat ini: {$cand['current_stage']}");
-        }
-        if (! empty($cand['converted_employee_id'])) {
-            throw new \RuntimeException("Candidate ini sudah di-convert ke employee #{$cand['converted_employee_id']}");
-        }
+        $db->transBegin();
+        try {
+            // Lock candidate supaya double-click/request paralel tidak dapat
+            // membuat dua employee dari kandidat yang sama.
+            $cand = $db->query(
+                'SELECT * FROM candidates WHERE id = ? AND deleted_at IS NULL FOR UPDATE',
+                [$candidateId],
+            )->getRowArray();
+            if (! $cand) throw new \InvalidArgumentException('Candidate not found');
+            if (! empty($cand['converted_employee_id'])) {
+                throw new \RuntimeException("Candidate ini sudah di-convert ke employee #{$cand['converted_employee_id']}");
+            }
+
+            $acceptedOffer = $db->table('candidate_offers')
+                ->where('candidate_id', $candidateId)
+                ->where('status', 'ACCEPTED')
+                ->where('deleted_at IS NULL')
+                ->orderBy('responded_at', 'DESC')
+                ->get()->getRowArray();
+            if (! $acceptedOffer) {
+                throw new \RuntimeException(
+                    'Kandidat hanya dapat di-hire setelah offer diterima (ACCEPTED).'
+                );
+            }
 
         $job = $db->table('job_postings')->where('id', (int) $cand['job_posting_id'])->get()->getRowArray();
         if (! $job) throw new \RuntimeException("Job posting hilang");
@@ -494,9 +510,12 @@ class RecruitmentService
             'department_id'     => $employeeOverrides['department_id'] ?? $job['department_id'] ?? null,
             'position_id'       => $employeeOverrides['position_id'] ?? $job['position_id'] ?? null,
             'branch_id'         => $employeeOverrides['branch_id'] ?? $job['branch_id'] ?? null,
-            'employment_status' => $employeeOverrides['employment_status'] ?? $job['employment_type'] ?? 'PKWTT',
-            'join_date'         => $employeeOverrides['join_date'] ?? ($cand['available_from'] ?? date('Y-m-d')),
-            'basic_salary'      => $employeeOverrides['basic_salary'] ?? ($cand['expected_salary'] ?? 0),
+            'employment_status' => $employeeOverrides['employment_status']
+                ?? $acceptedOffer['employment_status'] ?? $job['employment_type'] ?? 'PKWTT',
+            'join_date'         => $employeeOverrides['join_date']
+                ?? $acceptedOffer['proposed_join_date'] ?? $cand['available_from'] ?? date('Y-m-d'),
+            'basic_salary'      => $employeeOverrides['basic_salary']
+                ?? $acceptedOffer['basic_salary'] ?? $cand['expected_salary'] ?? 0,
             'is_active'         => 1,
             'created_at'        => $now,
             'updated_at'        => $now,
@@ -675,21 +694,43 @@ class RecruitmentService
             $insert['emergency_contact_rel'] = (string) $cand['emergency_contact_relation'];
         }
 
-        $db->table('employees')->insert($insert);
-        $employeeId = (int) $db->insertID();
+            $db->table('employees')->insert($insert);
+            $employeeId = (int) $db->insertID();
 
         // Copy candidate_documents → employee_documents kalau tabel
         // employee_documents ada (tidak semua schema include).
-        if ($db->tableExists('employee_documents')) {
-            $this->copyCandidateDocsToEmployee($candidateId, $employeeId, (int) $cand['company_id']);
-        }
+            if ($db->tableExists('employee_documents')) {
+                $this->copyCandidateDocsToEmployee($candidateId, $employeeId, (int) $cand['company_id']);
+            }
 
         // Update candidate
-        $db->table('candidates')->where('id', $candidateId)->update([
-            'converted_employee_id' => $employeeId,
-            'converted_at'          => $now,
-            'updated_at'            => $now,
-        ]);
+            if ($cand['current_stage'] !== 'HIRED') {
+                $db->table('candidate_stages')->insert([
+                    'company_id'   => (int) $cand['company_id'],
+                    'candidate_id' => $candidateId,
+                    'stage'        => 'HIRED',
+                    'result'       => 'PASSED',
+                    'completed_at' => $now,
+                    'created_by'   => $employeeOverrides['_actor_user_id'] ?? null,
+                    'created_at'   => $now,
+                    'updated_at'   => $now,
+                ]);
+            }
+            $db->table('candidates')->where('id', $candidateId)->update([
+                'current_stage'        => 'HIRED',
+                'converted_employee_id'=> $employeeId,
+                'converted_at'         => $now,
+                'updated_at'           => $now,
+            ]);
+
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Gagal menyimpan data inti hasil hire');
+            }
+            $db->transCommit();
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            throw $e;
+        }
 
         // Sprint 2 — Probation auto-tracking (HIRE-1)
         // Untuk PKWTT, auto-set probation_end_date = join_date + 3 bulan

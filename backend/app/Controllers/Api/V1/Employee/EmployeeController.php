@@ -9,6 +9,96 @@ class EmployeeController extends ApiController
 {
     use \App\Traits\DispatchesWebhooks;
 
+    public function myTeam()
+    {
+        $rootEmployeeId = $this->tenant()->getEmployeeId();
+        $companyId = $this->companyId();
+        if (! $rootEmployeeId || ! $companyId) {
+            return $this->fail('Akun login belum terhubung ke data employee.', 422);
+        }
+
+        $scope = strtolower(trim((string) ($this->request->getGet('scope') ?? 'n1')));
+        if (! in_array($scope, ['n1', 'n2', 'all'], true)) $scope = 'n1';
+        $search = mb_strtolower(trim((string) ($this->request->getGet('search') ?? '')));
+        $page = max(1, (int) ($this->request->getGet('page') ?? 1));
+        $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
+
+        $db = \Config\Database::connect();
+        $rows = $db->table('employees e')
+            ->select('e.id, e.employee_number, e.full_name, e.email, e.phone, e.avatar_path,
+                e.manager_id, e.department_id, e.position_id, e.branch_id, e.join_date,
+                e.employment_status, d.name AS department_name, p.name AS position_name,
+                b.name AS branch_name, mgr.full_name AS manager_name')
+            ->join('departments d', 'd.id = e.department_id', 'left')
+            ->join('positions p', 'p.id = e.position_id', 'left')
+            ->join('branches b', 'b.id = e.branch_id', 'left')
+            ->join('employees mgr', 'mgr.id = e.manager_id', 'left')
+            ->where('e.company_id', $companyId)
+            ->where('e.is_active', 1)
+            ->where('e.deleted_at IS NULL')
+            ->orderBy('e.full_name', 'ASC')
+            ->get()->getResultArray();
+
+        $children = [];
+        foreach ($rows as $row) {
+            $managerId = (int) ($row['manager_id'] ?? 0);
+            if ($managerId > 0) $children[$managerId][] = $row;
+        }
+
+        $team = [];
+        $visited = [$rootEmployeeId => true];
+        $frontier = [$rootEmployeeId];
+        for ($depth = 1; $depth <= 20 && $frontier !== []; $depth++) {
+            $next = [];
+            foreach ($frontier as $managerId) {
+                foreach ($children[$managerId] ?? [] as $employee) {
+                    $employeeId = (int) $employee['id'];
+                    if (isset($visited[$employeeId])) continue;
+                    $visited[$employeeId] = true;
+                    $employee['hierarchy_level'] = $depth;
+                    $team[] = $employee;
+                    $next[] = $employeeId;
+                }
+            }
+            $frontier = $next;
+        }
+
+        $counts = ['n1' => 0, 'n2' => 0, 'all' => count($team)];
+        foreach ($team as $employee) {
+            if ((int) $employee['hierarchy_level'] === 1) $counts['n1']++;
+            if ((int) $employee['hierarchy_level'] === 2) $counts['n2']++;
+        }
+
+        $targetDepth = $scope === 'n1' ? 1 : ($scope === 'n2' ? 2 : null);
+        $filtered = array_values(array_filter($team, static function (array $employee) use ($targetDepth, $search): bool {
+            if ($targetDepth !== null && (int) $employee['hierarchy_level'] !== $targetDepth) return false;
+            if ($search === '') return true;
+            $haystack = mb_strtolower(implode(' ', [
+                $employee['full_name'] ?? '', $employee['employee_number'] ?? '',
+                $employee['email'] ?? '', $employee['department_name'] ?? '',
+                $employee['position_name'] ?? '',
+            ]));
+            return str_contains($haystack, $search);
+        }));
+
+        $total = count($filtered);
+        $paged = array_slice($filtered, ($page - 1) * $perPage, $perPage);
+        return $this->response->setJSON([
+            'status' => 'success',
+            'message' => 'OK',
+            'data' => $paged,
+            'meta' => [
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
+                'pages' => $perPage > 0 ? (int) ceil($total / $perPage) : 0,
+                'scope' => $scope,
+                'counts' => $counts,
+                'root_employee_id' => $rootEmployeeId,
+            ],
+        ]);
+    }
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -103,6 +193,22 @@ class EmployeeController extends ApiController
             return $this->fail('Forbidden', 403);
         }
 
+        $teamView = (int) ($this->request->getGet('team_view') ?? 0) === 1;
+        if ($teamView) {
+            $managerEmployeeId = $this->tenant()->getEmployeeId();
+            if (! $managerEmployeeId || ! $this->isInManagementChain($managerEmployeeId, (int) $emp['id'])) {
+                return $this->fail('Karyawan tidak berada dalam hierarki tim Anda.', 403);
+            }
+            $allowed = [
+                'id','employee_number','first_name','last_name','full_name','email','phone','gender',
+                'date_of_birth','place_of_birth','address','province','city','postal_code','avatar_path',
+                'branch_id','department_id','position_id','job_grade_id','manager_id','supervisor_id',
+                'employment_status','employment_type','join_date','probation_end_date','contract_end_date',
+                'work_location_id','is_active',
+            ];
+            return $this->ok(array_intersect_key($emp, array_flip($allowed)));
+        }
+
         // Decrypt sensitive fields
         $enc = \Config\Services::encryption();
         $emp['nik'] = $enc->decrypt($emp['nik_encrypted']);
@@ -111,6 +217,30 @@ class EmployeeController extends ApiController
         unset($emp['nik_encrypted'], $emp['npwp_encrypted'], $emp['bank_account_encrypted']);
 
         return $this->ok($emp);
+    }
+
+    private function isInManagementChain(int $managerEmployeeId, int $targetEmployeeId): bool
+    {
+        if ($managerEmployeeId <= 0 || $targetEmployeeId <= 0 || $managerEmployeeId === $targetEmployeeId) {
+            return false;
+        }
+        $db = \Config\Database::connect();
+        $visited = [];
+        $currentId = $targetEmployeeId;
+        for ($depth = 0; $depth < 20 && $currentId > 0; $depth++) {
+            if (isset($visited[$currentId])) return false;
+            $visited[$currentId] = true;
+            $row = $db->table('employees')
+                ->select('manager_id')
+                ->where('id', $currentId)
+                ->where('company_id', $this->companyId())
+                ->where('deleted_at IS NULL')
+                ->get()->getRowArray();
+            if (! $row) return false;
+            $currentId = (int) ($row['manager_id'] ?? 0);
+            if ($currentId === $managerEmployeeId) return true;
+        }
+        return false;
     }
 
     public function create()

@@ -134,12 +134,16 @@ class RecruitmentController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
-            'title' => 'required|max_length[200]',
+            'title'             => 'required|max_length[200]',
+            'mpp_bypass_reason' => 'required|min_length[10]|max_length[500]',
         ]);
         if (! $valid) return null;
 
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return null;
+        if (($error = $this->validateJobRelationsAndSalary($data, $companyId)) !== null) {
+            return $this->fail($error, 422);
+        }
 
         $svc = Services::recruitment();
         $now = date('Y-m-d H:i:s');
@@ -165,7 +169,8 @@ class RecruitmentController extends ApiController
             'closed_at'       => $data['closed_at'] ?? null,
             'status'          => 'DRAFT',
             'hiring_manager_id'=> ! empty($data['hiring_manager_id']) ? (int) $data['hiring_manager_id'] : null,
-            'notes'           => $data['notes'] ?? null,
+            'notes'           => '[MPP BYPASS] ' . trim((string) $data['mpp_bypass_reason'])
+                . (! empty($data['notes']) ? "\n" . trim((string) $data['notes']) : ''),
             'created_by'      => $this->userId(),
             'updated_by'      => $this->userId(),
             'created_at'      => $now, 'updated_at' => $now,
@@ -184,6 +189,9 @@ class RecruitmentController extends ApiController
         $row = $this->loadJobOrFail((int) $id);
         if (! $row) return $this->response;
         $data = $this->getJsonInput();
+        if (($error = $this->validateJobRelationsAndSalary($data, (int) $row['company_id'], $row)) !== null) {
+            return $this->fail($error, 422);
+        }
         $update = array_intersect_key($data, array_flip([
             'title','department_id','position_id','branch_id','employment_type',
             'description','requirements','salary_min','salary_max','salary_visible',
@@ -223,6 +231,9 @@ class RecruitmentController extends ApiController
         if (! $row) return $this->response;
         if (! in_array($row['status'], ['DRAFT','PAUSED'], true)) {
             return $this->fail("Hanya DRAFT/PAUSED yang bisa dibuka, sekarang {$row['status']}", 422);
+        }
+        if (empty($row['department_id']) || empty($row['position_id'])) {
+            return $this->fail('Department dan posisi wajib dilengkapi sebelum lowongan dibuka.', 422);
         }
         \Config\Database::connect()->table('job_postings')->where('id', (int) $id)->update([
             'status' => 'OPEN',
@@ -493,6 +504,12 @@ class RecruitmentController extends ApiController
         if (! in_array($stage, self::STAGES, true)) {
             return $this->fail('Stage tidak valid', 422);
         }
+        if ($stage === 'HIRED') {
+            return $this->fail(
+                'Gunakan proses Hire agar offer, employee, dan onboarding diproses secara konsisten.',
+                422,
+            );
+        }
         try {
             $stageId = Services::recruitment()->moveStage((int) $id, $stage, [
                 'scheduled_at'  => $data['scheduled_at'] ?? null,
@@ -558,6 +575,7 @@ class RecruitmentController extends ApiController
             'bpjs_kesehatan_no','bpjs_kesehatan_class','bpjs_tk_no',
             'bank_name','bank_account','bank_account_holder',
         ]));
+        $overrides['_actor_user_id'] = $this->userId();
 
         // Validasi ringan untuk field payroll yang punya enum constraint
         $validPtkp = ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3'];
@@ -650,6 +668,41 @@ class RecruitmentController extends ApiController
     {
         $t = $this->tenant();
         return $t->isSuperAdmin() || $t->hasPermission('recruitment.manage');
+    }
+
+    private function validateJobRelationsAndSalary(array $data, int $companyId, array $current = []): ?string
+    {
+        $salaryMin = array_key_exists('salary_min', $data) ? (float) $data['salary_min'] : ($current['salary_min'] ?? null);
+        $salaryMax = array_key_exists('salary_max', $data) ? (float) $data['salary_max'] : ($current['salary_max'] ?? null);
+        if ($salaryMin !== null && $salaryMax !== null && $salaryMin > $salaryMax) {
+            return 'Salary minimum tidak boleh lebih besar dari salary maximum.';
+        }
+
+        $departmentId = array_key_exists('department_id', $data)
+            ? (int) $data['department_id']
+            : (int) ($current['department_id'] ?? 0);
+        $positionId = array_key_exists('position_id', $data)
+            ? (int) $data['position_id']
+            : (int) ($current['position_id'] ?? 0);
+        $db = \Config\Database::connect();
+        if ($departmentId > 0) {
+            $department = $db->table('departments')
+                ->where('id', $departmentId)
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
+            if (! $department) return 'Department tidak valid untuk perusahaan ini.';
+        }
+        if ($positionId > 0) {
+            $position = $db->table('positions')
+                ->where('id', $positionId)
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
+            if (! $position) return 'Posisi tidak valid untuk perusahaan ini.';
+            if ($departmentId > 0 && (int) ($position['department_id'] ?? 0) !== $departmentId) {
+                return 'Posisi yang dipilih tidak berada pada department tersebut.';
+            }
+        }
+        return null;
     }
 
     private function loadJobOrFail(int $id): ?array

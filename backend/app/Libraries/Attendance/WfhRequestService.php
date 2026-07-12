@@ -125,7 +125,7 @@ class WfhRequestService
                         substr($reason, 0, 120),
                     ),
                     ['wfh_request_id' => $id, 'employee_id' => $employeeId],
-                    '/wfh-requests/' . $id, true
+                    '/attendance/wfh?scope=inbox&request_id=' . $id, true
                 );
             } catch (\Throwable $e) { /* skip */ }
         }
@@ -188,7 +188,7 @@ class WfhRequestService
                         $decision === 'REJECTED' ? ' Alasan: ' . trim($note) : ''
                     ),
                     ['wfh_request_id' => $requestId],
-                    '/wfh-requests/' . $requestId, true
+                    '/attendance/wfh?scope=mine&request_id=' . $requestId, true
                 );
             } catch (\Throwable $e) {}
         }
