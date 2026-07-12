@@ -97,6 +97,8 @@ export default {
     delete_warning: 'Tindakan ini tidak dapat dibatalkan.',
     not_set: 'Belum diatur',
     not_available: 'Tidak tersedia',
+    open_link: 'Buka detail',
+    mark_read: 'Tandai dibaca',
   },
 
   nav: {

@@ -19,7 +19,7 @@ import {
   // components/menu/iconMap.js dari kolom `icon` di tabel menus.
   BellIcon, ArrowLeftStartOnRectangleIcon,
   BuildingOffice2Icon, ShieldCheckIcon, ChevronDownIcon, Bars3Icon, XMarkIcon,
-  UserCircleIcon,
+  UserCircleIcon, Cog6ToothIcon, MegaphoneIcon,
   SunIcon, MoonIcon, ComputerDesktopIcon, LanguageIcon, CheckIcon,
 } from '@heroicons/vue/24/outline'
 import SidebarMenu from '@/components/menu/SidebarMenu.vue'
@@ -46,6 +46,7 @@ const langMenuOpen = ref(false)
 const companyMenuOpen = ref(false)
 const unreadCount = ref(0)
 const notifications = ref([])
+const isNotificationUnread = (notification) => Number(notification?.is_read) === 0
 
 // Tree dari MenuStore — sudah ter-filter sesuai permission user di backend.
 const menuTree = computed(() => menuStore.tree)
@@ -79,8 +80,20 @@ async function loadNotifications() {
 }
 
 async function markAllRead() {
+  notifications.value.forEach(notification => { notification.is_read = 1 })
+  unreadCount.value = 0
   await api.post('/notifications/read-all')
-  loadNotifications()
+}
+
+async function markNotificationRead(notification) {
+  if (! isNotificationUnread(notification)) return
+  notification.is_read = 1
+  unreadCount.value = Math.max(0, unreadCount.value - 1)
+  try {
+    await api.post(`/notifications/${notification.id}/read`)
+  } catch (_) {
+    loadNotifications()
+  }
 }
 
 async function logout() {
@@ -93,7 +106,9 @@ let pollTimer = null
 onMounted(() => {
   // Fetch menu sekali saat layout mount. Kalau gagal, MenuStore set
   // fallback minimal supaya user setidaknya bisa logout & ke dashboard.
-  menuStore.load()
+  // Force refresh agar perubahan menu database langsung terlihat setelah
+  // deploy/migration, termasuk ketika layout di-remount dalam sesi yang sama.
+  menuStore.load(true)
   loadNotifications()
   pollTimer = setInterval(loadNotifications, 60000)
 })
@@ -269,10 +284,14 @@ watch(() => auth.user?.id, (newId, oldId) => {
               <div class="max-h-80 overflow-y-auto">
                 <div v-if="notifications.length === 0" class="px-4 py-6 text-center text-sm text-gray-500">{{ t('nav.no_notifications') }}</div>
                 <RouterLink v-for="n in notifications" :key="n.id" :to="n.link_url || '/notifications'"
-                  class="block px-4 py-3 border-b border-gray-100 hover:bg-gray-50 last:border-0"
-                  :class="{ 'bg-blue-50/40': ! n.is_read }">
-                  <div class="text-sm font-medium text-gray-800">{{ n.title }}</div>
-                  <div class="text-xs text-gray-500 line-clamp-2">{{ n.message }}</div>
+                  class="block px-4 py-3 border-b border-gray-100 border-l-4 hover:bg-gray-50 last:border-b-0"
+                  :class="isNotificationUnread(n) ? 'bg-blue-50/80 border-l-primary-500' : 'bg-white border-l-transparent'"
+                  @click="markNotificationRead(n)">
+                  <div class="flex items-center gap-2">
+                    <span v-if="isNotificationUnread(n)" class="w-2 h-2 rounded-full bg-primary-600 flex-shrink-0"></span>
+                    <div class="text-sm" :class="isNotificationUnread(n) ? 'font-semibold text-gray-900' : 'font-medium text-gray-600'">{{ n.title }}</div>
+                  </div>
+                  <div class="text-xs line-clamp-2" :class="isNotificationUnread(n) ? 'text-gray-600' : 'text-gray-400'">{{ n.message }}</div>
                   <div class="text-xs text-gray-400 mt-1">{{ new Date(n.created_at).toLocaleString(locale === 'en' ? 'en-US' : 'id-ID') }}</div>
                 </RouterLink>
               </div>
@@ -337,6 +356,12 @@ watch(() => auth.user?.id, (newId, oldId) => {
             <div v-if="userMenuOpen" class="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border border-gray-200 overflow-hidden">
               <RouterLink to="/profile" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 <UserCircleIcon class="w-5 h-5" /> {{ t('nav.profile') }}
+              </RouterLink>
+              <RouterLink to="/profile/notification-settings" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <Cog6ToothIcon class="w-5 h-5" /> Pengaturan Notifikasi
+              </RouterLink>
+              <RouterLink v-if="auth.can('notifications.broadcast')" to="/admin/notification-broadcast" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <MegaphoneIcon class="w-5 h-5" /> Broadcast Notifikasi
               </RouterLink>
               <RouterLink to="/change-password" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                 <ShieldCheckIcon class="w-5 h-5" /> {{ t('nav.change_password') }}

@@ -441,6 +441,14 @@ class MenuController extends ApiController
             $localByCode[$r['code']] = $r;
         }
 
+        // Saat sebuah parent global sudah di-fork ke company, child global
+        // baru masih menyimpan parent_id global. Remap ke parent lokal agar
+        // child tersebut tidak menjadi orphan pada runtime tree.
+        $globalCodeById = [];
+        foreach ($globals as $g) {
+            $globalCodeById[(int) $g['id']] = $g['code'];
+        }
+
         // Untuk admin mode, kembalikan semuanya (global + local) supaya
         // tampak baseline; saat render frontend dia akan bedakan.
         if ($adminMode) {
@@ -455,6 +463,13 @@ class MenuController extends ApiController
         $merged = $localRows;
         foreach ($globals as $g) {
             if (isset($localByCode[$g['code']])) continue;
+            $globalParentId = (int) ($g['parent_id'] ?? 0);
+            if ($globalParentId > 0) {
+                $parentCode = $globalCodeById[$globalParentId] ?? null;
+                if ($parentCode && isset($localByCode[$parentCode])) {
+                    $g['parent_id'] = (int) $localByCode[$parentCode]['id'];
+                }
+            }
             $merged[] = $g;
         }
         return $merged;

@@ -32,6 +32,18 @@ use Config\Services;
  */
 class ManpowerController extends ApiController
 {
+    public function approvalPreview()
+    {
+        if (! $this->canView() && ! $this->canSubmit()) return $this->fail('Forbidden', 403);
+        $companyId = $this->companyId();
+        if (! $companyId) return $this->fail('Company context required', 400);
+        $requestType = strtoupper((string) ($this->request->getGet('request_type') ?? 'BUDGET'));
+        if (! in_array($requestType, \App\Libraries\Manpower\ManpowerService::TYPES, true)) {
+            return $this->fail('request_type harus BUDGET atau UNBUDGET', 422);
+        }
+        return $this->ok(Services::manpower()->approvalPreview($companyId, $requestType));
+    }
+
     private const TYPES   = ManpowerService::TYPES;
     private const REASONS = ManpowerService::REASONS;
     private const EMPLOYMENT_TYPES = ['PKWT','PKWTT','MAGANG','OUTSOURCING','PARTTIME','CONTRACT'];
@@ -92,6 +104,10 @@ class ManpowerController extends ApiController
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('mr.created_at', 'DESC')
             ->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
+        foreach ($rows as &$row) {
+            $row['can_current_user_approve'] = $this->canActOnPendingStep((int) $row['id']);
+        }
+        unset($row);
         return $this->paginated($rows, $total, $page, $perPage);
     }
 
@@ -165,6 +181,7 @@ class ManpowerController extends ApiController
         $row['postings']          = $postings;
         $row['allocated_headcount'] = $usedHc;
         $row['remaining_headcount'] = $remainingHc;
+        $row['can_current_user_approve'] = $this->canActOnPendingStep((int) $id);
 
         return $this->ok($row);
     }
@@ -527,9 +544,11 @@ class ManpowerController extends ApiController
 
     public function approve($id = null)
     {
-        if (! $this->canApprove()) return $this->fail('Forbidden: butuh permission mpp.approve', 403);
         $row = $this->loadOrFail((int) $id);
         if (! $row) return $this->response;
+        if (! $this->canApprove() && ! $this->canActOnPendingStep((int) $id)) {
+            return $this->fail('Forbidden: Anda bukan approver aktif MPP ini', 403);
+        }
         $data = $this->getJsonInput();
         try {
             $result = Services::manpower()->approveStep((int) $id, $this->userId(), $data['comment'] ?? null);
@@ -549,9 +568,11 @@ class ManpowerController extends ApiController
 
     public function reject($id = null)
     {
-        if (! $this->canApprove()) return $this->fail('Forbidden', 403);
         $row = $this->loadOrFail((int) $id);
         if (! $row) return $this->response;
+        if (! $this->canApprove() && ! $this->canActOnPendingStep((int) $id)) {
+            return $this->fail('Forbidden: Anda bukan approver aktif MPP ini', 403);
+        }
         $data = $this->getJsonInput();
         $reason = trim((string) ($data['reason'] ?? ''));
         if (strlen($reason) < 5) return $this->fail('Alasan minimal 5 karakter', 422);
@@ -755,6 +776,25 @@ class ManpowerController extends ApiController
     {
         $t = $this->tenant();
         return $t->isSuperAdmin() || $t->hasPermission('mpp.approve');
+    }
+
+    private function canActOnPendingStep(int $mppId): bool
+    {
+        $db = \Config\Database::connect();
+        $pending = $db->table('manpower_request_approvals')
+            ->select('company_id, expected_approver_user_id')
+            ->where('manpower_request_id', $mppId)
+            ->where('decision', 'PENDING')
+            ->orderBy('step', 'ASC')
+            ->limit(1)->get()->getRowArray();
+        if (! $pending || empty($pending['expected_approver_user_id'])) return false;
+
+        return Services::approvalDelegationResolver()->canApproveOnBehalfOf(
+            $this->userId(),
+            (int) $pending['expected_approver_user_id'],
+            (int) $pending['company_id'],
+            'MPP',
+        );
     }
 
     private function canFulfill(): bool

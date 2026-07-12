@@ -177,21 +177,20 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
   max-width: min(100%, 72rem);
 }
 
+.org-children::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: min(7.5rem, 50%);
+  right: min(7.5rem, 50%);
+  height: 1px;
+  background: rgb(203 213 225);
+}
+
 .org-child {
   flex: 0 1 15rem;
   min-width: min(15rem, calc(100vw - 3rem));
   position: relative;
-}
-
-.org-child::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 50%;
-  width: min(8rem, 45%);
-  height: 1px;
-  transform: translateX(-50%);
-  background: rgb(203 213 225);
 }
 
 [draggable="true"]:active { cursor: grabbing; }

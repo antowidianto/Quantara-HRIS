@@ -54,6 +54,7 @@ const submitting = ref(false)
 
 const showReject = ref(null)
 const rejectNote = ref('')
+const focusedRequestId = ref(Number(route.query.request_id) || null)
 
 async function fetchList() {
   loading.value = true
@@ -81,6 +82,26 @@ function switchTab(t) {
   tab.value = t
   router.replace({ query: { ...route.query, scope: t } })
   fetchList()
+}
+
+async function initializeFromNotification() {
+  if (! focusedRequestId.value) {
+    await fetchList()
+    return
+  }
+
+  try {
+    const res = await api.get(`/wfh-requests/${focusedRequestId.value}`)
+    const request = res.data.data
+    const ownEmployeeId = Number(auth.employee?.id || auth.user?.employee_id || 0)
+    tab.value = Number(request?.employee_id) === ownEmployeeId ? 'mine' : 'inbox'
+    await router.replace({
+      query: { ...route.query, scope: tab.value, request_id: focusedRequestId.value },
+    })
+  } catch (e) {
+    toast.error(e.response?.data?.message || t('attendance.wfh.load_failed'))
+  }
+  await fetchList()
 }
 
 async function submitForm() {
@@ -173,7 +194,7 @@ const maxDate = (() => {
   return d.toISOString().slice(0, 10)
 })()
 
-onMounted(fetchList)
+onMounted(initializeFromNotification)
 </script>
 
 <template>
@@ -273,7 +294,8 @@ onMounted(fetchList)
             <tr v-else-if="items.length === 0">
               <td :colspan="tab === 'mine' ? 6 : 7" class="text-center py-8 text-gray-400">{{ t('attendance.wfh.no_requests') }}</td>
             </tr>
-            <tr v-for="r in items" :key="r.id">
+            <tr v-for="r in items" :key="r.id"
+              :class="Number(r.id) === focusedRequestId ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''">
               <td v-if="tab !== 'mine'">
                 <div class="font-medium text-sm">{{ r.employee_name || '—' }}</div>
                 <div class="text-xs text-gray-500 font-mono">{{ r.employee_number || '' }}</div>

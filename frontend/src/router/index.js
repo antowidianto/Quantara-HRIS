@@ -58,6 +58,7 @@ const routes = [
       // /employees/123 tidak rusak; route legacy itu render list yang
       // akan otomatis membuka modal sesuai path (lihat syncFromRoute).
       { path: 'employees', name: 'employees', component: () => import('@/views/Employees/EmployeeList.vue') },
+      { path: 'my-team', name: 'my-team', component: () => import('@/views/Employees/MyTeam.vue') },
       { path: 'employees/new', name: 'employee-new', component: () => import('@/views/Employees/EmployeeList.vue') },
       { path: 'employees/:id', name: 'employee-detail', component: () => import('@/views/Employees/EmployeeList.vue') },
       { path: 'employees/:id/edit', name: 'employee-edit', component: () => import('@/views/Employees/EmployeeList.vue') },
@@ -108,6 +109,11 @@ const routes = [
       // ─── Horizon 1 (Sprint 7-9 Quick Wins) ───────────────────
       // H1.5 WFH Mode — pengajuan & approval inbox WFH
       { path: 'attendance/wfh', name: 'wfh-requests', component: () => import('@/views/Attendance/WfhRequests.vue') },
+      // Backward compatibility untuk link notifikasi WFH lama.
+      { path: 'wfh-requests/:id', redirect: to => ({
+        name: 'wfh-requests',
+        query: { request_id: to.params.id },
+      }) },
       // ADMS / Physical Devices (Fingerprint)
       { path: 'attendance/physical-devices', name: 'physical-devices', component: () => import('@/views/Attendance/PhysicalDevices.vue') },
       // H1.4 Recruitment Funnel Metrics — bottleneck pipeline + stale candidates
@@ -271,6 +277,8 @@ const routes = [
 
       // Notifications
       { path: 'notifications', name: 'notifications', component: () => import('@/views/Notifications.vue') },
+      { path: 'profile/notification-settings', name: 'notification-settings', component: () => import('@/views/NotificationPreferences.vue') },
+      { path: 'admin/notification-broadcast', name: 'notification-broadcast', component: () => import('@/views/Admin/NotificationBroadcast.vue'), meta: { permission: 'notifications.broadcast' } },
 
       // Reports
       { path: 'reports', name: 'reports', component: () => import('@/views/Reports.vue') },
@@ -324,6 +332,9 @@ router.beforeEach((to, from, next) => {
     return next({ name: 'login', query: { redirect: to.fullPath } })
   }
   if (to.meta.guest && auth.isAuthenticated) {
+    return next({ name: 'dashboard' })
+  }
+  if (to.meta.permission && ! auth.can(to.meta.permission)) {
     return next({ name: 'dashboard' })
   }
   next()

@@ -342,7 +342,19 @@ async function doReject() {
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
 }
 
-function openHireModal(c) {
+async function openHireModal(c) {
+  let acceptedOffer = null
+  try {
+    const res = await api.get(`/candidates/${c.id}/offers`)
+    acceptedOffer = (res.data.data || []).find((offer) => offer.status === 'ACCEPTED') || null
+    if (!acceptedOffer) {
+      toast.error('Hire belum dapat dilakukan. Kandidat harus menerima offer terlebih dahulu.', { timeout: 7000 })
+      return
+    }
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal memeriksa status offer kandidat')
+    return
+  }
   showHireModal.value = c
   // Reset semua field; pre-fill dari data candidate kalau tersedia.
   // PTKP di-derive dari marital_status candidate (BELUM_KAWIN→TK0,
@@ -355,9 +367,9 @@ function openHireModal(c) {
     CERAI_MATI: 'TK0',
   }
   Object.assign(hireForm, {
-    basic_salary: c.expected_salary || 0,
-    join_date: c.available_from || new Date().toISOString().slice(0, 10),
-    employment_status: 'PKWTT',
+    basic_salary: acceptedOffer.basic_salary || c.expected_salary || 0,
+    join_date: acceptedOffer.proposed_join_date || c.available_from || new Date().toISOString().slice(0, 10),
+    employment_status: acceptedOffer.employment_status || 'PKWTT',
     probation_end_date: '',
     contract_end_date: '',
     ptkp_status: maritalToPtkp[c.marital_status] || 'TK0',
@@ -410,10 +422,8 @@ async function doHire() {
 
   try {
     const candidateName = showHireModal.value.full_name
-    // Move to HIRED dulu kalau belum
-    if (showHireModal.value.current_stage !== 'HIRED') {
-      await api.post(`/candidates/${showHireModal.value.id}/move-stage`, { stage: 'HIRED' })
-    }
+    // Backend memvalidasi offer ACCEPTED lalu memindahkan stage dan membuat
+    // employee secara atomic. Jangan ubah stage lebih dulu dari UI.
     // Build payload — kirim semua field yang HR lengkapi. Backend akan
     // skip field yang kosong-string supaya tidak overwrite carry-over
     // dari candidate dengan empty value.

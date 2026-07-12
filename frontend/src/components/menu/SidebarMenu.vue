@@ -16,10 +16,11 @@
  *   localStorage `hris_menu_expanded` = JSON array of menu codes.
  *   Refresh halaman → parent yang sebelumnya open tetap open.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { resolveIcon } from './iconMap'
 import { useI18n } from '@/locales'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps({
   node: { type: Object, required: true },
@@ -28,28 +29,59 @@ const props = defineProps({
 })
 
 const route = useRoute()
+const auth = useAuthStore()
 const { t, locale } = useI18n()
 
 // ─── Persistent expand state (shared antar instance) ──────────────
-const STORAGE_KEY = 'hris_menu_expanded'
+const EXPAND_EVENT = 'hris-menu-expand-change'
+const storageKey = computed(() => {
+  const userId = auth.user?.id || 'guest'
+  const companyId = auth.activeCompanyId || auth.company?.id || 'global'
+  return `hris_menu_expanded:${userId}:${companyId}`
+})
 
 function readExpanded() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (! raw) return new Set()
-    const arr = JSON.parse(raw)
-    return new Set(Array.isArray(arr) ? arr : [])
+    const raw = localStorage.getItem(storageKey.value)
+    if (! raw) return {}
+    const value = JSON.parse(raw)
+    return value && typeof value === 'object' && ! Array.isArray(value) ? value : {}
   } catch {
-    return new Set()
+    return {}
   }
 }
-function writeExpanded(set) {
+function writeExpanded(value) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]))
+    localStorage.setItem(storageKey.value, JSON.stringify(value))
   } catch {}
 }
 
 const expanded = ref(readExpanded())
+
+function applyExpandChange(event) {
+  const detail = event.detail || {}
+  if (detail.storageKey !== storageKey.value) return
+  expanded.value = { ...detail.expanded }
+}
+
+function setLevelOpen(code) {
+  const level = String(props.depth)
+  const next = { ...expanded.value }
+  if (code) next[level] = code
+  else delete next[level]
+  expanded.value = next
+  writeExpanded(next)
+  window.dispatchEvent(new CustomEvent(EXPAND_EVENT, {
+    detail: { storageKey: storageKey.value, expanded: next },
+  }))
+}
+
+onMounted(() => {
+  window.addEventListener(EXPAND_EVENT, applyExpandChange)
+  expanded.value = readExpanded()
+})
+onUnmounted(() => window.removeEventListener(EXPAND_EVENT, applyExpandChange))
+watch(storageKey, () => { expanded.value = readExpanded() })
 
 // Resolusi label: pakai translation_key kalau ada; fallback ke `label`.
 const label = computed(() => {
@@ -84,7 +116,7 @@ function hasActiveDescendant(node) {
 
 const isOpen = computed(() => {
   if (props.node.type !== 'PARENT') return true
-  return expanded.value.has(props.node.code)
+  return expanded.value[String(props.depth)] === props.node.code
 })
 
 // Auto-expand: kalau navigasi masuk ke salah satu descendant (mis. deep-link),
@@ -95,11 +127,8 @@ watch(
   () => route.path,
   () => {
     if (props.node.type !== 'PARENT') return
-    if (hasActiveDescendant(props.node) && ! expanded.value.has(props.node.code)) {
-      const next = new Set(expanded.value)
-      next.add(props.node.code)
-      expanded.value = next
-      writeExpanded(next)
+    if (hasActiveDescendant(props.node) && ! isOpen.value) {
+      setLevelOpen(props.node.code)
     }
   },
   { immediate: true },
@@ -108,12 +137,7 @@ watch(
 function toggle() {
   if (props.node.type !== 'PARENT') return
   const code = props.node.code
-  // Clone Set supaya reactive
-  const next = new Set(expanded.value)
-  if (next.has(code)) next.delete(code)
-  else next.add(code)
-  expanded.value = next
-  writeExpanded(next)
+  setLevelOpen(isOpen.value ? null : code)
 }
 
 // Active state untuk ITEM
