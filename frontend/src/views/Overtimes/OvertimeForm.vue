@@ -40,7 +40,7 @@ async function submit() {
     const end   = `${form.value.work_date} ${form.value.end_time}:00`
     await api.post('/overtimes', { ...form.value, start_time: start, end_time: end })
     toast.success(t('overtime.submit_success'))
-    router.push('/overtimes')
+    router.push('/overtimes?scope=mine')
   } catch (e) {
     toast.error(e.response?.data?.message || t('overtime.submit_failed'))
   } finally {

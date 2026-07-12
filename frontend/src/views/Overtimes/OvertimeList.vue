@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -14,14 +14,32 @@ const route = useRoute()
 const toast = useToast()
 const { t } = useI18n()
 const items = ref([])
-const filterStatus = ref(route.query.status || '')
+const filterStatus = ref('')
+
+function isMineScope() {
+  return route.query.scope === 'mine'
+}
 
 async function fetchData() {
-  const res = await api.get('/overtimes', { params: { status: filterStatus.value || undefined } })
+  const res = await api.get('/overtimes', {
+    params: {
+      status: filterStatus.value || undefined,
+      mine: isMineScope() ? 1 : undefined,
+    },
+  })
   items.value = res.data.data
 }
 
-onMounted(fetchData)
+// Component yang sama dipakai menu "Saya" dan "HR". Vue tidak me-remount
+// component ketika hanya query string yang berubah, jadi scope harus diawasi.
+watch(
+  () => [route.query.scope, route.query.status],
+  () => {
+    filterStatus.value = route.query.status || ''
+    fetchData()
+  },
+  { immediate: true },
+)
 
 async function approve(id) {
   const ok = await confirmDialog({

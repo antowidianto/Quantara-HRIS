@@ -147,7 +147,7 @@ onMounted(loadMyPlanned)
 <template>
   <div>
     <button class="text-sm text-gray-600 hover:text-primary-600 inline-flex items-center gap-1 mb-3"
-      @click="router.push('/overtimes')">
+      @click="router.push('/overtimes?scope=mine')">
       <ArrowLeftIcon class="w-4 h-4" /> {{ t('overtime.back_to_list') }}
     </button>
 
