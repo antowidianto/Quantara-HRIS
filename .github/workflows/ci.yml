@@ -51,6 +51,14 @@ jobs:
         working-directory: backend
         run: composer stan
 
+      - name: Migration integrity
+        working-directory: backend
+        run: composer migration:check
+
+      - name: Permission seed coverage
+        working-directory: backend
+        run: composer permission:check
+
       - name: PHPUnit
         working-directory: backend
         run: composer test

@@ -69,9 +69,14 @@ const IDEMPOTENT_PATH_PATTERNS: RegExp[] = [
   /^\/leaves$/,
   /^\/overtimes$/,
   /^\/reimbursements$/,
+  /^\/loans$/,
   /^\/business-trips$/,
   /^\/approval-requests\/\d+\/(approve|reject)$/,
   /^\/approval-requests\/bulk-(approve|reject)$/,
+  /^\/payroll-periods\/\d+\/(calculate|finalize|disburse)$/,
+  /^\/bonus-runs$/,
+  /^\/bonus-runs\/\d+\/(calculate|approve|mark-paid|cancel)$/,
+  /^\/bonus-runs\/\d+\/recipients\/include-all$/,
   /^\/devices\/register$/,
 ];
 

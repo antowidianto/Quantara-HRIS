@@ -95,37 +95,5 @@ class Filters extends BaseConfig
         // dengan index company_id). Read-only (GET/HEAD/OPTIONS) tetap
         // allowed supaya user bisa lihat data + reactivate via /billing.
         'suspended' => ['before' => ['api/v1/*']],
-        // Mobile Prep / MOB-3 — Idempotency-Key untuk POST critical.
-        // Filter optional: hanya aktif kalau client kirim header
-        // `Idempotency-Key`. Dipasang di pattern POST yang sering jadi
-        // sumber duplikat (clock-in/out, leaves create, reimbursement,
-        // approval decisions). after-pass diperlukan untuk tulis
-        // response cache.
-        'idempotency' => [
-            'before' => [
-                'api/v1/attendance/clock-in',
-                'api/v1/attendance/clock-out',
-                'api/v1/leaves',
-                'api/v1/overtimes',
-                'api/v1/reimbursements',
-                'api/v1/business-trips',
-                'api/v1/approval-requests/*/approve',
-                'api/v1/approval-requests/*/reject',
-                'api/v1/approval-requests/bulk-approve',
-                'api/v1/approval-requests/bulk-reject',
-            ],
-            'after' => [
-                'api/v1/attendance/clock-in',
-                'api/v1/attendance/clock-out',
-                'api/v1/leaves',
-                'api/v1/overtimes',
-                'api/v1/reimbursements',
-                'api/v1/business-trips',
-                'api/v1/approval-requests/*/approve',
-                'api/v1/approval-requests/*/reject',
-                'api/v1/approval-requests/bulk-approve',
-                'api/v1/approval-requests/bulk-reject',
-            ],
-        ],
     ];
 }

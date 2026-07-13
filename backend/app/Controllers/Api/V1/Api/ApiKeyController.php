@@ -52,8 +52,11 @@ class ApiKeyController extends ApiController
         $ids = array_map(static fn($r) => (int) $r['id'], $rows);
         $scopes = [];
         if ($ids !== []) {
-            $rs = Database::connect()->table('api_key_scopes')
-                ->whereIn('api_key_id', $ids)->get()->getResultArray();
+            $rs = Database::connect()->table('api_key_scopes s')
+                ->select('s.*')
+                ->join('api_keys k', 'k.id = s.api_key_id')
+                ->where('k.company_id', $companyId)
+                ->whereIn('s.api_key_id', $ids)->get()->getResultArray();
             foreach ($rs as $s) {
                 $scopes[(int) $s['api_key_id']][] = $s['scope'];
             }
@@ -107,7 +110,12 @@ class ApiKeyController extends ApiController
         if (! $row) return $this->fail('Not found', 404, 'NOT_FOUND');
         unset($row['key_hash']);
         $row['scopes'] = array_column(
-            Database::connect()->table('api_key_scopes')->where('api_key_id', $id)->get()->getResultArray(),
+            Database::connect()->table('api_key_scopes s')
+                ->select('s.scope')
+                ->join('api_keys k', 'k.id = s.api_key_id')
+                ->where('s.api_key_id', $id)
+                ->where('k.company_id', $companyId)
+                ->get()->getResultArray(),
             'scope'
         );
         return $this->ok($row);
@@ -124,6 +132,7 @@ class ApiKeyController extends ApiController
         try {
             $result = $this->service->rotate(
                 $id,
+                $companyId,
                 $this->userId(),
                 (string) ($this->getJsonInput()['reason'] ?? 'Manual rotation'),
             );
@@ -147,7 +156,7 @@ class ApiKeyController extends ApiController
         if ($reason === '') {
             return $this->fail('reason wajib diisi', 422, 'REASON_REQUIRED');
         }
-        $this->service->revoke($id, $reason);
+        $this->service->revoke($id, $companyId, $reason);
         return $this->ok(['id' => $id, 'revoked' => true]);
     }
 
@@ -167,16 +176,19 @@ class ApiKeyController extends ApiController
         $db = Database::connect();
         $total = (int) $db->table('api_request_logs')
             ->where('api_key_id', $id)
+            ->where('company_id', $companyId)
             ->where('created_at >=', $sinceFmt)
             ->countAllResults();
         $rateLimited = (int) $db->table('api_request_logs')
             ->where('api_key_id', $id)
+            ->where('company_id', $companyId)
             ->where('created_at >=', $sinceFmt)
             ->where('rate_limited', 1)
             ->countAllResults();
         $byEndpoint = $db->table('api_request_logs')
             ->select('endpoint, COUNT(*) AS hits, AVG(duration_ms) AS avg_ms')
             ->where('api_key_id', $id)
+            ->where('company_id', $companyId)
             ->where('created_at >=', $sinceFmt)
             ->groupBy('endpoint')
             ->orderBy('hits', 'DESC')
@@ -185,6 +197,7 @@ class ApiKeyController extends ApiController
         $byStatus = $db->table('api_request_logs')
             ->select('status_code, COUNT(*) AS hits')
             ->where('api_key_id', $id)
+            ->where('company_id', $companyId)
             ->where('created_at >=', $sinceFmt)
             ->groupBy('status_code')
             ->orderBy('hits', 'DESC')

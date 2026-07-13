@@ -95,7 +95,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             'type'             => 'PARENT',
             'code'             => 'admin.enterprise',
             'label'            => 'Enterprise Modules',
-            'translation_key'  => null,
+            'translation_key'  => 'nav.enterprise',
             'icon'             => 'BuildingOffice2Icon',
             'route_path'       => null,
             'permission'       => null,
@@ -109,6 +109,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.subscription',
                 'label'      => 'Subscription Plan',
+                'translation_key' => 'nav.items.subscription',
                 'icon'       => 'CreditCardIcon',
                 'route_path' => '/billing/plan',
                 'permission' => 'billing.manage',
@@ -117,6 +118,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.usage',
                 'label'      => 'Usage & Billing',
+                'translation_key' => 'nav.items.billing_usage',
                 'icon'       => 'ChartBarIcon',
                 'route_path' => '/billing/usage',
                 'permission' => 'billing.view',
@@ -125,6 +127,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.erp_journal',
                 'label'      => 'ERP Journal',
+                'translation_key' => 'nav.items.erp_journal',
                 'icon'       => 'BanknotesIcon',
                 'route_path' => '/erp/journal',
                 'permission' => 'erp.journal.view',
@@ -133,6 +136,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.signing',
                 'label'      => 'Digital Signing',
+                'translation_key' => 'nav.items.digital_signing',
                 'icon'       => 'PencilSquareIcon',
                 'route_path' => '/signing',
                 'permission' => 'signing.envelope.view',
@@ -141,6 +145,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.api_keys',
                 'label'      => 'Developer API Keys',
+                'translation_key' => 'nav.items.developer_api_keys',
                 'icon'       => 'KeyIcon',
                 'route_path' => '/developer/api-keys',
                 'permission' => 'api_key.view',
@@ -149,6 +154,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.licenses',
                 'label'      => 'License Tracker',
+                'translation_key' => 'nav.items.license_tracker',
                 'icon'       => 'AcademicCapIcon',
                 'route_path' => '/licenses',
                 'permission' => 'employee_license.view',
@@ -157,6 +163,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
             [
                 'code'       => 'admin.enterprise.timesheet',
                 'label'      => 'Project Timesheet',
+                'translation_key' => 'nav.items.project_timesheet',
                 'icon'       => 'ClockIcon',
                 'route_path' => '/timesheet',
                 'permission' => 'timesheet.submit',
@@ -171,7 +178,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
                 'type'             => 'ITEM',
                 'code'             => $c['code'],
                 'label'            => $c['label'],
-                'translation_key'  => null,
+                'translation_key'  => $c['translation_key'],
                 'icon'             => $c['icon'],
                 'route_path'       => $c['route_path'],
                 'permission'       => $c['permission'],
@@ -221,6 +228,7 @@ class S20RelocateMenusToSuperAdmin extends Migration
                 'parent_id'        => $row['parent_id'] ?? null,
                 'type'             => $row['type'],
                 'label'            => $row['label'],
+                'translation_key'  => $row['translation_key'] ?? null,
                 'icon'             => $row['icon'] ?? null,
                 'route_path'       => $row['route_path'] ?? null,
                 'permission'       => $row['permission'] ?? null,

@@ -138,7 +138,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // metadata supaya ada trail forensic kalau ada dispute.
         $routes->get('offers',                               'Auth\CandidateAuthController::listOffers');
         $routes->get('offers/(:num)',                        'Auth\CandidateAuthController::showOffer/$1');
-        $routes->post('offers/(:num)/respond',               'Auth\CandidateAuthController::respondToOffer/$1');
+        $routes->post('offers/(:num)/respond',               'Auth\CandidateAuthController::respondToOffer/$1',
+            ['filter' => 'idempotency:required']);
     });
 
     // Detail & apply pakai 2 segmen slug
@@ -316,9 +317,9 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->get('attendance', 'Attendance\AttendanceController::index');
         // Sprint A / B3 — Origin guard untuk multipart selfie clock.
         $routes->post('attendance/clock-in', 'Attendance\AttendanceController::clockIn',
-            ['filter' => 'sameorigin']);
+            ['filter' => ['sameorigin', 'idempotency:required']]);
         $routes->post('attendance/clock-out', 'Attendance\AttendanceController::clockOut',
-            ['filter' => 'sameorigin']);
+            ['filter' => ['sameorigin', 'idempotency:required']]);
         $routes->get('attendance/my', 'Attendance\AttendanceController::my');
         $routes->get('attendance/calendar/(:num)', 'Attendance\AttendanceController::calendar/$1');
         
@@ -385,6 +386,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // Sama: team-calendar harus di atas resource supaya tidak ke-trap
         // sebagai /leaves/(:num).
         $routes->get('leaves/team-calendar', 'Leave\LeaveController::teamCalendar');
+        $routes->post('leaves', 'Leave\LeaveController::create',
+            ['filter' => 'idempotency:required']);
         $routes->resource('leaves', ['controller' => 'Leave\LeaveController']);
         $routes->post('leaves/(:num)/approve', 'Leave\LeaveController::approve/$1');
         $routes->post('leaves/(:num)/reject', 'Leave\LeaveController::reject/$1');
@@ -396,6 +399,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // H1.6 — pre-approval flow (plan + realize). Dideklarasikan di atas
         // resource() supaya path /overtimes/plan tidak ke-trap sebagai numeric id.
         $routes->post('overtimes/plan', 'Attendance\OvertimeController::plan');
+        $routes->post('overtimes', 'Attendance\OvertimeController::create',
+            ['filter' => 'idempotency:required']);
         $routes->resource('overtimes', ['controller' => 'Attendance\OvertimeController']);
         $routes->post('overtimes/(:num)/approve', 'Attendance\OvertimeController::approve/$1');
         $routes->post('overtimes/(:num)/reject', 'Attendance\OvertimeController::reject/$1');
@@ -410,9 +415,12 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         // /payroll-periods/4/export-summary tidak nyangkut sebagai
         // resource show() (yang akan return period biasa, bukan summary
         // export). Pola sama dengan leaves & goals di atas.
-        $routes->post('payroll-periods/(:num)/calculate',     'Payroll\PayrollPeriodController::calculate/$1');
-        $routes->post('payroll-periods/(:num)/finalize',      'Payroll\PayrollPeriodController::finalize/$1');
-        $routes->post('payroll-periods/(:num)/disburse',      'Payroll\DisbursementController::disburse/$1');
+        $routes->post('payroll-periods/(:num)/calculate',     'Payroll\PayrollPeriodController::calculate/$1',
+            ['filter' => ['permission:payroll.calculate', 'idempotency:required']]);
+        $routes->post('payroll-periods/(:num)/finalize',      'Payroll\PayrollPeriodController::finalize/$1',
+            ['filter' => ['permission:payroll.finalize', 'idempotency:required']]);
+        $routes->post('payroll-periods/(:num)/disburse',      'Payroll\DisbursementController::disburse/$1',
+            ['filter' => ['permission:payroll.finalize', 'idempotency:required']]);
         $routes->get('payroll-periods/(:num)/disburse-status', 'Payroll\DisbursementController::checkStatus/$1');
         // Pre-check sebelum calculate: deteksi pengajuan transaksi yang
         // memengaruhi payroll & masih PENDING approval. UI bisa show
@@ -435,7 +443,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
 
         // Payroll (Reimbursements, dll)
         $routes->get('my-benefit-balances', 'Payroll\ReimbursementController::myBalances');
+        $routes->post('reimbursements', 'Payroll\ReimbursementController::create',
+            ['filter' => 'idempotency:required']);
         $routes->resource('reimbursements', ['controller' => 'Payroll\ReimbursementController']);
+        $routes->post('loans', 'Payroll\LoanController::create',
+            ['filter' => 'idempotency:required']);
         $routes->resource('loans', ['controller' => 'Payroll\LoanController']);
 
         // ─── Fase 4: Talent Management ──────────────────────────
@@ -756,7 +768,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->put('offers/(:num)',                       'Recruitment\OfferController::update/$1');
         $routes->delete('offers/(:num)',                    'Recruitment\OfferController::delete/$1');
         $routes->post('offers/(:num)/send',                 'Recruitment\OfferController::send/$1');
-        $routes->post('offers/(:num)/respond',              'Recruitment\OfferController::respond/$1');
+        $routes->post('offers/(:num)/respond',              'Recruitment\OfferController::respond/$1',
+            ['filter' => 'idempotency:required']);
         $routes->post('offers/(:num)/withdraw',             'Recruitment\OfferController::withdraw/$1');
 
         // ─── Probation (Sprint 2 / HIRE-1) ─────────────────────────
@@ -843,7 +856,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->put('business-trip-expenses/(:num)',    'Attendance\BusinessTripController::updateExpense/$1');
         $routes->delete('business-trip-expenses/(:num)', 'Attendance\BusinessTripController::deleteExpense/$1');
         $routes->get('business-trips',                       'Attendance\BusinessTripController::index');
-        $routes->post('business-trips',                      'Attendance\BusinessTripController::create');
+        $routes->post('business-trips',                      'Attendance\BusinessTripController::create',
+            ['filter' => 'idempotency:required']);
         $routes->get('business-trips/(:num)',                'Attendance\BusinessTripController::show/$1');
         $routes->put('business-trips/(:num)',                'Attendance\BusinessTripController::update/$1');
         $routes->delete('business-trips/(:num)',             'Attendance\BusinessTripController::delete/$1');
@@ -899,16 +913,22 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->put('bonus-schemes/(:num)',                    'Payroll\BonusController::updateScheme/$1');
         $routes->delete('bonus-schemes/(:num)',                 'Payroll\BonusController::deleteScheme/$1');
         $routes->get('bonus-runs',                              'Payroll\BonusController::listRuns');
-        $routes->post('bonus-runs',                             'Payroll\BonusController::createRun');
+        $routes->post('bonus-runs',                             'Payroll\BonusController::createRun',
+            ['filter' => 'idempotency:required']);
         $routes->get('bonus-runs/(:num)',                       'Payroll\BonusController::showRun/$1');
         $routes->put('bonus-runs/(:num)',                       'Payroll\BonusController::updateRun/$1');
         $routes->delete('bonus-runs/(:num)',                    'Payroll\BonusController::deleteRun/$1');
-        $routes->post('bonus-runs/(:num)/calculate',            'Payroll\BonusController::calculateRun/$1');
-        $routes->post('bonus-runs/(:num)/approve',              'Payroll\BonusController::approveRun/$1');
-        $routes->post('bonus-runs/(:num)/mark-paid',            'Payroll\BonusController::markRunPaid/$1');
-        $routes->post('bonus-runs/(:num)/cancel',               'Payroll\BonusController::cancelRun/$1');
+        $routes->post('bonus-runs/(:num)/calculate',            'Payroll\BonusController::calculateRun/$1',
+            ['filter' => 'idempotency:required']);
+        $routes->post('bonus-runs/(:num)/approve',              'Payroll\BonusController::approveRun/$1',
+            ['filter' => 'idempotency:required']);
+        $routes->post('bonus-runs/(:num)/mark-paid',            'Payroll\BonusController::markRunPaid/$1',
+            ['filter' => 'idempotency:required']);
+        $routes->post('bonus-runs/(:num)/cancel',               'Payroll\BonusController::cancelRun/$1',
+            ['filter' => 'idempotency:required']);
         $routes->get('bonus-runs/(:num)/recipients',            'Payroll\BonusController::listRecipients/$1');
-        $routes->post('bonus-runs/(:num)/recipients/include-all', 'Payroll\BonusController::includeAllRecipients/$1');
+        $routes->post('bonus-runs/(:num)/recipients/include-all', 'Payroll\BonusController::includeAllRecipients/$1',
+            ['filter' => 'idempotency:required']);
         $routes->put('bonus-recipients/(:num)',                 'Payroll\BonusController::overrideRecipient/$1');
         // Sprint 20+ — Bonus history per karyawan (untuk profile tab + HR analytics)
         $routes->get('employees/(:num)/bonus-history',          'Payroll\BonusController::employeeHistory/$1');
@@ -952,25 +972,29 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
         $routes->delete('approval-delegations/(:num)', 'Approval\ApprovalDelegationController::delete/$1');
 
         // ─── Approval Chains ───────────────────────────────────────
-        $routes->get('approval-chains',            'Approval\ApprovalChainController::index');
-        $routes->get('approval-chains/(:num)',     'Approval\ApprovalChainController::show/$1');
-        $routes->post('approval-chains',           'Approval\ApprovalChainController::create');
-        $routes->put('approval-chains/(:num)',     'Approval\ApprovalChainController::update/$1');
-        $routes->delete('approval-chains/(:num)',  'Approval\ApprovalChainController::delete/$1');
+        $routes->get('approval-chains',            'Approval\ApprovalChainController::index', ['filter' => 'permission:approval_chain.view']);
+        $routes->get('approval-chains/(:num)',     'Approval\ApprovalChainController::show/$1', ['filter' => 'permission:approval_chain.view']);
+        $routes->post('approval-chains',           'Approval\ApprovalChainController::create', ['filter' => 'permission:approval_chain.manage']);
+        $routes->put('approval-chains/(:num)',     'Approval\ApprovalChainController::update/$1', ['filter' => 'permission:approval_chain.manage']);
+        $routes->delete('approval-chains/(:num)',  'Approval\ApprovalChainController::delete/$1', ['filter' => 'permission:approval_chain.manage']);
         // Assignment rules — chain mana berlaku untuk dept/branch/grade tertentu
-        $routes->get('approval-assignments',       'Approval\ApprovalChainController::listAssignments');
-        $routes->post('approval-assignments',      'Approval\ApprovalChainController::createAssignment');
-        $routes->delete('approval-assignments/(:num)', 'Approval\ApprovalChainController::deleteAssignment/$1');
+        $routes->get('approval-assignments',       'Approval\ApprovalChainController::listAssignments', ['filter' => 'permission:approval_chain.view']);
+        $routes->post('approval-assignments',      'Approval\ApprovalChainController::createAssignment', ['filter' => 'permission:approval_chain.manage']);
+        $routes->delete('approval-assignments/(:num)', 'Approval\ApprovalChainController::deleteAssignment/$1', ['filter' => 'permission:approval_chain.manage']);
         // Inbox + decision
         $routes->get('approval-requests/inbox',         'Approval\ApprovalChainController::inbox');
         // Bulk endpoints (Sprint 7 / H1.1) — harus didefinisikan SEBELUM
         // /(:num)/approve & /(:num)/reject supaya path /bulk-approve tidak
         // di-resolve sebagai numeric id.
-        $routes->post('approval-requests/bulk-approve', 'Approval\ApprovalChainController::bulkApprove');
-        $routes->post('approval-requests/bulk-reject',  'Approval\ApprovalChainController::bulkReject');
+        $routes->post('approval-requests/bulk-approve', 'Approval\ApprovalChainController::bulkApprove',
+            ['filter' => 'idempotency:required']);
+        $routes->post('approval-requests/bulk-reject',  'Approval\ApprovalChainController::bulkReject',
+            ['filter' => 'idempotency:required']);
         $routes->get('approval-requests/(:num)',        'Approval\ApprovalChainController::showRequest/$1');
-        $routes->post('approval-requests/(:num)/approve','Approval\ApprovalChainController::approveRequest/$1');
-        $routes->post('approval-requests/(:num)/reject', 'Approval\ApprovalChainController::rejectRequest/$1');
+        $routes->post('approval-requests/(:num)/approve','Approval\ApprovalChainController::approveRequest/$1',
+            ['filter' => 'idempotency:required']);
+        $routes->post('approval-requests/(:num)/reject', 'Approval\ApprovalChainController::rejectRequest/$1',
+            ['filter' => 'idempotency:required']);
 
         // ─── Company Regulations (klausul peraturan) ───────────────
         $routes->get('regulations',                'System\CompanyRegulationController::index');
@@ -1294,13 +1318,13 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers\Api\V1'], static funct
             'Signing\SigningController::recordSignerEvent/$1/$2');
 
         // ─── H3.8 — Open API & Developer Portal ─────────────────────
-        $routes->get('api-scopes',                            'Api\ApiKeyController::listScopes');
-        $routes->get('api-keys',                              'Api\ApiKeyController::listKeys');
-        $routes->post('api-keys',                             'Api\ApiKeyController::createKey');
-        $routes->get('api-keys/(:num)',                       'Api\ApiKeyController::showKey/$1');
-        $routes->post('api-keys/(:num)/rotate',               'Api\ApiKeyController::rotateKey/$1');
-        $routes->post('api-keys/(:num)/revoke',               'Api\ApiKeyController::revokeKey/$1');
-        $routes->get('api-keys/(:num)/usage',                 'Api\ApiKeyController::usage/$1');
+        $routes->get('api-scopes',                            'Api\ApiKeyController::listScopes', ['filter' => 'permission:api_key.view']);
+        $routes->get('api-keys',                              'Api\ApiKeyController::listKeys', ['filter' => 'permission:api_key.view']);
+        $routes->post('api-keys',                             'Api\ApiKeyController::createKey', ['filter' => 'permission:api_key.manage']);
+        $routes->get('api-keys/(:num)',                       'Api\ApiKeyController::showKey/$1', ['filter' => 'permission:api_key.view']);
+        $routes->post('api-keys/(:num)/rotate',               'Api\ApiKeyController::rotateKey/$1', ['filter' => 'permission:api_key.manage']);
+        $routes->post('api-keys/(:num)/revoke',               'Api\ApiKeyController::revokeKey/$1', ['filter' => 'permission:api_key.manage']);
+        $routes->get('api-keys/(:num)/usage',                 'Api\ApiKeyController::usage/$1', ['filter' => 'permission:api_key.view']);
 
         // ─── Project Timesheet (jasa profesional / konsultan) ────────
         // Project master + assignments. burn-rate harus di atas /(:num)

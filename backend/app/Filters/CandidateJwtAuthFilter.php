@@ -51,6 +51,9 @@ class CandidateJwtAuthFilter implements FilterInterface
         // Stash ke request — controller akses lewat $this->request->candidate
         $request->candidate = $account;
         $request->candidateJwt = $payload;
+        // Candidate bukan user internal, tetapi company scope tetap dibutuhkan
+        // oleh layanan tenant-aware seperti penyimpanan idempotency key.
+        Services::tenant()->setCompanyId((int) $account['company_id']);
     }
 
     public function after(RequestInterface $request, ResponseInterface $response, $arguments = null)

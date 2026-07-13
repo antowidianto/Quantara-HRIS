@@ -29,7 +29,7 @@ class AddMyTeamMenu extends Migration
             'type' => 'ITEM',
             'code' => 'my.team',
             'label' => 'Tim Saya',
-            'translation_key' => null,
+            'translation_key' => 'nav.items.my_team',
             'icon' => 'UserGroupIcon',
             'route_path' => '/my-team',
             'permission' => null,

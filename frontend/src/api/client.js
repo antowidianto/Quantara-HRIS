@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'
+import { createIdempotencyKey, requiresIdempotencyKey } from '@/api/idempotency'
 
 const baseURL = (import.meta.env.VITE_USE_PROXY === 'true')
   ? '/api/v1'
@@ -21,6 +22,18 @@ api.interceptors.request.use((config) => {
   // Untuk super admin, kirim active company agar backend tahu target tenant
   if (auth.isSuperAdmin && auth.activeCompanyId) {
     config.headers['X-Company-Id'] = auth.activeCompanyId
+  }
+  if (requiresIdempotencyKey(config.method, config.url)) {
+    const existing = typeof config.headers?.get === 'function'
+      ? config.headers.get('Idempotency-Key')
+      : config.headers?.['Idempotency-Key']
+    if (! existing) {
+      if (typeof config.headers?.set === 'function') {
+        config.headers.set('Idempotency-Key', createIdempotencyKey())
+      } else {
+        config.headers['Idempotency-Key'] = createIdempotencyKey()
+      }
+    }
   }
   return config
 })

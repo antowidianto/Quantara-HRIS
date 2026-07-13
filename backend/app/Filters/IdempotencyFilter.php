@@ -18,9 +18,8 @@ use Config\Services;
  *
  *   1. **Tidak ada header** Idempotency-Key:
  *      - GET / HEAD / OPTIONS → bypass (idempotent secara HTTP)
- *      - POST / PUT / PATCH / DELETE → wajib (atau opsional, tergantung
- *        konfigurasi). Untuk MVP: opsional, hanya enforced kalau header
- *        ada. Server kasih warning di response header.
+ *      - POST / PUT / PATCH / DELETE → ditolak ketika route memakai
+ *        argumen filter `required`.
  *
  *   2. **Header ada, key BARU**: reservasi state IN_FLIGHT, lanjut ke
  *      controller. Setelah controller selesai, simpan response di tabel.
@@ -36,7 +35,7 @@ use Config\Services;
  *   5. **Header ada, key SAMA + body BERBEDA**: return 422 — pelanggaran
  *      kontrak idempotency (key sama harus body sama).
  *
- * Header validasi: format UUID v4 atau opaque string ≤ 64 char.
+ * Header validasi: opaque string sepanjang 8–100 karakter.
  *
  * Catatan implementasi: kita pakai 2-pass via `before` dan `after`.
  * `before` reservasi key, `after` save response. Karena CI4 filter `after`
@@ -61,7 +60,14 @@ class IdempotencyFilter implements FilterInterface
 
         $rawKey = trim($request->getHeaderLine(self::HEADER));
         if ($rawKey === '') {
-            // Optional di MVP — tidak block. Jika nanti mau strict, ubah ke fail().
+            if (in_array('required', $arguments ?? [], true)) {
+                return $this->fail(
+                    'Idempotency-Key is required for this operation',
+                    400,
+                    'IDEMPOTENCY_KEY_REQUIRED'
+                );
+            }
+            // Tetap mendukung mode opsional untuk endpoint non-kritis.
             return;
         }
         if (strlen($rawKey) < self::MIN_LEN || strlen($rawKey) > self::MAX_LEN) {
@@ -77,7 +83,11 @@ class IdempotencyFilter implements FilterInterface
             // Filter `jwt` belum berhasil set tenant context — abort.
             // Dalam praktek IdempotencyFilter selalu di-chain setelah `jwt`,
             // jadi ini defense in depth.
-            return;
+            return $this->fail(
+                'Tenant context is required for idempotent operations',
+                400,
+                'TENANT_CONTEXT_REQUIRED'
+            );
         }
 
         $keyHash = IdempotencyKeyModel::hashKey($rawKey);
