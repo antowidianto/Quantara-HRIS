@@ -178,3 +178,5 @@ if (! empty($missingFromSeed)) {
     echo "  ✓ Audit clean — semua permission ter-track.\n";
 }
 echo "{$line}\n";
+
+exit($missingFromSeed === [] ? 0 : 1);

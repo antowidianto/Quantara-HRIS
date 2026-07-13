@@ -130,7 +130,10 @@ class ApprovalEngine
     public function canApprove(int $requestId, int $userId): bool
     {
         $db = \Config\Database::connect();
-        $req = $db->table('approval_requests')->where('id', $requestId)->get()->getRowArray();
+        $builder = $db->table('approval_requests')->where('id', $requestId);
+        $companyId = Services::tenant()->getCompanyId();
+        if ($companyId > 0) $builder->where('company_id', $companyId);
+        $req = $builder->get()->getRowArray();
         if (! $req || $req['status'] !== 'PENDING') return false;
 
         // Super admin / HR fallback selalu bisa approve.
@@ -156,6 +159,8 @@ class ApprovalEngine
             ->where('ar.status', 'PENDING')
             ->orderBy('ar.created_at', 'DESC')
             ->limit($limit);
+        $companyId = Services::tenant()->getCompanyId();
+        if ($companyId > 0) $builder->where('ar.company_id', $companyId);
         if ($module) $builder->where('ar.module', $module);
 
         $rows = $builder->get()->getResultArray();
@@ -319,7 +324,10 @@ class ApprovalEngine
     private function decide(int $requestId, int $userId, string $decision, string $note): array
     {
         $db = \Config\Database::connect();
-        $req = $db->table('approval_requests')->where('id', $requestId)->get()->getRowArray();
+        $builder = $db->table('approval_requests')->where('id', $requestId);
+        $companyId = Services::tenant()->getCompanyId();
+        if ($companyId > 0) $builder->where('company_id', $companyId);
+        $req = $builder->get()->getRowArray();
         if (! $req) {
             throw new \RuntimeException('Approval request not found');
         }

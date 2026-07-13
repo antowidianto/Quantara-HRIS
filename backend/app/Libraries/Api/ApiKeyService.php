@@ -72,6 +72,14 @@ class ApiKeyService
 
         $db  = Database::connect();
         $now = date('Y-m-d H:i:s');
+        $knownScopes = array_column(
+            $db->table('api_scopes')->select('scope')->whereIn('scope', $scopes)->get()->getResultArray(),
+            'scope',
+        );
+        $unknownScopes = array_values(array_diff($scopes, $knownScopes));
+        if ($unknownScopes !== []) {
+            throw new \InvalidArgumentException('scope tidak dikenal: ' . implode(', ', $unknownScopes));
+        }
         $row = [
             'company_id'            => $companyId,
             'name'                  => mb_substr($name, 0, 200),
@@ -147,18 +155,22 @@ class ApiKeyService
      * Rotate key: revoke yang lama, buat key baru dengan scope yang sama.
      * Plain key baru dikembalikan sekali.
      */
-    public function rotate(int $apiKeyId, int $userId, ?string $reason = null): array
+    public function rotate(int $apiKeyId, int $companyId, int $userId, ?string $reason = null): array
     {
         $db = Database::connect();
-        $row = $db->table('api_keys')->where('id', $apiKeyId)->get()->getRowArray();
+        $row = $db->table('api_keys')->where('id', $apiKeyId)->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) {
             throw new \RuntimeException('API key tidak ditemukan');
         }
         $scopes = array_column(
-            $db->table('api_key_scopes')->where('api_key_id', $apiKeyId)->get()->getResultArray(),
+            $db->table('api_key_scopes s')->select('s.scope')
+                ->join('api_keys k', 'k.id = s.api_key_id')
+                ->where('s.api_key_id', $apiKeyId)
+                ->where('k.company_id', $companyId)
+                ->get()->getResultArray(),
             'scope'
         );
-        $this->revoke($apiKeyId, $reason ?? 'Rotated by ' . $userId);
+        $this->revoke($apiKeyId, $companyId, $reason ?? 'Rotated by ' . $userId);
         return $this->generate(
             (int) $row['company_id'],
             $userId,
@@ -173,10 +185,11 @@ class ApiKeyService
     /**
      * Revoke key (soft, audit-friendly).
      */
-    public function revoke(int $apiKeyId, ?string $reason = null): void
+    public function revoke(int $apiKeyId, int $companyId, ?string $reason = null): void
     {
         Database::connect()->table('api_keys')
             ->where('id', $apiKeyId)
+            ->where('company_id', $companyId)
             ->update([
                 'revoked_at'     => date('Y-m-d H:i:s'),
                 'revoked_reason' => $reason !== null ? mb_substr($reason, 0, 255) : null,
@@ -215,7 +228,7 @@ class ApiKeyService
             'rate_limited' => $rateLimited ? 1 : 0,
             'created_at'   => $now,
         ]);
-        $db->table('api_keys')->where('id', $apiKeyId)->update([
+        $db->table('api_keys')->where('id', $apiKeyId)->where('company_id', $companyId)->update([
             'last_used_at' => $now,
             'last_used_ip' => $ip,
             'updated_at'   => $now,
@@ -225,12 +238,13 @@ class ApiKeyService
     /**
      * Hitung request count untuk window 60 detik terakhir (rate limit).
      */
-    public function countRecentRequests(int $apiKeyId, int $windowSeconds = 60): int
+    public function countRecentRequests(int $companyId, int $apiKeyId, int $windowSeconds = 60): int
     {
         $db = Database::connect();
         $cutoff = date('Y-m-d H:i:s', time() - $windowSeconds);
         return (int) $db->table('api_request_logs')
             ->where('api_key_id', $apiKeyId)
+            ->where('company_id', $companyId)
             ->where('created_at >=', $cutoff)
             ->countAllResults();
     }

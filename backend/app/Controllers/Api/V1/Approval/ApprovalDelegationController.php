@@ -70,7 +70,7 @@ class ApprovalDelegationController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('approval_delegations')->where('id', (int) $id)->get()->getRowArray();
+        $row = $this->findForTenant($db, (int) $id);
         if (! $row) return $this->fail('Not found', 404);
         if (! $this->canTouch($row)) return $this->fail('Forbidden', 403);
         return $this->ok($row);
@@ -106,6 +106,15 @@ class ApprovalDelegationController extends ApiController
         if ($data['date_to'] < $data['date_from']) {
             return $this->fail('Tanggal selesai harus >= tanggal mulai', 422);
         }
+
+        $db = \Config\Database::connect();
+        $userCount = $db->table('users')
+            ->where('company_id', $companyId)
+            ->whereIn('id', [$userId, $delegateTo])
+            ->countAllResults();
+        if ($userCount !== 2) {
+            return $this->fail('Delegator dan penerima delegasi harus berasal dari perusahaan yang sama', 422, 'CROSS_TENANT_DELEGATION');
+        }
         $module = trim((string) ($data['module'] ?? ''));
         $allowedModules = ['LEAVE','OVERTIME','ATTENDANCE_CHANGE','REIMBURSEMENT','LOAN','GENERIC'];
         if ($module !== '' && ! in_array($module, $allowedModules, true)) {
@@ -114,7 +123,6 @@ class ApprovalDelegationController extends ApiController
 
         // Cek duplikasi: user yg sama, delegate yg sama, modul yg sama,
         // rentang yg overlap → tolak.
-        $db = \Config\Database::connect();
         $overlap = $db->table('approval_delegations')
             ->where('company_id', $companyId)
             ->where('user_id', $userId)
@@ -162,7 +170,7 @@ class ApprovalDelegationController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('approval_delegations')->where('id', $id)->get()->getRowArray();
+        $existing = $this->findForTenant($db, $id);
         if (! $existing) return $this->fail('Not found', 404);
         if (! $this->canTouch($existing)) return $this->fail('Forbidden', 403);
 
@@ -177,8 +185,21 @@ class ApprovalDelegationController extends ApiController
         if (isset($update['module']) && $update['module'] === '') {
             $update['module'] = null;
         }
+        if (isset($update['delegate_to_user_id'])) {
+            $delegateId = (int) $update['delegate_to_user_id'];
+            if ($delegateId === (int) $existing['user_id']) {
+                return $this->fail('Anda tidak bisa mendelegasikan ke diri sendiri', 422, 'SELF_DELEGATION');
+            }
+            $delegateExists = $db->table('users')
+                ->where('id', $delegateId)
+                ->where('company_id', (int) $existing['company_id'])
+                ->countAllResults();
+            if ($delegateExists !== 1) {
+                return $this->fail('Penerima delegasi harus berasal dari perusahaan yang sama', 422, 'CROSS_TENANT_DELEGATION');
+            }
+        }
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('approval_delegations')->where('id', $id)->update($update);
+        $db->table('approval_delegations')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update($update);
 
         Services::audit()
             ->forModule('APPROVAL')
@@ -192,11 +213,11 @@ class ApprovalDelegationController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('approval_delegations')->where('id', $id)->get()->getRowArray();
+        $existing = $this->findForTenant($db, $id);
         if (! $existing) return $this->fail('Not found', 404);
         if (! $this->canTouch($existing)) return $this->fail('Forbidden', 403);
 
-        $db->table('approval_delegations')->where('id', $id)->delete();
+        $db->table('approval_delegations')->where('id', $id)->where('company_id', (int) $existing['company_id'])->delete();
         Services::audit()
             ->forModule('APPROVAL')
             ->logDelete('approval_delegation', $id, $existing,
@@ -215,5 +236,17 @@ class ApprovalDelegationController extends ApiController
         if ($tenant->hasPermission('delegation.manage')) return true;
         // Pemilik delegasi sendiri
         return (int) $row['user_id'] === (int) $tenant->getUserId();
+    }
+
+    private function findForTenant(\CodeIgniter\Database\BaseConnection $db, int $id): ?array
+    {
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return null;
+
+        return $db->table('approval_delegations')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()
+            ->getRowArray();
     }
 }

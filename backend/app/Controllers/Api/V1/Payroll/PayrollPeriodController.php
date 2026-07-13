@@ -26,7 +26,7 @@ class PayrollPeriodController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('payroll_periods')->where('id', (int) $id)->get()->getRowArray();
+        $row = $this->findPeriodForTenant($db, (int) $id);
         if (! $row) return $this->fail('Not found', 404);
         return $this->ok($row);
     }
@@ -168,14 +168,14 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        $existing = $this->findPeriodForTenant($db, $id);
         if (! $existing) return $this->fail('Not found', 404);
         if ($existing['status'] !== 'DRAFT') return $this->fail('Cannot update non-draft period', 422);
 
         $data = $this->getJsonInput();
         $update = array_intersect_key($data, array_flip(['name','start_date','end_date','pay_date','cutoff_attendance_date']));
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('payroll_periods')->where('id', $id)->update($update);
+        $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update($update);
         return $this->ok(null, 'Updated');
     }
 
@@ -183,7 +183,7 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        $existing = $this->findPeriodForTenant($db, $id);
         if (! $existing) return $this->fail('Not found', 404);
         if (! in_array($existing['status'], ['DRAFT', 'CALCULATED'], true)) {
             return $this->fail('Cannot delete finalized period', 422);
@@ -191,8 +191,8 @@ class PayrollPeriodController extends ApiController
         $db->table('payslip_details')->whereIn('payslip_id', function ($q) use ($id) {
             $q->select('id')->from('payslips')->where('payroll_period_id', $id);
         })->delete();
-        $db->table('payslips')->where('payroll_period_id', $id)->delete();
-        $db->table('payroll_periods')->where('id', $id)->delete();
+        $db->table('payslips')->where('payroll_period_id', $id)->where('company_id', (int) $existing['company_id'])->delete();
+        $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $existing['company_id'])->delete();
         Services::audit()
             ->forModule('PAYROLL')
             ->logDelete(
@@ -207,6 +207,10 @@ class PayrollPeriodController extends ApiController
     public function calculate($id = null)
     {
         $id = (int) $id;
+        $db = \Config\Database::connect();
+        if (! $this->findPeriodForTenant($db, $id)) {
+            return $this->fail('Period not found', 404);
+        }
         $audit = Services::audit()->forModule('PAYROLL')->start();
         try {
             $summary = Services::payroll()->calculatePeriod($id);
@@ -266,7 +270,7 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        $period = $this->findPeriodForTenant($db, $id);
         if (! $period) return $this->fail('Period not found', 404);
 
         try {
@@ -319,6 +323,10 @@ class PayrollPeriodController extends ApiController
     public function finalize($id = null)
     {
         $id = (int) $id;
+        $db = \Config\Database::connect();
+        if (! $this->findPeriodForTenant($db, $id)) {
+            return $this->fail('Period not found', 404);
+        }
         $audit = Services::audit()->forModule('PAYROLL')->start();
         try {
             Services::payroll()->finalize($id);
@@ -332,8 +340,7 @@ class PayrollPeriodController extends ApiController
 
             // Sprint 14+ — webhook outbound `payroll.period_finalized`.
             // Lookup periode untuk kirim metadata dasar (no PII slip).
-            $db = \Config\Database::connect();
-            $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+            $period = $this->findPeriodForTenant($db, $id);
             if ($period) {
                 // Hitung ringkasan: total payslip + grand total net pay.
                 // NOTE: kolom di tabel `payslips` adalah `take_home_pay`
@@ -344,6 +351,7 @@ class PayrollPeriodController extends ApiController
                     ->selectSum('take_home_pay', 'total_net')
                     ->selectCount('id', 'count')
                     ->where('payroll_period_id', $id)
+                    ->where('company_id', (int) $period['company_id'])
                     ->get()->getRowArray();
 
                 $this->dispatchWebhook(
@@ -473,7 +481,7 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        $period = $this->findPeriodForTenant($db, $id);
         if (! $period) return $this->fail('Period not found', 404);
 
         $payslips = $db->table('payslips p')
@@ -482,6 +490,7 @@ class PayrollPeriodController extends ApiController
                 . ' e.npwp_encrypted, e.bpjs_kesehatan_no, e.bpjs_tk_no')
             ->join('employees e', 'e.id = p.employee_id')
             ->where('p.payroll_period_id', $id)
+            ->where('p.company_id', (int) $period['company_id'])
             ->get()->getResultArray();
 
         $bankBuckets = [];
@@ -530,7 +539,7 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $period = $db->table('payroll_periods')->where('id', $id)->get()->getRowArray();
+        $period = $this->findPeriodForTenant($db, $id);
         if (! $period) return $this->failNotFound('Period not found');
         if ($period['status'] !== 'PAID') {
             return $this->fail('Periode harus dalam status PAID sebelum melapor e-Bupot', 422);
@@ -540,6 +549,7 @@ class PayrollPeriodController extends ApiController
             ->select('p.*, e.npwp_encrypted, e.full_name')
             ->join('employees e', 'e.id = p.employee_id')
             ->where('p.payroll_period_id', $id)
+            ->where('p.company_id', (int) $period['company_id'])
             ->where('p.pph21_amount >', 0)
             ->get()->getResultArray();
 
@@ -551,7 +561,7 @@ class PayrollPeriodController extends ApiController
             $ebupotService = new \App\Libraries\Tax\Providers\MockEbupotService();
             $batchId = $ebupotService->uploadBuktiPotong($payslips);
 
-            $db->table('payroll_periods')->where('id', $id)->update([
+            $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $period['company_id'])->update([
                 'ebupot_status' => 'IN_PROGRESS',
                 'ebupot_reference' => $batchId,
             ]);
@@ -559,8 +569,8 @@ class PayrollPeriodController extends ApiController
             // Pura-puranya langsung ngecek status
             $status = $ebupotService->getUploadStatus($batchId);
             if ($status['status'] === 'COMPLETED') {
-                $db->table('payroll_periods')->where('id', $id)->update(['ebupot_status' => 'COMPLETED']);
-                $db->table('payslips')->where('payroll_period_id', $id)->update(['ebupot_status' => 'COMPLETED']);
+                $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $period['company_id'])->update(['ebupot_status' => 'COMPLETED']);
+                $db->table('payslips')->where('payroll_period_id', $id)->where('company_id', (int) $period['company_id'])->update(['ebupot_status' => 'COMPLETED']);
             }
 
             Services::audit()->forModule('PAYROLL')->log(
@@ -571,11 +581,26 @@ class PayrollPeriodController extends ApiController
 
             return $this->ok(['batch_id' => $batchId, 'status' => $status['status']], 'Sinkronisasi e-Bupot dimulai');
         } catch (\Throwable $e) {
-            $db->table('payroll_periods')->where('id', $id)->update([
+            $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $period['company_id'])->update([
                 'ebupot_status' => 'FAILED',
                 'ebupot_error'  => $e->getMessage(),
             ]);
             return $this->fail('Gagal sinkronisasi e-Bupot: ' . $e->getMessage(), 500);
         }
+    }
+
+    /** Resolve a payroll period only inside the active/selected tenant. */
+    private function findPeriodForTenant(\CodeIgniter\Database\BaseConnection $db, int $id): ?array
+    {
+        $companyId = $this->companyId();
+        if ($companyId <= 0) {
+            return null;
+        }
+
+        return $db->table('payroll_periods')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()
+            ->getRowArray();
     }
 }

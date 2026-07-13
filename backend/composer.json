@@ -40,11 +40,15 @@
         ],
         "test": "phpunit",
         "test:unit": "phpunit --testsuite Unit",
+        "migration:check": "php scripts/check-migrations.php",
+        "permission:check": "php scripts/audit_permissions.php",
         "stan": "phpstan analyse --memory-limit=512M",
         "stan:baseline": "phpstan analyse --memory-limit=512M --generate-baseline",
         "format": "pint",
         "format:check": "pint --test",
         "ci": [
+            "@migration:check",
+            "@permission:check",
             "@stan",
             "@test"
         ],

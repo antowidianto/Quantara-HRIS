@@ -13,10 +13,13 @@ class DisbursementController extends ApiController
     public function disburse($periodId)
     {
         $db = \Config\Database::connect();
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return $this->fail('Company context required', 422, 'COMPANY_REQUIRED');
         
         // 1. Check period
         $period = $db->table('payroll_periods')
             ->where('id', (int) $periodId)
+            ->where('company_id', $companyId)
             ->get()->getRowArray();
 
         if (! $period) {
@@ -35,7 +38,8 @@ class DisbursementController extends ApiController
         // 2. Fetch all payslips for this period that have take_home_pay > 0
         $payslips = $db->table('payslips')
             ->select('id')
-            ->where('period_id', $period['id'])
+            ->where('payroll_period_id', $period['id'])
+            ->where('company_id', $companyId)
             ->where('take_home_pay >', 0)
             ->where('disbursement_status !=', 'COMPLETED')
             ->get()->getResultArray();
@@ -52,7 +56,7 @@ class DisbursementController extends ApiController
 
         if ($result['success']) {
             // Update period status
-            $db->table('payroll_periods')->where('id', $period['id'])->update([
+            $db->table('payroll_periods')->where('id', $period['id'])->where('company_id', $companyId)->update([
                 'disbursement_status' => 'IN_PROGRESS',
                 'disbursement_reference' => $result['batch_id'],
             ]);
@@ -65,7 +69,7 @@ class DisbursementController extends ApiController
             ]);
         } else {
             // Update period error
-            $db->table('payroll_periods')->where('id', $period['id'])->update([
+            $db->table('payroll_periods')->where('id', $period['id'])->where('company_id', $companyId)->update([
                 'disbursement_status' => 'FAILED',
                 'disbursement_error' => $result['error'],
             ]);
@@ -82,9 +86,12 @@ class DisbursementController extends ApiController
     public function checkStatus($periodId)
     {
         $db = \Config\Database::connect();
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return $this->fail('Company context required', 422, 'COMPANY_REQUIRED');
         
         $period = $db->table('payroll_periods')
             ->where('id', (int) $periodId)
+            ->where('company_id', $companyId)
             ->get()->getRowArray();
 
         if (! $period) {
@@ -100,7 +107,7 @@ class DisbursementController extends ApiController
 
         // Sync period status if it has changed
         if ($result['status'] !== 'UNKNOWN' && $result['status'] !== $period['disbursement_status']) {
-            $db->table('payroll_periods')->where('id', $period['id'])->update([
+            $db->table('payroll_periods')->where('id', $period['id'])->where('company_id', $companyId)->update([
                 'disbursement_status' => $result['status'],
                 'status' => $result['status'] === 'COMPLETED' ? 'PAID' : $period['status'],
             ]);
@@ -110,6 +117,7 @@ class DisbursementController extends ApiController
             if ($result['status'] === 'COMPLETED') {
                 $db->table('payslips')
                     ->where('disbursement_reference', $period['disbursement_reference'])
+                    ->where('company_id', $companyId)
                     ->update(['disbursement_status' => 'COMPLETED']);
             }
         }

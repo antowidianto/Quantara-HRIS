@@ -31,13 +31,14 @@ class ApprovalChainController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $chain = $db->table('approval_chains')->where('id', (int) $id)->get()->getRowArray();
+        $chain = $this->findChainForTenant($db, (int) $id);
         if (! $chain) return $this->fail('Not found', 404);
         if (! $this->tenant()->isSuperAdmin() && (int) $chain['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
         $steps = $db->table('approval_chain_steps')
             ->where('chain_id', (int) $id)
+            ->where('company_id', (int) $chain['company_id'])
             ->orderBy('step_order', 'ASC')
             ->get()->getResultArray();
         // Resolve nama referensi untuk display di UI.
@@ -47,11 +48,11 @@ class ApprovalChainController extends ApiController
                 $s['approver_role_name'] = $r['name'] ?? null;
             }
             if (! empty($s['approver_user_id'])) {
-                $u = $db->table('users')->where('id', (int) $s['approver_user_id'])->get()->getRowArray();
+                $u = $db->table('users')->where('id', (int) $s['approver_user_id'])->where('company_id', (int) $chain['company_id'])->get()->getRowArray();
                 $s['approver_user_name'] = $u['name'] ?? null;
             }
             if (! empty($s['approver_employee_id'])) {
-                $e = $db->table('employees')->where('id', (int) $s['approver_employee_id'])->get()->getRowArray();
+                $e = $db->table('employees')->where('id', (int) $s['approver_employee_id'])->where('company_id', (int) $chain['company_id'])->get()->getRowArray();
                 $s['approver_employee_name'] = $e['full_name'] ?? null;
             }
         }
@@ -62,6 +63,7 @@ class ApprovalChainController extends ApiController
             ->join('branches b', 'b.id = ar.branch_id', 'left')
             ->join('job_grades g', 'g.id = ar.job_grade_id', 'left')
             ->where('ar.chain_id', (int) $id)
+            ->where('ar.company_id', (int) $chain['company_id'])
             ->orderBy('ar.priority', 'ASC')
             ->get()->getResultArray();
         $chain['steps'] = $steps;
@@ -133,7 +135,7 @@ class ApprovalChainController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('approval_chains')->where('id', $id)->get()->getRowArray();
+        $existing = $this->findChainForTenant($db, $id);
         if (! $existing) return $this->fail('Not found', 404);
         if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
@@ -149,7 +151,7 @@ class ApprovalChainController extends ApiController
                 ->where('id !=', $id)
                 ->update(['is_default' => 0, 'updated_at' => $update['updated_at']]);
         }
-        $db->table('approval_chains')->where('id', $id)->update($update);
+        $db->table('approval_chains')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update($update);
 
         if (array_key_exists('steps', $data) && is_array($data['steps'])) {
             $this->replaceSteps($id, (int) $existing['company_id'], $data['steps']);
@@ -166,12 +168,12 @@ class ApprovalChainController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('approval_chains')->where('id', $id)->get()->getRowArray();
+        $existing = $this->findChainForTenant($db, $id);
         if (! $existing) return $this->fail('Not found', 404);
         if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
-        $db->table('approval_chains')->where('id', $id)->update([
+        $db->table('approval_chains')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update([
             'deleted_at' => date('Y-m-d H:i:s'),
             'is_active'  => 0,
         ]);
@@ -213,6 +215,10 @@ class ApprovalChainController extends ApiController
         if ($companyId === null) return null;
         $now = date('Y-m-d H:i:s');
         $db = \Config\Database::connect();
+        $chain = $this->findChainForTenant($db, (int) $data['chain_id']);
+        if (! $chain || (int) $chain['company_id'] !== $companyId) {
+            return $this->fail('Approval chain tidak ditemukan di perusahaan aktif', 422, 'CROSS_TENANT_CHAIN');
+        }
         $insert = [
             'company_id'    => $companyId,
             'chain_id'      => (int) $data['chain_id'],
@@ -237,12 +243,12 @@ class ApprovalChainController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('approval_assignments')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('approval_assignments')->where('id', $id)->where('company_id', $this->companyId())->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
         if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
-        $db->table('approval_assignments')->where('id', $id)->delete();
+        $db->table('approval_assignments')->where('id', $id)->where('company_id', (int) $existing['company_id'])->delete();
         Services::audit()
             ->forModule('MASTER')
             ->logDelete('approval_assignment', $id, $existing, 'Menghapus assignment chain');
@@ -270,6 +276,7 @@ class ApprovalChainController extends ApiController
             ->join('employees e', 'e.id = ar.employee_id', 'left')
             ->join('approval_chains c', 'c.id = ar.chain_id', 'left')
             ->where('ar.id', (int) $id)
+            ->where('ar.company_id', $this->companyId())
             ->get()->getRowArray();
         if (! $req) return $this->fail('Not found', 404);
         $decisions = $db->table('approval_decisions ad')
@@ -288,6 +295,7 @@ class ApprovalChainController extends ApiController
     public function approveRequest($id = null)
     {
         $id = (int) $id;
+        if (! $this->approvalRequestBelongsToTenant($id)) return $this->fail('Not found', 404);
         $note = (string) ($this->getJsonInput()['note'] ?? '');
         try {
             $res = Services::approval()->approve($id, (int) $this->userId(), $note);
@@ -307,6 +315,7 @@ class ApprovalChainController extends ApiController
     public function rejectRequest($id = null)
     {
         $id = (int) $id;
+        if (! $this->approvalRequestBelongsToTenant($id)) return $this->fail('Not found', 404);
         $note = (string) ($this->getJsonInput()['note'] ?? '');
         if ($note === '') return $this->fail('Alasan penolakan wajib diisi', 422, 'REASON_REQUIRED');
         try {
@@ -374,6 +383,9 @@ class ApprovalChainController extends ApiController
 
         foreach ($ids as $id) {
             try {
+                if (! $this->approvalRequestBelongsToTenant($id)) {
+                    throw new \RuntimeException('Approval request not found');
+                }
                 if ($decision === 'APPROVED') {
                     $res = $service->approve($id, $userId, $note);
                 } else {
@@ -430,7 +442,7 @@ class ApprovalChainController extends ApiController
     private function replaceSteps(int $chainId, int $companyId, array $steps): void
     {
         $db = \Config\Database::connect();
-        $db->table('approval_chain_steps')->where('chain_id', $chainId)->delete();
+        $db->table('approval_chain_steps')->where('chain_id', $chainId)->where('company_id', $companyId)->delete();
         $now = date('Y-m-d H:i:s');
         // Sprint 9 / H1.3 — terima condition_type + condition_value_json baru.
         // Validasi config kalau di-set, supaya tidak masuk DB dengan format ngaco.
@@ -468,5 +480,29 @@ class ApprovalChainController extends ApiController
                 'updated_at'           => $now,
             ]);
         }
+    }
+
+    private function findChainForTenant(\CodeIgniter\Database\BaseConnection $db, int $id): ?array
+    {
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return null;
+
+        return $db->table('approval_chains')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')
+            ->get()
+            ->getRowArray();
+    }
+
+    private function approvalRequestBelongsToTenant(int $id): bool
+    {
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return false;
+
+        return \Config\Database::connect()->table('approval_requests')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->countAllResults() === 1;
     }
 }
