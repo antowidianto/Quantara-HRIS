@@ -70,9 +70,11 @@ class ErpJournalService
 
         // Ambil semua payslip yang sudah finalize di period ini
         $payslips = $db->table('payslips')
-            ->select('id, employee_id, gross_earning, net_pay, total_deduction, bpjs_employee, bpjs_company, pph21')
+            ->select('id, employee_id, cost_center_id, gross_earning, take_home_pay, total_deduction,'
+                . ' bpjs_kes_employee, bpjs_kes_company, bpjs_jht_employee, bpjs_jht_company,'
+                . ' bpjs_jp_employee, bpjs_jp_company, bpjs_jkk_company, bpjs_jkm_company, pph21_amount')
             ->where('company_id', $companyId)
-            ->where('period_id', $periodId)
+            ->where('payroll_period_id', $periodId)
             ->get()
             ->getResultArray();
 
@@ -82,18 +84,11 @@ class ErpJournalService
 
         $payslipIds = array_column($payslips, 'id');
 
-        // Group payslip per cost_center via employees.cost_center_id
+        // Cost center is snapshotted on the payslip so later employee transfers
+        // cannot rewrite historical accounting allocation.
         $employeeMap = [];
-        $empIds = array_unique(array_column($payslips, 'employee_id'));
-        if ($empIds !== [] && $db->tableExists('employees')) {
-            $empRows = $db->table('employees')
-                ->select('id, cost_center_id')
-                ->whereIn('id', $empIds)
-                ->get()
-                ->getResultArray();
-            foreach ($empRows as $row) {
-                $employeeMap[(int) $row['id']] = (int) ($row['cost_center_id'] ?? 0);
-            }
+        foreach ($payslips as $row) {
+            $employeeMap[(int) $row['employee_id']] = (int) ($row['cost_center_id'] ?? 0);
         }
 
         // Ambil detail komponen earning/deduction
@@ -145,9 +140,12 @@ class ErpJournalService
                 'bpjs_company'   => 0.0,
                 'pph21'          => 0.0,
             ];
-            $totalsByCC[$key]['bpjs_employee'] += (float) ($ps['bpjs_employee'] ?? 0);
-            $totalsByCC[$key]['bpjs_company']  += (float) ($ps['bpjs_company']  ?? 0);
-            $totalsByCC[$key]['pph21']         += (float) ($ps['pph21']         ?? 0);
+            $totalsByCC[$key]['bpjs_employee'] += (float) ($ps['bpjs_kes_employee'] ?? 0)
+                + (float) ($ps['bpjs_jht_employee'] ?? 0) + (float) ($ps['bpjs_jp_employee'] ?? 0);
+            $totalsByCC[$key]['bpjs_company'] += (float) ($ps['bpjs_kes_company'] ?? 0)
+                + (float) ($ps['bpjs_jht_company'] ?? 0) + (float) ($ps['bpjs_jp_company'] ?? 0)
+                + (float) ($ps['bpjs_jkk_company'] ?? 0) + (float) ($ps['bpjs_jkm_company'] ?? 0);
+            $totalsByCC[$key]['pph21'] += (float) ($ps['pph21_amount'] ?? 0);
         }
         foreach ($totalsByCC as $row) {
             if ($row['bpjs_company'] > 0) {

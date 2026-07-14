@@ -8,9 +8,9 @@ import { mmkv } from '@store/mmkv';
  */
 describe('IdleLock', () => {
   beforeEach(() => {
-    mmkv.delete('idle.threshold_sec');
-    mmkv.delete('idle.locked');
-    mmkv.delete('idle.last_background_at');
+    mmkv.remove('idle.threshold_sec');
+    mmkv.remove('idle.locked');
+    mmkv.remove('idle.last_background_at');
   });
 
   it('returns default threshold (300s) when not configured', () => {

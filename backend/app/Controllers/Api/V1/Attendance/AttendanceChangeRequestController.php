@@ -172,13 +172,18 @@ class AttendanceChangeRequestController extends ApiController
         $this->validateChangeTypePayload($type, $reqIn, $reqOut, $reqStatus, $workDate);
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $activeCompanyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $activeCompanyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
         $companyId = (int) $emp['company_id'];
         $branchId  = isset($emp['branch_id']) ? (int) $emp['branch_id'] : null;
 
         // Cek pengajuan PENDING duplikat untuk tanggal yang sama
         $duplicate = $db->table('attendance_change_requests')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->where('work_date', $workDate)
             ->where('status', 'PENDING')
@@ -193,6 +198,7 @@ class AttendanceChangeRequestController extends ApiController
 
         // Snapshot baris attendance saat ini (jika ada)
         $att = $db->table('attendances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->where('work_date', $workDate)
             ->get()->getRowArray();
@@ -243,7 +249,8 @@ class AttendanceChangeRequestController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $cr = $db->table('attendance_change_requests')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $cr = $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $cr) return $this->fail('Pengajuan tidak ditemukan', 404);
         if ($cr['status'] !== 'PENDING') {
             return $this->fail('Pengajuan tidak dalam status PENDING', 422, 'NOT_PENDING');
@@ -269,6 +276,7 @@ class AttendanceChangeRequestController extends ApiController
 
         // Terapkan perubahan ke attendances
         $att = $db->table('attendances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $cr['employee_id'])
             ->where('work_date', $cr['work_date'])
             ->get()->getRowArray();
@@ -294,7 +302,7 @@ class AttendanceChangeRequestController extends ApiController
         }
 
         if ($att) {
-            $db->table('attendances')->where('id', $att['id'])->update($update);
+            $db->table('attendances')->where('id', $att['id'])->where('company_id', $companyId)->update($update);
             $attId = (int) $att['id'];
         } else {
             $insert = array_merge([
@@ -319,7 +327,7 @@ class AttendanceChangeRequestController extends ApiController
             $attId = (int) $db->insertID();
         }
 
-        $db->table('attendance_change_requests')->where('id', $id)->update([
+        $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->update([
             'status'        => 'APPROVED',
             'reviewer_id'   => $this->userId(),
             'reviewed_at'   => date('Y-m-d H:i:s'),
@@ -334,7 +342,7 @@ class AttendanceChangeRequestController extends ApiController
         }
 
         // Notifikasi ke karyawan
-        $emp = $db->table('employees')->where('id', $cr['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $cr['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
         if ($emp && ! empty($emp['user_id'])) {
             Services::notification()->send(
                 (int) $emp['user_id'],
@@ -382,7 +390,8 @@ class AttendanceChangeRequestController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $cr = $db->table('attendance_change_requests')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $cr = $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $cr) return $this->fail('Pengajuan tidak ditemukan', 404);
         if ($cr['status'] !== 'PENDING') {
             return $this->fail('Pengajuan tidak dalam status PENDING', 422, 'NOT_PENDING');
@@ -403,7 +412,7 @@ class AttendanceChangeRequestController extends ApiController
             return $this->fail('Alasan penolakan wajib diisi', 422, 'REASON_REQUIRED');
         }
 
-        $db->table('attendance_change_requests')->where('id', $id)->update([
+        $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->update([
             'status'      => 'REJECTED',
             'reviewer_id' => $this->userId(),
             'reviewed_at' => date('Y-m-d H:i:s'),
@@ -412,7 +421,7 @@ class AttendanceChangeRequestController extends ApiController
         ]);
 
         // Notifikasi ke karyawan
-        $emp = $db->table('employees')->where('id', $cr['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $cr['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
         if ($emp && ! empty($emp['user_id'])) {
             Services::notification()->send(
                 (int) $emp['user_id'],
@@ -440,7 +449,8 @@ class AttendanceChangeRequestController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $cr = $db->table('attendance_change_requests')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $cr = $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $cr) return $this->fail('Pengajuan tidak ditemukan', 404);
         if ((int) $cr['employee_id'] !== (int) $this->tenant()->getEmployeeId()) {
             return $this->fail('Hanya pemilik pengajuan yang bisa membatalkan', 403);
@@ -448,7 +458,7 @@ class AttendanceChangeRequestController extends ApiController
         if ($cr['status'] !== 'PENDING') {
             return $this->fail('Pengajuan tidak dalam status PENDING', 422, 'NOT_PENDING');
         }
-        $db->table('attendance_change_requests')->where('id', $id)->update([
+        $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->update([
             'status'     => 'CANCELLED',
             'updated_at' => date('Y-m-d H:i:s'),
         ]);

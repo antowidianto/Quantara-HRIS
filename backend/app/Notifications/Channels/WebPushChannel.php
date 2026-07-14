@@ -13,16 +13,15 @@ use App\Notifications\NotificationChannel;
  * dan generate VAPID key:
  *   php -r "require 'vendor/autoload.php'; print_r(\Minishlink\WebPush\VAPID::createVapidKeys());"
  *
- * Channel ini sengaja IMPLEMENTASI MINIMAL — kalau library minishlink/web-push
- * tidak terpasang, fallback ke logging saja (untuk dev). Caller code
- * (NotificationService) tidak perlu peduli.
+ * Delivery production memerlukan library minishlink/web-push dan VAPID keys.
+ * Jika dependency atau konfigurasi tidak tersedia, channel gagal tertutup dan
+ * NotificationService dapat mencatat kegagalan; tidak boleh mengklaim terkirim.
  *
  * Subscription disimpan di `users.web_push_subscription` sebagai JSON:
  *   {"endpoint":"...","keys":{"auth":"...","p256dh":"..."}}
  *
  * Browser register subscription via `navigator.serviceWorker.pushManager.subscribe()`,
- * lalu POST ke endpoint backend (TODO: endpoint subscription belum dibuat —
- * masuk ke catatan future Sprint).
+ * lalu POST ke `/api/v1/notifications/push-subscribe`.
  */
 class WebPushChannel implements NotificationChannel
 {
@@ -51,9 +50,12 @@ class WebPushChannel implements NotificationChannel
         }
 
         // Cek apakah library minishlink/web-push terpasang.
-        if (! class_exists('\Minishlink\WebPush\WebPush')) {
-            log_message('info', '[WebPushChannel:dev-log] subscription endpoint=' . $decoded['endpoint']);
-            return true; // dev mode: anggap sukses
+        if (
+            ! class_exists('\Minishlink\WebPush\WebPush')
+            || ! class_exists('\Minishlink\WebPush\Subscription')
+        ) {
+            log_message('warning', 'WebPushChannel unavailable: minishlink/web-push is not installed');
+            return false;
         }
 
         $publicKey = (string) env('webpush.vapid.public', '');
@@ -73,7 +75,9 @@ class WebPushChannel implements NotificationChannel
                 ],
             ];
             $webPush = new \Minishlink\WebPush\WebPush($auth);
-            $subscription = \Minishlink\WebPush\Subscription::create($decoded);
+            /** @var class-string $subscriptionClass */
+            $subscriptionClass = '\Minishlink\WebPush\Subscription';
+            $subscription = $subscriptionClass::create($decoded);
             $body = json_encode([
                 'title'   => $payload['title']    ?? 'Notifikasi',
                 'message' => $payload['message']  ?? '',

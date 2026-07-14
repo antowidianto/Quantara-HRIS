@@ -1,12 +1,14 @@
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import api from '@/api/client'
+import { useI18n } from '@/locales'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 
 const contractId = computed(() => Number(route.params.id))
 const loading = ref(true)
@@ -31,12 +33,22 @@ onMounted(async () => {
     ])
     contract.value = contractRes.data.data
     contractHtml.value = htmlRes.data
-    await nextTick()
-    initCanvas()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat kontrak')
+    toast.error(e.response?.data?.message || t('contract_sign.load_failed'))
   } finally {
     loading.value = false
+    await nextTick()
+    if (contract.value) initCanvas()
+  }
+})
+
+watch(signatureMethod, async (method) => {
+  signatureData.value = null
+  hasSignature.value = false
+  if (fileInput.value) fileInput.value.value = ''
+  if (method === 'draw') {
+    await nextTick()
+    initCanvas()
   }
 })
 
@@ -112,7 +124,6 @@ function clearCanvas() {
   const w = Math.min(600, rect.width - 32)
   const h = 200
   const ctx = canvas.getContext('2d')
-  const dpr = window.devicePixelRatio || 1
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.fillStyle = '#fff'
@@ -128,11 +139,13 @@ function onFileSelected(e) {
   const file = e.target.files?.[0]
   if (!file) return
   if (!file.type.startsWith('image/')) {
-    toast.error('Hanya file gambar yang diterima')
+    toast.error(t('contract_sign.image_only'))
+    e.target.value = ''
     return
   }
   if (file.size > 2 * 1024 * 1024) {
-    toast.error('Ukuran file maksimal 2 MB')
+    toast.error(t('contract_sign.max_size'))
+    e.target.value = ''
     return
   }
   const reader = new FileReader()
@@ -143,9 +156,15 @@ function onFileSelected(e) {
   reader.readAsDataURL(file)
 }
 
+function clearUploadedSignature() {
+  signatureData.value = null
+  hasSignature.value = false
+  if (fileInput.value) fileInput.value.value = ''
+}
+
 async function submitSignature() {
   if (!signatureData.value) {
-    toast.error('Silakan isi tanda tangan terlebih dahulu')
+    toast.error(t('contract_sign.signature_required'))
     return
   }
   submitting.value = true
@@ -154,9 +173,9 @@ async function submitSignature() {
       signature_data: signatureData.value,
     })
     signed.value = true
-    toast.success('Kontrak berhasil ditandatangani')
+    toast.success(t('contract_sign.signed_toast'))
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan tanda tangan')
+    toast.error(e.response?.data?.message || t('contract_sign.save_failed'))
   } finally {
     submitting.value = false
   }
@@ -170,13 +189,13 @@ function toDashboard() {
 <template>
   <div class="min-h-screen bg-slate-100">
     <div v-if="loading" class="flex items-center justify-center min-h-screen text-slate-400">
-      Memuat kontrak...
+      {{ t('contract_sign.loading') }}
     </div>
 
     <template v-else-if="contract && !signed">
       <div class="max-w-4xl mx-auto py-6 px-4">
         <div class="mb-4">
-          <h1 class="text-xl font-bold text-slate-900">{{ contract.subject || 'Kontrak Kerja' }}</h1>
+          <h1 class="text-xl font-bold text-slate-900">{{ contract.subject || t('contract_sign.default_subject') }}</h1>
           <p class="text-sm text-slate-500">{{ contract.contract_number }}</p>
         </div>
 
@@ -187,21 +206,22 @@ function toDashboard() {
             style="height: 70vh; min-height: 400px;"
             sandbox="allow-same-origin allow-scripts"
             :srcdoc="contractHtml"
+            v-bind="{ title: t('contract_sign.preview_title') }"
           ></iframe>
         </div>
 
         <!-- Signature -->
         <div class="bg-white border border-slate-200 rounded-xl p-6 mb-6">
-          <h2 class="text-base font-semibold text-slate-900 mb-4">Tanda Tangan Digital</h2>
+          <h2 class="text-base font-semibold text-slate-900 mb-4">{{ t('contract_sign.digital_signature') }}</h2>
 
           <div class="flex items-center gap-4 mb-4">
             <label class="flex items-center gap-2 text-sm cursor-pointer">
               <input type="radio" v-model="signatureMethod" value="draw" class="text-indigo-600" />
-              Gambar Manual
+              {{ t('contract_sign.draw_manual') }}
             </label>
             <label class="flex items-center gap-2 text-sm cursor-pointer">
               <input type="radio" v-model="signatureMethod" value="upload" class="text-indigo-600" />
-              Upload Foto Tanda Tangan
+              {{ t('contract_sign.upload_photo') }}
             </label>
           </div>
 
@@ -211,6 +231,8 @@ function toDashboard() {
               <canvas
                 ref="canvasEl"
                 class="touch-none cursor-crosshair"
+                role="img"
+                v-bind="{ 'aria-label': t('contract_sign.draw_area') }"
                 @mousedown="startDraw"
                 @mousemove="draw"
                 @mouseup="endDraw"
@@ -221,20 +243,26 @@ function toDashboard() {
               ></canvas>
             </div>
             <button
+              type="button"
               v-if="hasSignature"
               @click="clearCanvas"
               class="text-sm text-slate-500 hover:text-rose-600 underline underline-offset-2"
             >
-              Hapus & gambar ulang
+              {{ t('contract_sign.clear_redraw') }}
             </button>
-            <p v-else class="text-xs text-slate-400">Gambar tanda tangan Anda di atas menggunakan mouse atau sentuhan</p>
+            <p v-else class="text-xs text-slate-400">{{ t('contract_sign.draw_help') }}</p>
           </div>
 
           <!-- Upload signature -->
           <div v-else>
             <div
               class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:bg-slate-50"
+              role="button"
+              tabindex="0"
+              v-bind="{ 'aria-label': t('contract_sign.upload_area') }"
               @click="fileInput?.click()"
+              @keydown.enter.prevent="fileInput?.click()"
+              @keydown.space.prevent="fileInput?.click()"
             >
               <input
                 ref="fileInput"
@@ -244,42 +272,45 @@ function toDashboard() {
                 @change="onFileSelected"
               />
               <div v-if="signatureData" class="mb-2">
-                <img :src="signatureData" class="max-h-32 mx-auto" alt="Preview tanda tangan" />
+                <img :src="signatureData" class="max-h-32 mx-auto" v-bind="{ alt: t('contract_sign.signature_preview') }" />
               </div>
               <div v-else>
-                <p class="text-sm text-slate-500">Klik untuk upload foto tanda tangan</p>
-                <p class="text-xs text-slate-400 mt-1">PNG, JPG, atau WebP. Maks 2 MB.</p>
+                <p class="text-sm text-slate-500">{{ t('contract_sign.upload_prompt') }}</p>
+                <p class="text-xs text-slate-400 mt-1">{{ t('contract_sign.file_hint') }}</p>
               </div>
             </div>
             <button
+              type="button"
               v-if="signatureData && signatureMethod === 'upload'"
-              @click="signatureData = null; hasSignature = false; fileInput.value = null"
+              @click="clearUploadedSignature"
               class="mt-2 text-sm text-slate-500 hover:text-rose-600 underline underline-offset-2"
             >
-              Hapus & pilih ulang
+              {{ t('contract_sign.clear_reselect') }}
             </button>
           </div>
 
           <!-- Signature preview -->
           <div v-if="signatureData" class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <p class="text-xs text-amber-700 font-medium mb-1">Tanda tangan akan disimpan:</p>
-            <img :src="signatureData" class="max-h-16" alt="Preview" />
+            <p class="text-xs text-amber-700 font-medium mb-1">{{ t('contract_sign.will_be_saved') }}</p>
+            <img :src="signatureData" class="max-h-16" v-bind="{ alt: t('contract_sign.signature_preview') }" />
           </div>
 
           <!-- Submit -->
           <div class="mt-6 flex items-center gap-3">
             <button
+              type="button"
               @click="submitSignature"
               :disabled="submitting || !hasSignature"
               class="px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {{ submitting ? 'Menyimpan...' : 'Tanda Tangan & Setujui Kontrak' }}
+              {{ submitting ? t('contract_sign.saving') : t('contract_sign.sign_accept') }}
             </button>
             <button
+              type="button"
               @click="toDashboard"
               class="px-4 py-2.5 border border-slate-300 rounded-lg text-sm text-slate-600 hover:bg-slate-50"
             >
-              Nanti Saja
+              {{ t('contract_sign.later') }}
             </button>
           </div>
         </div>
@@ -290,26 +321,26 @@ function toDashboard() {
     <div v-else-if="signed" class="max-w-lg mx-auto py-16 px-4 text-center">
       <div class="bg-white border border-slate-200 rounded-xl p-8">
         <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg class="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg class="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h2 class="text-xl font-bold text-slate-900 mb-2">Kontrak Berhasil Ditandatangani</h2>
+        <h2 class="text-xl font-bold text-slate-900 mb-2">{{ t('contract_sign.success_title') }}</h2>
         <p class="text-sm text-slate-500 mb-6">
-          Kontrak kerja {{ contract?.contract_number }} telah ditandatangani secara digital.
-          Dokumen akan diproses lebih lanjut oleh tim HR.
+          {{ t('contract_sign.success_message', { number: contract?.contract_number }) }}
         </p>
         <button
+          type="button"
           @click="toDashboard"
           class="px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700"
         >
-          Ke Dashboard
+          {{ t('contract_sign.dashboard') }}
         </button>
       </div>
     </div>
 
     <div v-else class="flex items-center justify-center min-h-screen text-slate-400">
-      Kontrak tidak ditemukan
+      {{ t('contract_sign.not_found') }}
     </div>
   </div>
 </template>

@@ -77,8 +77,12 @@ abstract class BaseModel extends Model
         $b = $this->builder();
         if ($this->multiTenant) {
             $tenant = Services::tenant();
-            if (! $tenant->isSuperAdmin() && $tenant->getCompanyId() > 0) {
-                $b->where("{$this->table}.{$this->companyColumn}", $tenant->getCompanyId());
+            $companyId = $tenant->getCompanyId();
+            // Super admin is global only when no company has explicitly been
+            // selected. Once X-Company-Id resolves an active company, use the
+            // same tenant boundary as every other role.
+            if (! ($tenant->isSuperAdmin() && $companyId === 0)) {
+                $b->where("{$this->table}.{$this->companyColumn}", $companyId);
             }
         }
         return $b;

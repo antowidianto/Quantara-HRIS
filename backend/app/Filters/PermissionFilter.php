@@ -11,7 +11,8 @@ use Config\Services;
  * PermissionFilter
  *
  * Usage: ['filter' => 'permission:employee.create']
- * Checks the authenticated user's role for the required permission slug.
+ * Any-of usage: ['filter' => 'permission:payslip.view_self,payslip.view_all']
+ * Checks the authenticated user's role for at least one required permission slug.
  */
 class PermissionFilter implements FilterInterface
 {
@@ -21,30 +22,25 @@ class PermissionFilter implements FilterInterface
             return;
         }
 
-        $required = $arguments[0];
+        $required = array_values(array_filter(array_map('trim', $arguments)));
         $tenant   = Services::tenant();
 
         if ($tenant->isSuperAdmin()) {
             return;
         }
 
-        $roleId = $tenant->getRoleId();
-        if ($roleId === 0) {
+        if ($tenant->getRoleId() === 0) {
             return $this->forbidden('No role assigned');
         }
 
-        $db  = \Config\Database::connect();
-        $row = $db->table('role_permissions rp')
-            ->select('rp.id')
-            ->join('permissions p', 'p.id = rp.permission_id')
-            ->where('rp.role_id', $roleId)
-            ->where('p.slug', $required)
-            ->limit(1)
-            ->get()
-            ->getRowArray();
+        foreach ($required as $permission) {
+            if ($tenant->hasPermission($permission)) {
+                return;
+            }
+        }
 
-        if (! $row) {
-            return $this->forbidden("Missing permission: {$required}");
+        if ($required !== []) {
+            return $this->forbidden('Missing permission: any of ' . implode(', ', $required));
         }
     }
 

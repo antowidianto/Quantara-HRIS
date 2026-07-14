@@ -98,6 +98,7 @@ class BusinessTripController extends ApiController
 
         $db = \Config\Database::connect();
         $expenses = $db->table('business_trip_expenses')
+            ->where('company_id', $this->requireCompanyId())
             ->where('business_trip_id', (int) $id)
             ->orderBy('expense_date', 'ASC')
             ->orderBy('id', 'ASC')
@@ -130,7 +131,11 @@ class BusinessTripController extends ApiController
         }
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
         if (! $tenant->isSuperAdmin() && (int) $emp['company_id'] !== $tenant->getCompanyId()) {
             return $this->fail('Forbidden', 403);
@@ -217,7 +222,10 @@ class BusinessTripController extends ApiController
         }
         $update['updated_by'] = $this->userId();
         $update['updated_at'] = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('business_trips')->where('id', (int) $id)->update($update);
+        \Config\Database::connect()->table('business_trips')
+            ->where('id', (int) $id)
+            ->where('company_id', $this->requireCompanyId())
+            ->update($update);
         Services::audit()->forModule('BUSINESS_TRIP')->logUpdate('business_trip', (int) $id, $row, $update);
         return $this->ok(null, 'Updated');
     }
@@ -229,7 +237,10 @@ class BusinessTripController extends ApiController
         if (! in_array($row['status'], ['DRAFT','REJECTED','CANCELLED'], true)) {
             return $this->fail('Trip status tidak bisa di-delete', 422);
         }
-        \Config\Database::connect()->table('business_trips')->where('id', (int) $id)->update([
+        \Config\Database::connect()->table('business_trips')
+            ->where('id', (int) $id)
+            ->where('company_id', $this->requireCompanyId())
+            ->update([
             'deleted_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -412,6 +423,7 @@ class BusinessTripController extends ApiController
         $row = $this->loadTripOrFail((int) $tripId);
         if (! $row) return $this->response;
         $rows = \Config\Database::connect()->table('business_trip_expenses')
+            ->where('company_id', $this->requireCompanyId())
             ->where('business_trip_id', (int) $tripId)
             ->orderBy('expense_date', 'ASC')->orderBy('id', 'ASC')
             ->get()->getResultArray();
@@ -458,7 +470,11 @@ class BusinessTripController extends ApiController
     public function updateExpense($expenseId = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trip_expenses')->where('id', (int) $expenseId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('business_trip_expenses')
+            ->where('id', (int) $expenseId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Expense not found', 404);
         $trip = $this->loadTripOrFail((int) $row['business_trip_id']);
         if (! $trip) return $this->response;
@@ -472,7 +488,10 @@ class BusinessTripController extends ApiController
             return $this->fail('category tidak valid', 422);
         }
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('business_trip_expenses')->where('id', (int) $expenseId)->update($update);
+        $db->table('business_trip_expenses')
+            ->where('id', (int) $expenseId)
+            ->where('company_id', $companyId)
+            ->update($update);
         Services::businessTrip()->recomputeActual((int) $row['business_trip_id']);
         return $this->ok(null, 'Updated');
     }
@@ -480,12 +499,19 @@ class BusinessTripController extends ApiController
     public function deleteExpense($expenseId = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trip_expenses')->where('id', (int) $expenseId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('business_trip_expenses')
+            ->where('id', (int) $expenseId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Expense not found', 404);
         $trip = $this->loadTripOrFail((int) $row['business_trip_id']);
         if (! $trip) return $this->response;
         if ($trip['status'] === 'SETTLED') return $this->fail('Trip sudah SETTLED', 422);
-        $db->table('business_trip_expenses')->where('id', (int) $expenseId)->delete();
+        $db->table('business_trip_expenses')
+            ->where('id', (int) $expenseId)
+            ->where('company_id', $companyId)
+            ->delete();
         Services::businessTrip()->recomputeActual((int) $row['business_trip_id']);
         return $this->ok(null, 'Deleted');
     }
@@ -503,7 +529,11 @@ class BusinessTripController extends ApiController
     private function loadTripOrFail(int $id): ?array
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        $row = $db->table('business_trips')
+            ->where('id', $id)
+            ->where('company_id', $this->requireCompanyId())
+            ->where('deleted_at IS NULL')
+            ->get()->getRowArray();
         if (! $row) {
             $this->response = $this->fail('Trip not found', 404);
             return null;

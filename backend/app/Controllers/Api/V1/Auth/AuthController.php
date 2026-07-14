@@ -375,17 +375,9 @@ class AuthController extends ApiController
             $employee = $db->table('employees')->where('id', $user['employee_id'])->get()->getRowArray();
         }
 
-        // Permissions
-        $perms = [];
-        if ($user['role_id']) {
-            $rows = $db->table('role_permissions rp')
-                ->select('p.slug')
-                ->join('permissions p', 'p.id = rp.permission_id')
-                ->where('rp.role_id', $user['role_id'])
-                ->get()
-                ->getResultArray();
-            foreach ($rows as $r) $perms[] = $r['slug'];
-        }
+        // Use the same effective permission set as API filters and menus.
+        // Employees retain their self-service baseline under a functional role.
+        $perms = $this->tenant()->getPermissions();
 
         $company = null;
         if ($companyId) {

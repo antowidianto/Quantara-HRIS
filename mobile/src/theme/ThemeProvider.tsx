@@ -58,7 +58,7 @@ export const ThemeProvider: React.FC<Props> = ({ children }) => {
   const setMode = useCallback((next: ThemeMode) => {
     if (!isMode(next)) return;
     if (next === 'system') {
-      mmkv.delete(KEY_MODE);
+      mmkv.remove(KEY_MODE);
     } else {
       mmkv.set(KEY_MODE, next);
     }

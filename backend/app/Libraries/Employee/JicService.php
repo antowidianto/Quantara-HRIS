@@ -2,6 +2,7 @@
 
 namespace App\Libraries\Employee;
 
+use App\Libraries\Payroll\JicRetroPayrollService;
 use Config\Database;
 use Config\Services;
 
@@ -335,6 +336,14 @@ class JicService
 
         $db->transStart();
 
+        // A past-effective salary change must create an auditable correction
+        // before the employee master is changed. A missing target period fails
+        // the transaction so retro pay can never be silently dropped.
+        $retroAdjustmentIds = (new JicRetroPayrollService($db))->createForJic(
+            $jic,
+            $actorUserId ?: (int) ($jic['created_by'] ?? 0),
+        );
+
         // 1. Update employees dengan field non-null saja (jangan timpa null tak sengaja)
         $update = [];
         foreach ([
@@ -354,7 +363,8 @@ class JicService
         }
         if (! empty($update)) {
             $update['updated_at'] = $now;
-            $db->table('employees')->where('id', (int) $jic['employee_id'])->update($update);
+            $db->table('employees')->where('id', (int) $jic['employee_id'])
+                ->where('company_id', (int) $jic['company_id'])->update($update);
         }
 
         // 2. Insert employee_contracts amandemen untuk PROMOTION/DEMOTION/STATUS_CHANGE
@@ -401,12 +411,18 @@ class JicService
         }
 
         // 4. Set status IMPLEMENTED
-        $db->table('job_information_changes')->where('id', $jicId)->update([
+        $db->table('job_information_changes')->where('id', $jicId)
+            ->where('company_id', (int) $jic['company_id'])->update([
             'status'           => 'IMPLEMENTED',
             'implemented_at'   => $now,
             'implemented_by'   => $actorUserId,
             'updated_at'       => $now,
         ]);
+
+        (new EmployeeEffectiveHistoryService($db))->recordAppliedSnapshot(
+            (int) $jic['company_id'], (int) $jic['employee_id'], (string) $effectiveDate,
+            'JIC', $jicId, $actorUserId,
+        );
 
         $db->transComplete();
         if ($db->transStatus() === false) {
@@ -423,7 +439,7 @@ class JicService
                 $contractId ? " — kontrak amandemen #{$contractId} dibuat" : '',
             ),
             severity: 'WARNING',
-            metadata: ['contract_id' => $contractId],
+            metadata: ['contract_id' => $contractId, 'retro_adjustment_ids' => $retroAdjustmentIds],
         );
 
         // 5. Notifikasi karyawan
@@ -433,6 +449,7 @@ class JicService
             'success' => true,
             'message' => 'JIC berhasil di-implementasi',
             'contract_id' => $contractId,
+            'retro_adjustment_ids' => $retroAdjustmentIds,
         ];
     }
 
@@ -479,7 +496,8 @@ class JicService
     private function notifyImplemented(array $jic, ?int $contractId): void
     {
         $db  = Database::connect();
-        $emp = $db->table('employees')->where('id', (int) $jic['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', (int) $jic['employee_id'])
+            ->where('company_id', (int) $jic['company_id'])->get()->getRowArray();
         if (! $emp) return;
 
         $title = match ($jic['change_type']) {
@@ -565,6 +583,7 @@ class JicService
         $rows = $db->table('employees')
             ->select('id, user_id, full_name')
             ->whereIn('id', $empIds)
+            ->where('company_id', (int) $jic['company_id'])
             ->where('deleted_at IS NULL')
             ->get()->getResultArray();
         $byEmp = [];

@@ -518,14 +518,22 @@ class PerformanceController extends ApiController
         // hanya boleh lihat reviewnya sendiri ATAU yang dia jadi reviewer.
         $tenant = $this->tenant();
         $tenant->applyScope($b, 'r.company_id');
-        $canViewAll = $this->privacy()->canViewAll('performance');
+        $selfConductOnly = $tenant->hasPermission('review.conduct_self')
+            && ! $tenant->hasPermission('review.view_team')
+            && ! $tenant->hasPermission('performance.manage');
+        $canViewAll = ! $selfConductOnly && $this->privacy()->canViewAll('performance');
+        if ($selfConductOnly) {
+            $b->where('r.reviewer_id', (int) $tenant->getUserId());
+        }
         if (! $canViewAll) {
-            $myEmpId = $this->getMyEmployeeId();
-            $myUserId = (int) $tenant->getUserId();
-            $b->groupStart()
-                ->where('r.employee_id', $myEmpId ?: 0)
-                ->orWhere('r.reviewer_id', $myUserId)
-                ->groupEnd();
+            if (! $selfConductOnly) {
+                $myEmpId = $this->getMyEmployeeId();
+                $myUserId = (int) $tenant->getUserId();
+                $b->groupStart()
+                    ->where('r.employee_id', $myEmpId ?: 0)
+                    ->orWhere('r.reviewer_id', $myUserId)
+                    ->groupEnd();
+            }
         } elseif ($mine) {
             $myEmpId = $this->getMyEmployeeId();
             if ($myEmpId) $b->where('r.employee_id', $myEmpId);
@@ -583,7 +591,10 @@ class PerformanceController extends ApiController
 
     public function showReview($id = null)
     {
-        if (! $this->can('performance.view')) return $this->fail('Forbidden', 403);
+        if (! $this->can('performance.view')
+            && ! $this->can('review.conduct')
+            && ! $this->can('review.conduct_self')
+        ) return $this->fail('Forbidden', 403);
         $id = (int) $id;
         $r = $this->db()->table('performance_reviews')->where('id', $id)
             ->where('deleted_at IS NULL')->get()->getRowArray();
@@ -594,7 +605,7 @@ class PerformanceController extends ApiController
         $myUserId = (int) $this->tenant()->getUserId();
         $isOwner = $myEmpId && (int) $r['employee_id'] === $myEmpId;
         $isReviewer = $myUserId && (int) $r['reviewer_id'] === $myUserId;
-        if (! $isOwner && ! $isReviewer && ! $this->can('review.view_team')) {
+        if (! $isOwner && ! $isReviewer && ! $this->can('review.view_team') && ! $this->can('performance.manage')) {
             return $this->fail('Forbidden', 403);
         }
 
@@ -620,7 +631,7 @@ class PerformanceController extends ApiController
         if ($r['status'] !== 'DRAFT') return $this->fail('Hanya draft yang bisa diedit', 422);
 
         $myUserId = (int) $this->tenant()->getUserId();
-        if ((int) $r['reviewer_id'] !== $myUserId && ! $this->can('review.conduct')) {
+        if ((int) $r['reviewer_id'] !== $myUserId && ! $this->can('performance.manage')) {
             return $this->fail('Forbidden', 403);
         }
 
@@ -642,6 +653,12 @@ class PerformanceController extends ApiController
     public function submitReview($id = null)
     {
         $id = (int) $id;
+        $review = $this->db()->table('performance_reviews')->select('reviewer_id')
+            ->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $review) return $this->fail('Not found', 404);
+        if ((int) $review['reviewer_id'] !== (int) $this->tenant()->getUserId()
+            && ! $this->can('performance.manage')
+        ) return $this->fail('Forbidden', 403);
         $data = $this->getJsonInput();
         try {
             $r = $this->svc()->submitReview($id, $data);

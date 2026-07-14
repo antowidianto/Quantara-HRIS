@@ -116,7 +116,8 @@ class DeactivateResigned extends BaseCommand
 
             // 1. Deactivate employee
             try {
-                $db->table('employees')->where('id', (int) $r['id'])->update([
+                $db->table('employees')->where('id', (int) $r['id'])
+                    ->where('company_id', (int) $r['company_id'])->update([
                     'is_active'  => 0,
                     'updated_at' => $now,
                 ]);
@@ -129,7 +130,8 @@ class DeactivateResigned extends BaseCommand
             // 2. Deactivate user account (kalau ada link)
             if (! empty($r['user_id'])) {
                 try {
-                    $db->table('users')->where('id', (int) $r['user_id'])->update([
+                    $db->table('users')->where('id', (int) $r['user_id'])
+                        ->where('company_id', (int) $r['company_id'])->update([
                         'is_active'  => 0,
                         'updated_at' => $now,
                     ]);

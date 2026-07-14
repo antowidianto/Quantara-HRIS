@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -16,7 +16,7 @@ const { t } = useI18n()
 const items = ref([])
 const meta = ref({ total: 0, page: 1, pages: 1 })
 const filterStatus = ref(route.query.status || '')
-const showMine = ref(! auth.can('leave.approve'))
+const showMine = ref(route.query.scope === 'mine' || ! auth.can('leave.approve'))
 
 async function fetchData() {
   const res = await api.get('/leaves', {
@@ -27,6 +27,16 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
+
+watch(
+  () => [route.query.scope, route.query.status],
+  () => {
+    showMine.value = route.query.scope === 'mine' || ! auth.can('leave.approve')
+    filterStatus.value = route.query.status || ''
+    meta.value.page = 1
+    fetchData()
+  },
+)
 
 async function approve(id) {
   const ok = await confirmDialog({

@@ -40,7 +40,11 @@ class ReimbursementController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('reimbursements')->where('id', (int) $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
         // Sebelumnya tanpa authorization sama sekali — bisa akses ID lintas-tenant.
         if (! $this->privacy()->canAccessRow($row, 'reimbursement')) {
@@ -64,7 +68,11 @@ class ReimbursementController extends ApiController
         if (! $employeeId) return $this->fail('Employee not specified', 400);
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
 
         $reqNumber = 'RB-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
@@ -76,6 +84,7 @@ class ReimbursementController extends ApiController
         if ($policy) {
             $year = date('Y', strtotime($data['expense_date']));
             $balance = $db->table('employee_benefit_balances')
+                          ->where('company_id', $companyId)
                           ->where('employee_id', $employeeId)
                           ->where('policy_id', $policy['id'])
                           ->where('year', $year)
@@ -130,17 +139,29 @@ class ReimbursementController extends ApiController
     public function delete($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('reimbursements')->where('id', (int) $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
+        if (! $this->privacy()->canAccessRow($row, 'reimbursement')) return $this->fail('Forbidden', 403);
         if ($row['status'] !== 'PENDING') return $this->fail('Cannot cancel', 422);
-        $db->table('reimbursements')->where('id', (int) $id)->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
+        $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
         return $this->ok(null, 'Cancelled');
     }
 
     public function approve($id)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('reimbursements')->where('id', (int) $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
         if ($row['status'] !== 'PENDING') return $this->fail('Cannot approve non-pending request', 422);
 
@@ -151,19 +172,23 @@ class ReimbursementController extends ApiController
         if ($policy) {
             $year = date('Y', strtotime($row['expense_date']));
             $balance = $db->table('employee_benefit_balances')
+                          ->where('company_id', $companyId)
                           ->where('employee_id', $row['employee_id'])
                           ->where('policy_id', $policy['id'])
                           ->where('year', $year)
                           ->get()->getRowArray();
 
             if ($balance) {
-                $db->table('employee_benefit_balances')->where('id', $balance['id'])
+                $db->table('employee_benefit_balances')
+                   ->where('id', $balance['id'])
+                   ->where('company_id', $companyId)
                    ->update([
                        'used_amount' => $balance['used_amount'] + $row['amount'],
                        'updated_at' => date('Y-m-d H:i:s')
                    ]);
             } else {
                 $db->table('employee_benefit_balances')->insert([
+                    'company_id' => $companyId,
                     'employee_id' => $row['employee_id'],
                     'policy_id' => $policy['id'],
                     'year' => $year,
@@ -175,8 +200,13 @@ class ReimbursementController extends ApiController
             }
         }
 
-        $db->table('reimbursements')->where('id', (int) $id)->update([
+        $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->update([
             'status' => 'APPROVED',
+            'approved_by' => $this->userId(),
+            'approved_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s')
         ]);
 
@@ -187,8 +217,20 @@ class ReimbursementController extends ApiController
     public function reject($id)
     {
         $db = \Config\Database::connect();
-        $db->table('reimbursements')->where('id', (int) $id)->update([
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
+        if (! $row) return $this->fail('Not found', 404);
+        if ($row['status'] !== 'PENDING') return $this->fail('Cannot reject non-pending request', 422);
+        $db->table('reimbursements')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->update([
             'status' => 'REJECTED',
+            'approved_by' => $this->userId(),
+            'approved_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s')
         ]);
         Services::audit()->log('reimbursement.reject', 'reimbursement', $id);

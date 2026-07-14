@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { createIdempotencyKey, requiresIdempotencyKey } from '@/api/idempotency'
 
 /**
  * Public Career Portal API client.
@@ -12,6 +13,22 @@ const careerApi = axios.create({
   baseURL,
   timeout: 30000,
   withCredentials: false,
+})
+
+careerApi.interceptors.request.use((config) => {
+  if (!requiresIdempotencyKey(config.method, config.url)) return config
+
+  const existing = typeof config.headers?.get === 'function'
+    ? config.headers.get('Idempotency-Key')
+    : config.headers?.['Idempotency-Key']
+  if (existing) return config
+
+  if (typeof config.headers?.set === 'function') {
+    config.headers.set('Idempotency-Key', createIdempotencyKey())
+  } else {
+    config.headers = { ...config.headers, 'Idempotency-Key': createIdempotencyKey() }
+  }
+  return config
 })
 
 export default careerApi

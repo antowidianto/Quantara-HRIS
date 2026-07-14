@@ -31,6 +31,7 @@ namespace App\Libraries\Payroll;
  *   - payroll.overtime_hours_per_month
  *   - payroll.overtime_to_leave_hours_per_day
  *   - payroll.absent_deduction_enabled
+ *   - payroll.high_value_approval_threshold
  */
 class PayrollSettings
 {
@@ -83,6 +84,13 @@ class PayrollSettings
         return (string) $val !== '0' && (string) $val !== 'false';
     }
 
+    /** Payroll at or above this amount requires two independent approvers. */
+    public function highValueApprovalThreshold(?int $companyId = null): float
+    {
+        $val = $this->get($companyId, 'payroll.high_value_approval_threshold', '1000000000');
+        return max(0, (float) $val);
+    }
+
     /**
      * Bulk reader. Berguna untuk debug / endpoint settings UI yang ingin
      * tampilkan semua nilai aktif sekaligus.
@@ -96,6 +104,7 @@ class PayrollSettings
             'overtime_hours_per_month'        => $this->overtimeHoursPerMonth($companyId),
             'overtime_to_leave_hours_per_day' => $this->overtimeToLeaveHoursPerDay($companyId),
             'absent_deduction_enabled'        => $this->absentDeductionEnabled($companyId),
+            'high_value_approval_threshold'   => $this->highValueApprovalThreshold($companyId),
         ];
     }
 

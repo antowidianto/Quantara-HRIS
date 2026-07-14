@@ -85,7 +85,7 @@ async function submitOtp() {
                 <input id="password" v-model="password" :type="showPassword ? 'text' : 'password'"
                   required autocomplete="current-password" class="input pr-10" />
                 <button type="button" @click="showPassword = !showPassword"
-                  class="absolute inset-y-0 right-0 px-3 text-gray-400 text-sm">
+                  class="absolute inset-y-0 right-0 px-3 text-gray-600 text-sm">
                   {{ showPassword ? t('auth.hide_password') : t('auth.show_password') }}
                 </button>
               </div>

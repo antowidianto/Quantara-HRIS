@@ -9,6 +9,7 @@
  * tidak ramai. Drag-and-drop tetap bekerja untuk power user.
  */
 import { ref } from 'vue'
+import { useI18n } from '@/locales'
 import {
   BuildingOffice2Icon, UserGroupIcon, UserCircleIcon,
   ClipboardDocumentListIcon, EllipsisVerticalIcon,
@@ -21,6 +22,7 @@ const props = defineProps({
   collapsedIds:{ type: Set,    required: true },
   dragOverId:  { type: Number, default: null },
 })
+const { t } = useI18n()
 
 const emit = defineEmits([
   'toggle', 'drop-on', 'drag-over', 'drag-leave', 'drag-start',
@@ -65,14 +67,14 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
           <div class="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
             <UserCircleIcon class="w-3.5 h-3.5 flex-shrink-0" />
             <span v-if="node.manager_name" class="truncate">{{ node.manager_name }}</span>
-            <span v-else class="italic text-slate-400">Belum ada manager</span>
+            <span v-else class="italic text-slate-400">{{ t('org_structure.no_manager') }}</span>
           </div>
         </div>
         <!-- Menu 3 titik untuk aksi sekunder -->
         <button
-          class="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 opacity-0 group-hover:opacity-100"
+          type="button" class="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 opacity-0 group-hover:opacity-100"
           @click.stop="toggleMenu($event)"
-          title="Aksi lain"
+          v-bind="{ title: t('org_structure.node_more_actions'), 'aria-label': t('org_structure.node_more_actions') }"
         >
           <EllipsisVerticalIcon class="w-4 h-4" />
         </button>
@@ -80,17 +82,17 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
         <div v-if="menuOpen"
           class="absolute right-2 top-10 z-20 w-44 bg-white rounded-md border shadow-lg py-1 text-sm"
           @click.stop>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2"
+          <button type="button" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2"
             @click="pick('edit')">
-            <PencilIcon class="w-4 h-4 text-slate-500" /> Edit nama / manager
+            <PencilIcon class="w-4 h-4 text-slate-500" /> {{ t('org_structure.node_edit') }}
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2"
+          <button type="button" class="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2"
             @click="pick('add-child')">
-            <PlusIcon class="w-4 h-4 text-emerald-600" /> Tambah sub-department
+            <PlusIcon class="w-4 h-4 text-emerald-600" /> {{ t('org_structure.node_add_sub') }}
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-600 flex items-center gap-2"
+          <button type="button" class="w-full text-left px-3 py-1.5 hover:bg-red-50 text-red-600 flex items-center gap-2"
             @click="pick('delete')">
-            <TrashIcon class="w-4 h-4" /> Hapus department
+            <TrashIcon class="w-4 h-4" /> {{ t('org_structure.node_delete') }}
           </button>
         </div>
       </div>
@@ -99,27 +101,27 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
       <div class="flex items-center gap-3 px-3 mt-2 text-[11px] text-slate-600">
         <span class="flex items-center gap-1">
           <UserGroupIcon class="w-3.5 h-3.5 text-slate-400" />
-          <span class="font-semibold text-slate-800">{{ node.employee_count || 0 }}</span> orang
+          {{ t('org_structure.node_employees', { count: node.employee_count || 0 }) }}
         </span>
         <span v-if="(node.open_mpps || []).length"
           class="flex items-center gap-1 text-amber-700">
           <ClipboardDocumentListIcon class="w-3.5 h-3.5" />
-          <span class="font-semibold">{{ node.open_mpps.length }}</span> lowongan
+          {{ t('org_structure.node_vacancies', { count: node.open_mpps.length }) }}
         </span>
       </div>
 
       <!-- Tombol aksi utama -->
       <div class="px-3 pb-3 pt-2 flex items-center gap-2">
         <button
-          class="flex-1 px-3 py-1.5 rounded-md bg-primary-50 text-primary-700 text-xs font-medium border border-primary-200 hover:bg-primary-100 transition-colors"
+          type="button" class="flex-1 px-3 py-1.5 rounded-md bg-primary-50 text-primary-700 text-xs font-medium border border-primary-200 hover:bg-primary-100 transition-colors"
           @click.stop="emit('view-detail', node)"
         >
-          Lihat & Atur Karyawan
+          {{ t('org_structure.node_view_manage') }}
         </button>
         <button v-if="hasChildren()"
-          class="px-2 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-500"
+          type="button" class="px-2 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-slate-500"
           @click.stop="emit('toggle', node.id)"
-          :title="isCollapsed() ? 'Buka anak' : 'Tutup anak'">
+          v-bind="{ title: isCollapsed() ? t('org_structure.expand_children') : t('org_structure.collapse_children'), 'aria-label': isCollapsed() ? t('org_structure.expand_children') : t('org_structure.collapse_children') }">
           <ChevronDownIcon v-if="isCollapsed()" class="w-3.5 h-3.5" />
           <ChevronUpIcon v-else class="w-3.5 h-3.5" />
         </button>
@@ -127,7 +129,7 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
 
       <!-- Sub-dept count badge (kecil di bawah kartu) -->
       <div v-if="hasChildren()" class="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded-full border">
-        {{ (node.children || []).length }} sub-dept
+        {{ t('org_structure.node_subdepartments', { count: (node.children || []).length }) }}
       </div>
     </div>
 

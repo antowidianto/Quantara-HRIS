@@ -30,6 +30,8 @@ class DbBackupEncrypted extends BaseCommand
     {
         $svc   = new BackupService();
         $runId = 0;
+        $monitor = new \App\Libraries\System\BusinessJobMonitor();
+        $monitorRunId = $monitor->start('backup.full');
 
         try {
             $runId = $svc->startRun('FULL');
@@ -47,6 +49,7 @@ class DbBackupEncrypted extends BaseCommand
             ), 'green');
 
             $svc->completeRun($runId, $info);
+            $monitor->succeed($monitorRunId, 1, ['backup_run_id' => $runId, 'size_bytes' => $info['size_bytes']]);
             CLI::write('[' . date('Y-m-d H:i:s') . '] Run id=' . $runId . ' marked SUCCESS', 'green');
 
             // Audit log severity NOTICE — supaya muncul di dashboard SaaS metrics
@@ -57,6 +60,7 @@ class DbBackupEncrypted extends BaseCommand
             ]);
         } catch (\Throwable $e) {
             $msg = $e->getMessage();
+            $monitor->fail($monitorRunId, 'BACKUP_FAILED', 1, ['backup_run_id' => $runId]);
             CLI::error('[' . date('Y-m-d H:i:s') . '] Backup failed: ' . $msg);
             if ($runId > 0) {
                 $svc->failRun($runId, $msg);

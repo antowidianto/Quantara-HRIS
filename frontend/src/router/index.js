@@ -1,5 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { ensureFeaturesLoaded } from '@/composables/useFeature'
+import { ensureSubscriptionLoaded } from '@/composables/useSubscription'
+import { resolveNavigation } from './guard'
 
 const routes = [
   { path: '/login', name: 'login', component: () => import('@/views/Login.vue'), meta: { guest: true } },
@@ -124,6 +127,8 @@ const routes = [
       // ─── Horizon 2 (Sprint 10-13 Core Deepening) ─────────────
       // H2.6 Turnover Analytics — turnover rate, early attrition, regrettable loss
       { path: 'hr/turnover-analytics', name: 'turnover-analytics', component: () => import('@/views/HR/TurnoverAnalytics.vue') },
+      { path: 'hr/data-quality', name: 'employee-data-quality', component: () => import('@/views/HR/EmployeeDataQuality.vue'), meta: { permissionAny: ['hr_analytics.view', 'compliance.report.view'] } },
+      { path: 'hr/compensation-review', name: 'compensation-review', component: () => import('@/views/HR/CompensationReview.vue'), meta: { permissionAny: ['employee.view', 'payroll.view'] } },
       // H2.7 Payroll Simulation — what-if + compare + reverse THP
       { path: 'payroll/simulate', name: 'payroll-simulate', component: () => import('@/views/Payroll/PayrollSimulation.vue') },
       // H2.2 Goals Cascading Tree — visualisasi hierarchy goals
@@ -154,7 +159,7 @@ const routes = [
 
       // ─── Sprint 20 — Enterprise Readiness Modules ──────────────
       // H3.4 ERP Journal Integration (Accurate / Zahir / Odoo / SAP / CSV)
-      { path: 'erp/journal',     name: 'erp-journal',     component: () => import('@/views/Erp/ErpJournalDashboard.vue') },
+      { path: 'erp/journal', name: 'erp-journal', component: () => import('@/views/Erp/ErpJournalDashboard.vue'), meta: { permission: 'erp.journal.view', feature: 'integration.erp' } },
       // H3.7 Digital Signing PSrE (PrivyID / Vida / Peruri)
       { path: 'signing',         name: 'signing-envelopes', component: () => import('@/views/Signing/SigningEnvelopes.vue') },
       // H3.8 Open API & Developer Portal
@@ -256,8 +261,8 @@ const routes = [
       { path: 'overtimes/new', name: 'overtime-new', component: () => import('@/views/Overtimes/OvertimeForm.vue') },
 
       // Payroll
-      { path: 'payroll/periods', name: 'payroll-periods', component: () => import('@/views/Payroll/PeriodList.vue') },
-      { path: 'payroll/periods/new', name: 'payroll-period-new', component: () => import('@/views/Payroll/PeriodForm.vue') },
+      { path: 'payroll/periods', name: 'payroll-periods', component: () => import('@/views/Payroll/PeriodList.vue'), meta: { permission: 'payroll.view' } },
+      { path: 'payroll/periods/new', name: 'payroll-period-new', component: () => import('@/views/Payroll/PeriodForm.vue'), meta: { permission: 'payroll.manage', requiresWritableSubscription: true } },
       { path: 'payroll/periods/:id', name: 'payroll-period-detail', component: () => import('@/views/Payroll/PeriodDetail.vue') },
       { path: 'payslips', name: 'payslips', component: () => import('@/views/Payroll/PayslipList.vue') },
       { path: 'payslips/my', name: 'my-payslips', component: () => import('@/views/Payroll/MyPayslips.vue') },
@@ -325,19 +330,14 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
-
-  if (to.meta.requiresAuth && ! auth.isAuthenticated) {
-    return next({ name: 'login', query: { redirect: to.fullPath } })
-  }
-  if (to.meta.guest && auth.isAuthenticated) {
-    return next({ name: 'dashboard' })
-  }
-  if (to.meta.permission && ! auth.can(to.meta.permission)) {
-    return next({ name: 'dashboard' })
-  }
-  next()
+  const featureMap = to.meta.feature ? await ensureFeaturesLoaded() : null
+  const subscription = to.meta.requiresWritableSubscription
+    ? await ensureSubscriptionLoaded()
+    : null
+  const resolution = resolveNavigation(to, auth, featureMap, subscription?.status || null)
+  next(resolution === true ? undefined : resolution)
 })
 
 export default router

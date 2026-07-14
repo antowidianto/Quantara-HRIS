@@ -4,10 +4,12 @@ import { useRouter, useRoute } from 'vue-router'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import { useI18n } from '@/locales'
 
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
+const { t } = useI18n()
 const isEdit = computed(() => !! route.params.id)
 const loading = ref(false)
 const saving = ref(false)
@@ -86,10 +88,10 @@ async function submit() {
   try {
     if (isEdit.value) {
       await api.put(`/employees/${route.params.id}`, form.value)
-      toast.success('Karyawan diperbarui')
+      toast.success(t('employee_form.updated'))
     } else {
       await api.post('/employees', form.value)
-      toast.success('Karyawan ditambahkan')
+      toast.success(t('employee_form.created'))
     }
     router.push('/employees')
   } catch (e) {
@@ -97,70 +99,78 @@ async function submit() {
     if (errors) {
       toast.error(Object.values(errors).join('; '))
     } else {
-      toast.error(e.response?.data?.message || 'Gagal menyimpan')
+      toast.error(e.response?.data?.message || t('employee_form.save_failed'))
     }
   } finally {
     saving.value = false
   }
 }
+
+function employmentStatusLabel(status) {
+  return t(`employee_form.status_${status.toLowerCase()}`)
+}
+
+function employmentTypeLabel(type) {
+  return t(`employee_form.type_${type.toLowerCase()}`)
+}
 </script>
 
 <template>
   <div>
-    <h1 class="text-2xl font-bold mb-4">{{ isEdit ? 'Edit Karyawan' : 'Karyawan Baru' }}</h1>
+    <h1 class="text-2xl font-bold mb-4">{{ isEdit ? t('employee_form.edit_title') : t('employee_form.create_title') }}</h1>
 
     <form v-if="!loading" @submit.prevent="submit" class="space-y-6">
       <!-- Identity -->
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Identitas</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('employee_form.identity') }}</span></div>
         <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="label">NIP *</label>
+            <label class="label">{{ t('employee_form.employee_number') }}</label>
             <input v-model="form.employee_number" class="input" required :disabled="isEdit" />
           </div>
           <div></div>
           <div>
-            <label class="label">Nama Depan *</label>
+            <label class="label">{{ t('employee_form.first_name') }}</label>
             <input v-model="form.first_name" class="input" required />
           </div>
           <div>
-            <label class="label">Nama Belakang</label>
+            <label class="label">{{ t('employee_form.last_name') }}</label>
             <input v-model="form.last_name" class="input" />
           </div>
           <div>
-            <label class="label">Email</label>
+            <label class="label">{{ t('employee_form.email') }}</label>
             <input v-model="form.email" type="email" class="input" />
           </div>
           <div>
-            <label class="label">Telepon</label>
+            <label class="label">{{ t('employee_form.phone') }}</label>
             <input v-model="form.phone" class="input" />
           </div>
           <div>
-            <label class="label">Jenis Kelamin</label>
+            <label class="label">{{ t('employee_form.gender') }}</label>
             <select v-model="form.gender" class="input">
-              <option value="">- Pilih -</option>
-              <option value="M">Laki-laki</option>
-              <option value="F">Perempuan</option>
+              <option value="">{{ t('employee_form.select') }}</option>
+              <option value="M">{{ t('employee_form.male') }}</option>
+              <option value="F">{{ t('employee_form.female') }}</option>
             </select>
           </div>
           <div>
-            <label class="label">Tempat Lahir</label>
+            <label class="label">{{ t('employee_form.birth_place') }}</label>
             <input v-model="form.place_of_birth" class="input" />
           </div>
           <div>
-            <label class="label">Tanggal Lahir</label>
+            <label class="label">{{ t('employee_form.birth_date') }}</label>
             <input v-model="form.date_of_birth" type="date" class="input" />
           </div>
           <div>
-            <label class="label">NIK KTP (terenkripsi)</label>
+            <label class="label">{{ t('employee_form.nik') }}</label>
             <input v-model="form.nik" class="input" maxlength="16" />
           </div>
           <div>
-            <label class="label">NPWP</label>
+            <label class="label">{{ t('employee_form.npwp') }}</label>
             <input v-model="form.npwp" class="input" />
           </div>
           <div>
-            <label class="label">Status PTKP</label>
+            <label class="label">{{ t('employee_form.ptkp') }}</label>
             <select v-model="form.ptkp_status" class="input">
               <option v-for="c in ['TK0','TK1','TK2','TK3','K0','K1','K2','K3','HB0','HB1','HB2','HB3']" :key="c" :value="c">{{ c }}</option>
             </select>
@@ -170,46 +180,46 @@ async function submit() {
 
       <!-- Address -->
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Alamat</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('employee_form.address_section') }}</span></div>
         <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="md:col-span-2">
-            <label class="label">Alamat</label>
+            <label class="label">{{ t('employee_form.address') }}</label>
             <textarea v-model="form.address" class="input" rows="2"></textarea>
           </div>
-          <div><label class="label">Provinsi</label><input v-model="form.province" class="input" /></div>
-          <div><label class="label">Kota</label><input v-model="form.city" class="input" /></div>
-          <div><label class="label">Kode Pos</label><input v-model="form.postal_code" class="input" /></div>
+          <div><label class="label">{{ t('employee_form.province') }}</label><input v-model="form.province" class="input" /></div>
+          <div><label class="label">{{ t('employee_form.city') }}</label><input v-model="form.city" class="input" /></div>
+          <div><label class="label">{{ t('employee_form.postal_code') }}</label><input v-model="form.postal_code" class="input" /></div>
         </div>
       </div>
 
       <!-- Employment -->
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Kepegawaian</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('employee_form.employment') }}</span></div>
         <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="label">Cabang</label>
+            <label class="label">{{ t('employee_form.branch') }}</label>
             <SearchableSelect
               v-model="form.branch_id"
               :items="branches"
               value-key="id"
               label-key="name"
               :search-keys="['name','code','city']"
-              placeholder="- Pilih -"
+              v-bind="{ placeholder: t('employee_form.select') }"
             />
           </div>
           <div>
-            <label class="label">Departemen</label>
+            <label class="label">{{ t('employee_form.department') }}</label>
             <SearchableSelect
               v-model="form.department_id"
               :items="departments"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="- Pilih -"
+              v-bind="{ placeholder: t('employee_form.select') }"
             />
           </div>
           <div>
-            <label class="label">Jabatan</label>
+            <label class="label">{{ t('employee_form.position') }}</label>
             <SearchableSelect
               v-model="form.position_id"
               :items="positions"
@@ -217,42 +227,42 @@ async function submit() {
               label-key="name"
               sub-label-key="department_name"
               :search-keys="['name','code','tier','department_name']"
-              placeholder="- Pilih -"
+              v-bind="{ placeholder: t('employee_form.select') }"
             />
           </div>
           <div>
-            <label class="label">Job Grade</label>
+            <label class="label">{{ t('employee_form.job_grade') }}</label>
             <SearchableSelect
               v-model="form.job_grade_id"
               :items="jobGrades"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="- Pilih -"
+              v-bind="{ placeholder: t('employee_form.select') }"
             />
           </div>
           <div>
-            <label class="label">Status Kepegawaian *</label>
+            <label class="label">{{ t('employee_form.employment_status') }}</label>
             <select v-model="form.employment_status" class="input">
-              <option v-for="s in ['PKWT','PKWTT','PROBATION','HARIAN','MAGANG','OUTSOURCING']" :key="s" :value="s">{{ s }}</option>
+              <option v-for="s in ['PKWT','PKWTT','PROBATION','HARIAN','MAGANG','OUTSOURCING']" :key="s" :value="s">{{ employmentStatusLabel(s) }}</option>
             </select>
           </div>
           <div>
-            <label class="label">Tipe Pekerja</label>
+            <label class="label">{{ t('employee_form.employment_type') }}</label>
             <select v-model="form.employment_type" class="input">
-              <option v-for="s in ['FULL_TIME','PART_TIME','CONTRACT','INTERN']" :key="s" :value="s">{{ s }}</option>
+              <option v-for="s in ['FULL_TIME','PART_TIME','CONTRACT','INTERN']" :key="s" :value="s">{{ employmentTypeLabel(s) }}</option>
             </select>
           </div>
           <div>
-            <label class="label">Tanggal Bergabung *</label>
+            <label class="label">{{ t('employee_form.join_date') }}</label>
             <input v-model="form.join_date" type="date" class="input" required />
           </div>
           <div>
-            <label class="label">Akhir Probation</label>
+            <label class="label">{{ t('employee_form.probation_end') }}</label>
             <input v-model="form.probation_end_date" type="date" class="input" />
           </div>
           <div>
-            <label class="label">Akhir Kontrak</label>
+            <label class="label">{{ t('employee_form.contract_end') }}</label>
             <input v-model="form.contract_end_date" type="date" class="input" />
           </div>
         </div>
@@ -260,38 +270,38 @@ async function submit() {
 
       <!-- Salary -->
       <div class="card">
-        <div class="card-header"><span class="font-semibold">Gaji & Pajak</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('employee_form.salary_tax') }}</span></div>
         <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="label">Gaji Pokok</label>
+            <label class="label">{{ t('employee_form.basic_salary') }}</label>
             <input v-model.number="form.basic_salary" type="number" min="0" class="input" />
           </div>
           <div>
-            <label class="label">Metode Pajak</label>
+            <label class="label">{{ t('employee_form.tax_method') }}</label>
             <select v-model="form.tax_method" class="input">
-              <option value="GROSS">Gross</option>
-              <option value="NETT">Nett</option>
-              <option value="GROSS_UP">Gross Up</option>
+              <option value="GROSS">{{ t('employee_form.tax_gross') }}</option>
+              <option value="NETT">{{ t('employee_form.tax_nett') }}</option>
+              <option value="GROSS_UP">{{ t('employee_form.tax_gross_up') }}</option>
             </select>
           </div>
           <div>
-            <label class="label">Bank</label>
+            <label class="label">{{ t('employee_form.bank') }}</label>
             <input v-model="form.bank_name" class="input" />
           </div>
           <div>
-            <label class="label">No. Rekening (terenkripsi)</label>
+            <label class="label">{{ t('employee_form.bank_account') }}</label>
             <input v-model="form.bank_account" class="input" />
           </div>
           <div>
-            <label class="label">Pemilik Rekening</label>
+            <label class="label">{{ t('employee_form.account_holder') }}</label>
             <input v-model="form.bank_account_holder" class="input" />
           </div>
           <div>
-            <label class="label">No. BPJS Kesehatan</label>
+            <label class="label">{{ t('employee_form.bpjs_health') }}</label>
             <input v-model="form.bpjs_kesehatan_no" class="input" />
           </div>
           <div>
-            <label class="label">No. BPJS Ketenagakerjaan</label>
+            <label class="label">{{ t('employee_form.bpjs_employment') }}</label>
             <input v-model="form.bpjs_tk_no" class="input" />
           </div>
         </div>
@@ -299,22 +309,22 @@ async function submit() {
 
       <!-- Account -->
       <div v-if="!isEdit" class="card">
-        <div class="card-header"><span class="font-semibold">Akun Aplikasi</span></div>
+        <div class="card-header"><span class="font-semibold">{{ t('employee_form.app_account') }}</span></div>
         <div class="card-body">
           <label class="flex items-center gap-2">
             <input type="checkbox" v-model="form.create_user_account" />
-            <span class="text-sm">Buat akun login otomatis (gunakan email di atas; password sementara dikirim via email)</span>
+            <span class="text-sm">{{ t('employee_form.create_account') }}</span>
           </label>
         </div>
       </div>
 
       <div class="flex justify-end gap-2">
-        <button type="button" class="btn-secondary" @click="$router.back()">Batal</button>
+        <button type="button" class="btn-secondary" @click="$router.back()">{{ t('employee_form.cancel') }}</button>
         <button type="submit" class="btn-primary" :disabled="saving">
-          {{ saving ? 'Menyimpan...' : (isEdit ? 'Simpan Perubahan' : 'Simpan') }}
+          {{ saving ? t('employee_form.saving') : (isEdit ? t('employee_form.save_changes') : t('employee_form.save')) }}
         </button>
       </div>
     </form>
-    <div v-else class="text-center py-12 text-gray-400">Memuat...</div>
+    <div v-else class="text-center py-12 text-gray-400">{{ t('employee_form.loading') }}</div>
   </div>
 </template>

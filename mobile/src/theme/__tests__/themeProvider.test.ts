@@ -13,7 +13,7 @@ import { buildTheme } from '../index';
  */
 describe('Theme', () => {
   beforeEach(() => {
-    mmkv.delete('theme.mode');
+    mmkv.remove('theme.mode');
   });
 
   it('buildTheme returns different bg color for light vs dark', () => {
@@ -34,7 +34,7 @@ describe('Theme', () => {
   it('persists theme.mode key in MMKV', () => {
     mmkv.set('theme.mode', 'dark');
     expect(mmkv.getString('theme.mode')).toBe('dark');
-    mmkv.delete('theme.mode');
+    mmkv.remove('theme.mode');
     expect(mmkv.getString('theme.mode')).toBeUndefined();
   });
 });

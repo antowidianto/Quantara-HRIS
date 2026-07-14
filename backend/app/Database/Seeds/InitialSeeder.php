@@ -48,6 +48,7 @@ class InitialSeeder extends Seeder
             ['slug' => 'employee.delete', 'name' => 'Delete Employee', 'group' => 'employee'],
             ['slug' => 'employee.view_self', 'name' => 'View Own Profile', 'group' => 'employee'],
             ['slug' => 'attendance.view', 'name' => 'View Attendance', 'group' => 'attendance'],
+            ['slug' => 'attendance.view_self', 'name' => 'View Own Attendance', 'group' => 'attendance'],
             ['slug' => 'attendance.view_all', 'name' => 'View All Attendance (own branch scope)', 'group' => 'attendance'],
             ['slug' => 'attendance.view_all_branches', 'name' => 'View Attendance Across Branches (within company)', 'group' => 'attendance'],
             ['slug' => 'attendance.clock', 'name' => 'Clock In/Out', 'group' => 'attendance'],
@@ -139,10 +140,10 @@ class InitialSeeder extends Seeder
         // yang diajukan bawahannya di cabang yang sama.
         $managerPerms = ['employee.view','attendance.view_all','leave.view','leave.approve',
             'overtime.view','overtime.approve','reimbursement.view','reimbursement.approve','report.view',
-            'employee.view_self','attendance.clock','attendance.request_change','attendance.approve_change',
+            'employee.view_self','attendance.clock','attendance.view_self','attendance.request_change','attendance.approve_change',
             'leave.create','overtime.create','reimbursement.create','loan.create','payslip.view_self'];
 
-        $employeePerms = ['employee.view_self','attendance.clock','attendance.view','attendance.request_change',
+        $employeePerms = ['employee.view_self','attendance.clock','attendance.view_self','attendance.view','attendance.request_change',
             'leave.view','leave.create','overtime.view','overtime.create',
             'reimbursement.view','reimbursement.create','loan.view','loan.create','payslip.view_self'];
 

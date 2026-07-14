@@ -19,6 +19,26 @@ use Config\Services;
  */
 class ApprovalDelegationController extends ApiController
 {
+    /** Minimal same-tenant directory used by the self-service delegate picker. */
+    public function eligibleUsers()
+    {
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return $this->fail('Company context tidak tersedia', 422);
+
+        $rows = \Config\Database::connect()->table('users u')
+            ->select('u.id, u.name, u.email, e.employee_number, p.name AS position_name')
+            ->join('employees e', 'e.user_id = u.id AND e.deleted_at IS NULL', 'left')
+            ->join('positions p', 'p.id = e.position_id', 'left')
+            ->where('u.company_id', $companyId)
+            ->where('u.is_active', 1)
+            ->where('u.id !=', $this->userId())
+            ->orderBy('u.name', 'ASC')
+            ->limit(500)
+            ->get()->getResultArray();
+
+        return $this->ok($rows);
+    }
+
     public function index()
     {
         $db = \Config\Database::connect();
@@ -116,7 +136,10 @@ class ApprovalDelegationController extends ApiController
             return $this->fail('Delegator dan penerima delegasi harus berasal dari perusahaan yang sama', 422, 'CROSS_TENANT_DELEGATION');
         }
         $module = trim((string) ($data['module'] ?? ''));
-        $allowedModules = ['LEAVE','OVERTIME','ATTENDANCE_CHANGE','REIMBURSEMENT','LOAN','GENERIC'];
+        $allowedModules = [
+            'LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN',
+            'MPP', 'RESIGNATION', 'TRANSFER', 'JIC', 'GENERIC',
+        ];
         if ($module !== '' && ! in_array($module, $allowedModules, true)) {
             return $this->fail('Modul tidak valid', 422);
         }

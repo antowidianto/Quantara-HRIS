@@ -2,9 +2,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
-import { fmtCurrency, fmtDate } from '@/composables/useResource'
+import { useI18n } from '@/locales'
 import {
-  ArrowLeftIcon, UserCircleIcon, BriefcaseIcon, BanknotesIcon,
+  ArrowLeftIcon, BriefcaseIcon, BanknotesIcon,
   CalendarDaysIcon, ClockIcon, ChartBarIcon, AcademicCapIcon,
   BuildingOffice2Icon, ExclamationTriangleIcon, DocumentTextIcon,
   ClipboardDocumentListIcon,
@@ -18,6 +18,7 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const { t, locale } = useI18n()
 const employeeId = computed(() => Number(route.params.id))
 const data = ref(null)
 const loading = ref(false)
@@ -49,18 +50,50 @@ const assets      = computed(() => data.value?.sections?.assets      || {})
 const disciplinary= computed(() => data.value?.sections?.disciplinary|| {})
 const documents   = computed(() => data.value?.sections?.documents   || {})
 const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
+
+function fmtCurrency(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'id-ID', {
+    style: 'currency', currency: 'IDR', maximumFractionDigits: 0,
+  }).format(Number(value))
+}
+
+function fmtDate(value) {
+  if (!value) return '-'
+  const date = new Date(value.length <= 10 ? `${value}T00:00:00` : value)
+  return date.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+
+function fmtDateTime(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString(locale.value === 'en' ? 'en-US' : 'id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function employmentStatusLabel(value) {
+  const supported = ['PKWT', 'PKWTT', 'PROBATION', 'HARIAN', 'MAGANG', 'OUTSOURCING']
+  return supported.includes(value) ? t(`employee_form.status_${value.toLowerCase()}`) : value
+}
+
+function probationStatusLabel(value) {
+  const supported = ['ONGOING', 'PASSED', 'FAILED', 'EXTENDED', 'NA']
+  return supported.includes(value) ? t(`employee_360.probation_${value.toLowerCase()}`) : value
+}
 </script>
 
 <template>
   <div>
     <button class="text-sm text-gray-600 hover:text-primary-600 flex items-center gap-1 mb-3"
       @click="router.push('/employees')">
-      <ArrowLeftIcon class="w-4 h-4" /> Kembali ke list karyawan
+      <ArrowLeftIcon class="w-4 h-4" /> {{ t('employee_360.back') }}
     </button>
 
-    <div v-if="loading" class="text-center py-16 text-gray-400">Memuat profile…</div>
+    <div v-if="loading" class="text-center py-16 text-gray-400">{{ t('employee_360.loading') }}</div>
     <div v-else-if="!data" class="text-center py-16 text-rose-600">
-      Data tidak ditemukan / akses ditolak.
+      {{ t('employee_360.unavailable') }}
     </div>
 
     <div v-else class="space-y-4">
@@ -82,22 +115,22 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
                 {{ profile.employee_number }}
               </span>
               <span v-if="profile.is_active" class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                ● Aktif
+                ● {{ t('employee_360.active') }}
               </span>
               <span v-else class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                Non-aktif
+                {{ t('employee_360.inactive') }}
               </span>
               <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
-                {{ employment.employment_status }}
+                {{ employmentStatusLabel(employment.employment_status) }}
               </span>
               <span v-if="employment.tenure_label" class="text-xs text-gray-500">
-                · Masa kerja: {{ employment.tenure_label }}
+                · {{ t('employee_360.tenure', { value: employment.tenure_label }) }}
               </span>
             </div>
           </div>
           <div class="text-right">
-            <p class="text-xs text-gray-500">Last update</p>
-            <p class="text-xs font-mono">{{ data.generated_at }}</p>
+            <p class="text-xs text-gray-500">{{ t('employee_360.last_update') }}</p>
+            <p class="text-xs font-mono">{{ fmtDateTime(data.generated_at) }}</p>
           </div>
         </div>
       </div>
@@ -108,15 +141,19 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <div class="flex items-start gap-2">
           <ExclamationTriangleIcon class="w-5 h-5 text-rose-600 mt-0.5 flex-shrink-0" />
           <div>
-            <strong class="text-rose-900">Karyawan dalam proses keluar.</strong>
+            <strong class="text-rose-900">{{ t('employee_360.exit_alert') }}</strong>
             <div v-if="lifecycle.active_resignation" class="text-rose-800 mt-0.5">
-              Resignation aktif (status {{ lifecycle.active_resignation.status }}) —
-              LWD: {{ fmtDate(lifecycle.active_resignation.last_working_date) }}
+              {{ t('employee_360.resignation_active', {
+                status: lifecycle.active_resignation.status,
+                date: fmtDate(lifecycle.active_resignation.last_working_date),
+              }) }}
             </div>
             <div v-if="lifecycle.active_termination" class="text-rose-800 mt-0.5">
-              Termination aktif #{{ lifecycle.active_termination.reference_number }}
-              ({{ lifecycle.active_termination.status }}) —
-              {{ fmtDate(lifecycle.active_termination.planned_termination_date) }}
+              {{ t('employee_360.termination_active', {
+                reference: lifecycle.active_termination.reference_number,
+                status: lifecycle.active_termination.status,
+                date: fmtDate(lifecycle.active_termination.planned_termination_date),
+              }) }}
             </div>
           </div>
         </div>
@@ -127,12 +164,12 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <!-- Employment -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <BriefcaseIcon class="w-4 h-4 text-blue-600" /> Kepegawaian
+            <BriefcaseIcon class="w-4 h-4 text-blue-600" /> {{ t('employee_360.employment') }}
           </h3>
           <dl class="space-y-1.5 text-sm">
-            <div class="flex justify-between"><dt class="text-gray-500">Tanggal Bergabung</dt><dd>{{ fmtDate(employment.join_date) }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.join_date') }}</dt><dd>{{ fmtDate(employment.join_date) }}</dd></div>
             <div v-if="employment.probation_end_date" class="flex justify-between">
-              <dt class="text-gray-500">Probation</dt>
+              <dt class="text-gray-500">{{ t('employee_360.probation') }}</dt>
               <dd>
                 {{ fmtDate(employment.probation_end_date) }}
                 <span v-if="employment.probation_status"
@@ -140,18 +177,18 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
                     employment.probation_status === 'PASSED' ? 'bg-emerald-100 text-emerald-700' :
                     employment.probation_status === 'FAILED' ? 'bg-rose-100 text-rose-700' :
                     'bg-amber-100 text-amber-700']">
-                  {{ employment.probation_status }}
+                  {{ probationStatusLabel(employment.probation_status) }}
                 </span>
               </dd>
             </div>
             <div v-if="employment.supervisor_name" class="flex justify-between">
-              <dt class="text-gray-500">Supervisor</dt><dd>{{ employment.supervisor_name }}</dd>
+              <dt class="text-gray-500">{{ t('employee_360.supervisor') }}</dt><dd>{{ employment.supervisor_name }}</dd>
             </div>
             <div v-if="employment.work_location_name" class="flex justify-between">
-              <dt class="text-gray-500">Lokasi Kerja</dt><dd>{{ employment.work_location_name }}</dd>
+              <dt class="text-gray-500">{{ t('employee_360.work_location') }}</dt><dd>{{ employment.work_location_name }}</dd>
             </div>
             <div v-if="employment.active_contract" class="pt-2 border-t border-gray-100 mt-2">
-              <p class="text-xs text-gray-500 mb-1">Kontrak Aktif</p>
+              <p class="text-xs text-gray-500 mb-1">{{ t('employee_360.active_contract') }}</p>
               <div class="text-xs">
                 <span class="font-mono">{{ employment.active_contract.contract_type }}</span>
                 · {{ fmtDate(employment.active_contract.start_date) }}
@@ -164,73 +201,73 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <!-- Compensation -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <BanknotesIcon class="w-4 h-4 text-emerald-600" /> Kompensasi
+            <BanknotesIcon class="w-4 h-4 text-emerald-600" /> {{ t('employee_360.compensation') }}
           </h3>
           <dl class="space-y-1.5 text-sm">
             <div class="flex justify-between">
-              <dt class="text-gray-500">Gaji Pokok</dt>
+              <dt class="text-gray-500">{{ t('employee_360.basic_salary') }}</dt>
               <dd class="font-semibold">{{ fmtCurrency(compensation.basic_salary || 0) }}</dd>
             </div>
             <div v-if="compensation.fixed_allowance" class="flex justify-between">
-              <dt class="text-gray-500">Tunjangan Tetap</dt>
+              <dt class="text-gray-500">{{ t('employee_360.fixed_allowance') }}</dt>
               <dd>{{ fmtCurrency(compensation.fixed_allowance) }}</dd>
             </div>
-            <div class="flex justify-between"><dt class="text-gray-500">PTKP</dt><dd>{{ compensation.ptkp_status || '-' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">NPWP</dt><dd class="font-mono text-xs">{{ compensation.npwp_masked || '-' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">Bank</dt><dd>{{ compensation.bank_name || '-' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">No. Rek</dt><dd class="font-mono text-xs">{{ compensation.bank_account_masked || '-' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">BPJS Kes</dt><dd class="font-mono text-xs">{{ compensation.bpjs_kes_number || '-' }}</dd></div>
-            <div class="flex justify-between"><dt class="text-gray-500">BPJS TK</dt><dd class="font-mono text-xs">{{ compensation.bpjs_tk_number || '-' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.ptkp') }}</dt><dd>{{ compensation.ptkp_status || '-' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.npwp') }}</dt><dd class="font-mono text-xs">{{ compensation.npwp_masked || '-' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.bank') }}</dt><dd>{{ compensation.bank_name || '-' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.bank_account') }}</dt><dd class="font-mono text-xs">{{ compensation.bank_account_masked || '-' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.bpjs_health') }}</dt><dd class="font-mono text-xs">{{ compensation.bpjs_kes_number || '-' }}</dd></div>
+            <div class="flex justify-between"><dt class="text-gray-500">{{ t('employee_360.bpjs_employment') }}</dt><dd class="font-mono text-xs">{{ compensation.bpjs_tk_number || '-' }}</dd></div>
           </dl>
         </section>
 
         <!-- Payroll YTD -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <BanknotesIcon class="w-4 h-4 text-amber-600" /> Payroll YTD ({{ payrollYtd.period_year }})
+            <BanknotesIcon class="w-4 h-4 text-amber-600" /> {{ t('employee_360.payroll_ytd', { year: payrollYtd.period_year }) }}
           </h3>
           <div class="grid grid-cols-2 gap-2 text-sm">
             <div>
-              <div class="text-xs text-gray-500">Gross Total</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.gross_total') }}</div>
               <div class="font-semibold">{{ fmtCurrency(payrollYtd.gross_total || 0) }}</div>
             </div>
             <div>
-              <div class="text-xs text-gray-500">Net Total</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.net_total') }}</div>
               <div class="font-semibold text-emerald-700">{{ fmtCurrency(payrollYtd.net_total || 0) }}</div>
             </div>
             <div>
-              <div class="text-xs text-gray-500">PPh21</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.pph21') }}</div>
               <div>{{ fmtCurrency(payrollYtd.pph21_total || 0) }}</div>
             </div>
             <div>
-              <div class="text-xs text-gray-500">BPJS</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.bpjs') }}</div>
               <div>{{ fmtCurrency(payrollYtd.bpjs_total || 0) }}</div>
             </div>
           </div>
-          <p class="text-xs text-gray-400 mt-2">{{ payrollYtd.payslip_count || 0 }} payslip</p>
+          <p class="text-xs text-gray-400 mt-2">{{ t('employee_360.payslips', { count: payrollYtd.payslip_count || 0 }) }}</p>
         </section>
 
         <!-- Attendance MTD -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <ClockIcon class="w-4 h-4 text-cyan-600" /> Attendance MTD
+            <ClockIcon class="w-4 h-4 text-cyan-600" /> {{ t('employee_360.attendance_mtd') }}
           </h3>
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div class="bg-emerald-50 rounded p-2 text-center">
               <div class="text-xl font-bold text-emerald-700">{{ attendance.present_count || 0 }}</div>
-              <div class="text-xs">Hadir</div>
+              <div class="text-xs">{{ t('employee_360.present') }}</div>
             </div>
             <div class="bg-amber-50 rounded p-2 text-center">
               <div class="text-xl font-bold text-amber-700">{{ attendance.late_count || 0 }}</div>
-              <div class="text-xs">Terlambat</div>
+              <div class="text-xs">{{ t('employee_360.late') }}</div>
             </div>
             <div class="bg-rose-50 rounded p-2 text-center">
               <div class="text-xl font-bold text-rose-700">{{ attendance.absent_count || 0 }}</div>
-              <div class="text-xs">Absent</div>
+              <div class="text-xs">{{ t('employee_360.absent') }}</div>
             </div>
             <div class="bg-blue-50 rounded p-2 text-center">
               <div class="text-xl font-bold text-blue-700">{{ attendance.overtime_hours || 0 }}</div>
-              <div class="text-xs">OT (jam)</div>
+              <div class="text-xs">{{ t('employee_360.overtime_hours') }}</div>
             </div>
           </div>
         </section>
@@ -238,15 +275,15 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <!-- Leave -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <CalendarDaysIcon class="w-4 h-4 text-indigo-600" /> Saldo Cuti {{ leaveS.period_year }}
+            <CalendarDaysIcon class="w-4 h-4 text-indigo-600" /> {{ t('employee_360.leave_balance', { year: leaveS.period_year }) }}
           </h3>
           <div v-if="(leaveS.balances || []).length === 0" class="text-sm text-gray-400 italic">
-            Belum ada data cuti.
+            {{ t('employee_360.no_leave') }}
           </div>
           <div v-else class="space-y-1 text-sm">
             <div v-for="b in leaveS.balances" :key="b.id" class="flex justify-between">
               <span>{{ b.leave_type }}</span>
-              <span class="font-semibold">{{ b.remaining }} / {{ b.entitled }} hari</span>
+              <span class="font-semibold">{{ t('employee_360.leave_days', { remaining: b.remaining, entitled: b.entitled }) }}</span>
             </div>
           </div>
         </section>
@@ -254,37 +291,37 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <!-- Performance -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <ChartBarIcon class="w-4 h-4 text-purple-600" /> Performance
+            <ChartBarIcon class="w-4 h-4 text-purple-600" /> {{ t('employee_360.performance') }}
           </h3>
           <div v-if="performance.last_review" class="text-sm">
-            <div class="text-xs text-gray-500">Last Review ({{ performance.last_review.cycle_name }})</div>
+            <div class="text-xs text-gray-500">{{ t('employee_360.last_review', { cycle: performance.last_review.cycle_name }) }}</div>
             <div class="text-xl font-bold mt-0.5">{{ performance.last_review.overall_score || '-' }}/100</div>
             <div v-if="performance.last_review.recommendation" class="text-xs mt-1">
-              Rekomendasi: <strong>{{ performance.last_review.recommendation }}</strong>
+              {{ t('employee_360.recommendation') }} <strong>{{ performance.last_review.recommendation }}</strong>
             </div>
           </div>
           <div class="text-xs text-gray-500 mt-2">
-            Active goals: <strong>{{ performance.active_goals || 0 }}</strong>
+            {{ t('employee_360.active_goals') }} <strong>{{ performance.active_goals || 0 }}</strong>
           </div>
         </section>
 
         <!-- Training -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <AcademicCapIcon class="w-4 h-4 text-blue-600" /> Training
+            <AcademicCapIcon class="w-4 h-4 text-blue-600" /> {{ t('employee_360.training') }}
           </h3>
           <div class="grid grid-cols-2 gap-2 text-sm">
             <div>
-              <div class="text-xs text-gray-500">Selesai 1 thn</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.completed_last_year') }}</div>
               <div class="text-xl font-bold">{{ training.completed_last_year || 0 }}</div>
             </div>
             <div>
-              <div class="text-xs text-gray-500">Aktif</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.training_active') }}</div>
               <div class="text-xl font-bold">{{ training.active_enrollments || 0 }}</div>
             </div>
           </div>
           <div v-if="(training.recent_completions || []).length > 0" class="mt-2 pt-2 border-t border-gray-100">
-            <p class="text-xs text-gray-500 mb-1">Recent</p>
+            <p class="text-xs text-gray-500 mb-1">{{ t('employee_360.recent') }}</p>
             <ul class="text-xs space-y-0.5">
               <li v-for="t in training.recent_completions.slice(0, 3)" :key="t.id">
                 ✓ {{ t.training_title }}
@@ -296,28 +333,28 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <!-- Assets -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <BuildingOffice2Icon class="w-4 h-4 text-orange-600" /> Aset
+            <BuildingOffice2Icon class="w-4 h-4 text-orange-600" /> {{ t('employee_360.assets') }}
           </h3>
           <div class="text-sm">
-            <div class="text-xs text-gray-500">Sedang dipinjam: <strong>{{ (assets.assigned || []).length }}</strong></div>
+            <div class="text-xs text-gray-500">{{ t('employee_360.assigned_assets') }} <strong>{{ (assets.assigned || []).length }}</strong></div>
             <ul v-if="(assets.assigned || []).length > 0" class="mt-1 text-xs space-y-0.5">
               <li v-for="a in assets.assigned" :key="a.id">
                 <span class="font-mono">{{ a.asset_number }}</span> · {{ a.name }}
                 <span class="text-gray-500">({{ a.category }})</span>
               </li>
             </ul>
-            <p class="text-xs text-gray-400 mt-2">Total history: {{ assets.history_count || 0 }}</p>
+            <p class="text-xs text-gray-400 mt-2">{{ t('employee_360.asset_history', { count: assets.history_count || 0 }) }}</p>
           </div>
         </section>
 
         <!-- Disciplinary -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <ExclamationTriangleIcon class="w-4 h-4 text-rose-600" /> Surat Peringatan
+            <ExclamationTriangleIcon class="w-4 h-4 text-rose-600" /> {{ t('employee_360.disciplinary') }}
           </h3>
           <div v-if="disciplinary.active_count > 0" class="bg-rose-50 border border-rose-200 rounded p-2 mb-2 text-xs">
-            <strong>{{ disciplinary.active_count }} SP aktif</strong>
-            <span v-if="disciplinary.highest_active"> · Tertinggi: {{ disciplinary.highest_active }}</span>
+            <strong>{{ t('employee_360.active_warnings', { count: disciplinary.active_count }) }}</strong>
+            <span v-if="disciplinary.highest_active"> · {{ t('employee_360.highest_warning', { level: disciplinary.highest_active }) }}</span>
           </div>
           <div v-if="(disciplinary.recent || []).length > 0" class="text-xs space-y-1">
             <div v-for="r in disciplinary.recent.slice(0, 3)" :key="r.id"
@@ -331,21 +368,21 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
               <span class="text-gray-600 truncate">{{ r.subject }}</span>
             </div>
           </div>
-          <p v-else class="text-xs text-gray-400 italic">Tidak ada SP. Bagus.</p>
+          <p v-else class="text-xs text-gray-400 italic">{{ t('employee_360.no_warning') }}</p>
         </section>
 
         <!-- Documents -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <DocumentTextIcon class="w-4 h-4 text-gray-600" /> Dokumen
+            <DocumentTextIcon class="w-4 h-4 text-gray-600" /> {{ t('employee_360.documents') }}
           </h3>
           <div class="grid grid-cols-2 gap-2 text-sm">
             <div>
-              <div class="text-xs text-gray-500">Kontrak</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.contracts') }}</div>
               <div class="text-xl font-bold">{{ documents.contract_count || 0 }}</div>
             </div>
             <div>
-              <div class="text-xs text-gray-500">Dokumen lain</div>
+              <div class="text-xs text-gray-500">{{ t('employee_360.other_documents') }}</div>
               <div class="text-xl font-bold">{{ documents.document_count || 0 }}</div>
             </div>
           </div>
@@ -354,10 +391,10 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
         <!-- Lifecycle -->
         <section class="bg-white rounded-lg border border-gray-200 p-4">
           <h3 class="font-semibold text-sm mb-3 flex items-center gap-2">
-            <ClipboardDocumentListIcon class="w-4 h-4 text-indigo-600" /> Lifecycle Tasks
+            <ClipboardDocumentListIcon class="w-4 h-4 text-indigo-600" /> {{ t('employee_360.lifecycle_tasks') }}
           </h3>
           <div v-if="lifecycle.onboarding_progress" class="mb-3">
-            <div class="text-xs text-gray-500 mb-1">Onboarding</div>
+            <div class="text-xs text-gray-500 mb-1">{{ t('employee_360.onboarding') }}</div>
             <div class="flex items-center gap-2">
               <div class="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                 <div class="bg-emerald-500 h-full"
@@ -368,12 +405,12 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
             <p class="text-xs text-gray-500 mt-0.5">
               {{ lifecycle.onboarding_progress.completed }}/{{ lifecycle.onboarding_progress.total }}
               <span v-if="lifecycle.onboarding_progress.overdue > 0" class="text-rose-600">
-                · {{ lifecycle.onboarding_progress.overdue }} overdue
+                · {{ t('employee_360.overdue', { count: lifecycle.onboarding_progress.overdue }) }}
               </span>
             </p>
           </div>
           <div v-if="lifecycle.offboarding_progress">
-            <div class="text-xs text-gray-500 mb-1">Offboarding</div>
+            <div class="text-xs text-gray-500 mb-1">{{ t('employee_360.offboarding') }}</div>
             <div class="flex items-center gap-2">
               <div class="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
                 <div class="bg-amber-500 h-full"
@@ -387,7 +424,7 @@ const lifecycle   = computed(() => data.value?.sections?.lifecycle   || {})
           </div>
           <p v-if="!lifecycle.onboarding_progress && !lifecycle.offboarding_progress"
             class="text-xs text-gray-400 italic">
-            Tidak ada task aktif.
+            {{ t('employee_360.no_active_tasks') }}
           </p>
         </section>
       </div>

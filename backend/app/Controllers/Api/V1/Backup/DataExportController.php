@@ -102,7 +102,10 @@ class DataExportController extends ApiController
                 if (class_exists('\\App\\Libraries\\Queue\\QueueService')
                     && class_exists('\\App\\Jobs\\ExportTenantDataJob')) {
                     $queue = new \App\Libraries\Queue\QueueService();
-                    $queue->dispatch('\\App\\Jobs\\ExportTenantDataJob', ['request_id' => $id], 'default');
+                    $queue->dispatch('\\App\\Jobs\\ExportTenantDataJob', [
+                        'request_id' => $id,
+                        'company_id' => $companyId,
+                    ], 'default');
                 }
             } catch (\Throwable $e) {
                 log_message('warning', '[DataExport] queue dispatch failed: ' . $e->getMessage());

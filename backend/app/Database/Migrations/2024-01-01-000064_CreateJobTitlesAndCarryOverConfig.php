@@ -182,15 +182,36 @@ class CreateJobTitlesAndCarryOverConfig extends Migration
 
             // Sekarang propagasi ke employees yang punya position_id ber-job_title_id
             if ($db->tableExists('employees')) {
-                $db->query(
-                    'UPDATE employees e
-                     INNER JOIN positions p ON p.id = e.position_id
-                     SET e.job_title_id = p.job_title_id, e.updated_at = ?
-                     WHERE e.job_title_id IS NULL
-                       AND p.job_title_id IS NOT NULL
-                       AND e.deleted_at IS NULL',
-                    [$now]
-                );
+                if ($db->DBDriver === 'SQLite3') {
+                    $db->query(
+                        'UPDATE employees
+                         SET job_title_id = (
+                                 SELECT p.job_title_id
+                                 FROM positions p
+                                 WHERE p.id = employees.position_id
+                             ),
+                             updated_at = ?
+                         WHERE job_title_id IS NULL
+                           AND deleted_at IS NULL
+                           AND EXISTS (
+                               SELECT 1
+                               FROM positions p
+                               WHERE p.id = employees.position_id
+                                 AND p.job_title_id IS NOT NULL
+                           )',
+                        [$now]
+                    );
+                } else {
+                    $db->query(
+                        'UPDATE employees e
+                         INNER JOIN positions p ON p.id = e.position_id
+                         SET e.job_title_id = p.job_title_id, e.updated_at = ?
+                         WHERE e.job_title_id IS NULL
+                           AND p.job_title_id IS NOT NULL
+                           AND e.deleted_at IS NULL',
+                        [$now]
+                    );
+                }
             }
         }
 

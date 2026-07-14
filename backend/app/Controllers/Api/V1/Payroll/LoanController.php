@@ -39,13 +39,18 @@ class LoanController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('loans')->where('id', (int) $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('loans')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
         if (! $this->privacy()->canAccessRow($row, 'loan')) {
             return $this->fail('Forbidden', 403);
         }
         
         $installments = $db->table('loan_installments')
+            ->where('company_id', $companyId)
             ->where('loan_id', (int) $id)
             ->orderBy('installment_number', 'ASC')
             ->get()
@@ -70,7 +75,11 @@ class LoanController extends ApiController
         if (! $employeeId) return $this->fail('Employee not specified', 400);
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
 
         $principal = (float) $data['principal'];
@@ -103,7 +112,11 @@ class LoanController extends ApiController
         $data = $this->getJsonInput();
         $action = $data['action'] ?? '';
         $db = \Config\Database::connect();
-        $loan = $db->table('loans')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $loan = $db->table('loans')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $loan) return $this->fail('Not found', 404);
 
         // Pastikan loan masuk scope tenant user (cegah cross-company write).
@@ -169,7 +182,11 @@ class LoanController extends ApiController
     public function delete($id = null)
     {
         $db = \Config\Database::connect();
-        $loan = $db->table('loans')->where('id', (int) $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $loan = $db->table('loans')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $loan) return $this->fail('Not found', 404);
 
         // Hanya owner atau yang punya `loan.approve` boleh cancel.
@@ -181,7 +198,10 @@ class LoanController extends ApiController
         }
         if ($loan['status'] !== 'PENDING') return $this->fail('Cannot cancel — only PENDING loans can be cancelled', 422);
 
-        $db->table('loans')->where('id', (int) $id)->update([
+        $db->table('loans')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->update([
             'status' => 'CANCELLED',
             'updated_at' => date('Y-m-d H:i:s'),
         ]);

@@ -73,21 +73,42 @@ class AddMppOverdueTracking extends Migration
         // direplace (kalau dia sudah resign), atau target_start_date
         // sebagai fallback.
         if ($db->tableExists('resignation_requests')) {
-            $db->query("
-                UPDATE manpower_requests mr
-                LEFT JOIN resignation_requests rr
-                    ON rr.employee_id = mr.replacement_for_employee_id
-                    AND rr.status = 'APPROVED'
-                    AND rr.deleted_at IS NULL
-                SET mr.vacancy_started_at = COALESCE(
-                    rr.effective_date,
-                    rr.last_working_date,
-                    mr.target_start_date
-                )
-                WHERE mr.vacancy_started_at IS NULL
-                  AND mr.replacement_for_employee_id IS NOT NULL
-                  AND mr.deleted_at IS NULL
-            ");
+            if ($db->DBDriver === 'SQLite3') {
+                $db->query("
+                    UPDATE manpower_requests
+                    SET vacancy_started_at = COALESCE(
+                        (
+                            SELECT COALESCE(rr.effective_date, rr.last_working_date)
+                            FROM resignation_requests rr
+                            WHERE rr.employee_id = manpower_requests.replacement_for_employee_id
+                              AND rr.status = 'APPROVED'
+                              AND rr.deleted_at IS NULL
+                            ORDER BY rr.id DESC
+                            LIMIT 1
+                        ),
+                        target_start_date
+                    )
+                    WHERE vacancy_started_at IS NULL
+                      AND replacement_for_employee_id IS NOT NULL
+                      AND deleted_at IS NULL
+                ");
+            } else {
+                $db->query("
+                    UPDATE manpower_requests mr
+                    LEFT JOIN resignation_requests rr
+                        ON rr.employee_id = mr.replacement_for_employee_id
+                        AND rr.status = 'APPROVED'
+                        AND rr.deleted_at IS NULL
+                    SET mr.vacancy_started_at = COALESCE(
+                        rr.effective_date,
+                        rr.last_working_date,
+                        mr.target_start_date
+                    )
+                    WHERE mr.vacancy_started_at IS NULL
+                      AND mr.replacement_for_employee_id IS NOT NULL
+                      AND mr.deleted_at IS NULL
+                ");
+            }
         }
         // Backfill non-REPLACEMENT (NEW_POSITION, EXPANSION, dll):
         // pakai target_start_date sebagai vacancy_started_at supaya logic

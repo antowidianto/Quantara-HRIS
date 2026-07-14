@@ -27,6 +27,7 @@ $patterns = [
     '/requirePermission\([\'"]([a-z0-9_.]+)[\'"]\)/',
     '/->can\([\'"]([a-z0-9_.]+)[\'"]\)/',
     '/[\'"]perm[\'"]\s*=>\s*[\'"]([a-z0-9_.]+)[\'"]/',
+    '/\bpermission:([a-z0-9_.]+)/',
 ];
 foreach ($rii as $f) {
     if ($f->getExtension() !== 'php') continue;

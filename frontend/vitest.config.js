@@ -3,9 +3,12 @@ import viteConfig from './vite.config.js'
 
 // Vitest config — extends vite.config.js supaya alias '@/...' tetap jalan
 // di test. Run via `npm run test` (single run) atau `npm run test:watch`.
-export default mergeConfig(
-  viteConfig({ mode: 'test' }),
-  defineConfig({
+export default defineConfig(async () => {
+  const baseConfig = await viteConfig({ mode: 'test', command: 'serve' })
+
+  return mergeConfig(
+    baseConfig,
+    defineConfig({
     test: {
       environment: 'jsdom',
       globals: true,
@@ -28,13 +31,14 @@ export default mergeConfig(
         // Threshold tahap awal — DI-COMMENT supaya CI tidak gagal saat
         // baseline coverage masih ~0%. Begitu Sprint E (frontend refactor)
         // mencapai cakupan layak, aktifkan dan ratchet bertahap.
-        // thresholds: {
-        //   lines: 30,
-        //   functions: 30,
-        //   branches: 25,
-        //   statements: 30,
-        // },
+        thresholds: {
+          lines: 20,
+          functions: 20,
+          branches: 15,
+          statements: 20,
+        },
       },
     },
-  }),
-)
+    }),
+  )
+})

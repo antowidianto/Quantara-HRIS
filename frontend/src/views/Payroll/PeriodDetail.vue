@@ -5,6 +5,7 @@ import api from '@/api/client'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
+import { useAsyncActions, useLatestRequest } from '@/composables/useAsyncAction'
 import { useI18n } from '@/locales'
 import {
   ArrowDownTrayIcon, BanknotesIcon, DocumentTextIcon, ShieldCheckIcon,
@@ -27,23 +28,25 @@ const exportSummary = ref(null)
 const exportLoading = ref(false)
 const selectedBank = ref('BCA')
 const isFinalForm = ref(false)
+const { runAction, isActionPending } = useAsyncActions()
+const { runLatest: runLatestFetch } = useLatestRequest()
 
 const apiBase = computed(() => api.defaults.baseURL || '/api/v1')
 
 async function fetchData() {
   const id = route.params.id
-  try {
-    const [p, s] = await Promise.all([
+  await runLatestFetch(
+    () => Promise.all([
       api.get(`/payroll-periods/${id}`),
       api.get('/payslips', { params: { period_id: id, per_page: 200 } }),
-    ])
-    period.value = p.data.data
-    slips.value = s.data.data
-  } catch (e) {
-    toast.error(t('payroll.period_detail.load_failed'))
-  }
-  // Refresh pending approvals warning supaya HR aware sebelum klik Hitung
-  fetchPendingApprovals()
+    ]),
+    ([p, s]) => {
+      period.value = p.data.data
+      slips.value = s.data.data
+      fetchPendingApprovals()
+    },
+    () => toast.error(t('payroll.period_detail.load_failed')),
+  )
 }
 onMounted(fetchData)
 
@@ -122,19 +125,42 @@ function labelType(type) {
   return labels[type] || type
 }
 async function finalize() {
-  const ok = await confirmDialog({
-    title: t('payroll.period_detail.finalize_title'),
-    message: t('payroll.period_detail.finalize_msg'),
-    okText: t('payroll.period_detail.finalize'),
-    variant: 'warning',
+  return runAction('finalize', async () => {
+    const ok = await confirmDialog({
+      title: t('payroll.period_detail.finalize_title'),
+      message: t('payroll.period_detail.finalize_msg'),
+      okText: t('payroll.period_detail.finalize'),
+      variant: 'warning',
+    })
+    if (! ok) return
+    try {
+      await api.post(`/payroll-periods/${route.params.id}/finalize`)
+      toast.success(t('payroll.period_detail.finalize_success'))
+      await fetchData()
+    } catch (e) {
+      toast.error(e.response?.data?.message || t('payroll.period_detail.finalize_failed'))
+    }
   })
-  if (! ok) return
-  try {
-    await api.post(`/payroll-periods/${route.params.id}/finalize`)
-    toast.success(t('payroll.period_detail.finalize_success'))
-    fetchData()
-  } catch (e) { toast.error(e.response?.data?.message || t('payroll.period_detail.finalize_failed')) }
 }
+
+async function transition(action, successKey, failureKey) {
+  return runAction(action, async () => {
+    try {
+      await api.post(`/payroll-periods/${route.params.id}/${action}`)
+      toast.success(t(successKey))
+      await fetchData()
+    } catch (e) {
+      toast.error(e.response?.data?.message || t(failureKey))
+    }
+  })
+}
+
+const submitPayroll = () => transition(
+  'submit', 'payroll.period_detail.submit_success', 'payroll.period_detail.submit_failed',
+)
+const approvePayroll = () => transition(
+  'approve', 'payroll.period_detail.approve_success', 'payroll.period_detail.approve_failed',
+)
 
 async function disburseSalary() {
   const ok = await confirmDialog({
@@ -245,7 +271,9 @@ function downloadBpjs(type) {
       </div>
       <div class="flex gap-2 flex-wrap">
         <button v-if="['DRAFT','CALCULATED'].includes(period.status)" class="btn-secondary" @click="calculate">{{ t('payroll.period_detail.recalculate') }}</button>
-        <button v-if="period.status === 'CALCULATED'" class="btn-success" @click="finalize">{{ t('payroll.period_detail.finalize') }}</button>
+        <button v-if="period.status === 'CALCULATED' && !period.submitted_at" class="btn-success" @click="submitPayroll">{{ t('payroll.period_detail.submit_approval') }}</button>
+        <button v-if="period.status === 'CALCULATED' && period.submitted_at" class="btn-success" :disabled="isActionPending('approve')" @click="approvePayroll">{{ t('payroll.period_detail.approve') }}</button>
+        <button v-if="period.status === 'APPROVED'" class="btn-success" :disabled="isActionPending('finalize')" @click="finalize">{{ t('payroll.period_detail.finalize') }}</button>
         <button v-if="['CALCULATED','APPROVED','PAID','CLOSED'].includes(period.status)"
           class="btn-primary" @click="openExport">
           <ArrowDownTrayIcon class="w-4 h-4" /> {{ t('payroll.period_detail.export_setor') }}

@@ -1,5 +1,6 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from 'vue-toastification'
@@ -32,6 +33,8 @@ import {
 
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const tab = ref('respond')
 const isHR = computed(() =>
@@ -193,10 +196,26 @@ function burnoutColor(score) {
 
 function switchTab(t) {
   tab.value = t
+  if (route.query.tab !== t) {
+    router.replace({ query: { ...route.query, tab: t } })
+  }
   if (t === 'respond' || t === 'manage') loadSurveys()
 }
 
-onMounted(loadSurveys)
+watch(
+  () => route.query.tab,
+  value => {
+    const requested = ['respond', 'manage', 'agg'].includes(value) ? value : 'respond'
+    tab.value = requested !== 'respond' && ! isHR.value ? 'respond' : requested
+    if (tab.value === 'respond' || tab.value === 'manage') loadSurveys()
+  },
+)
+
+onMounted(() => {
+  const requested = ['respond', 'manage', 'agg'].includes(route.query.tab) ? route.query.tab : 'respond'
+  tab.value = requested !== 'respond' && ! isHR.value ? 'respond' : requested
+  loadSurveys()
+})
 </script>
 
 <template>

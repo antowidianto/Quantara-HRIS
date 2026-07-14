@@ -21,6 +21,8 @@ import { useRoute, RouterLink } from 'vue-router'
 import { resolveIcon } from './iconMap'
 import { useI18n } from '@/locales'
 import { useAuthStore } from '@/stores/auth'
+import { useMenuStore } from '@/stores/menu'
+import { findActiveMenuCode } from './menuRouteMatcher'
 
 const props = defineProps({
   node: { type: Object, required: true },
@@ -30,6 +32,7 @@ const props = defineProps({
 
 const route = useRoute()
 const auth = useAuthStore()
+const menu = useMenuStore()
 const { t, locale } = useI18n()
 
 // ─── Persistent expand state (shared antar instance) ──────────────
@@ -98,18 +101,11 @@ const label = computed(() => {
 
 const iconCmp = computed(() => resolveIcon(props.node.icon))
 
-// Cek apakah path aktif match dengan ITEM ini.
-function pathMatches(node) {
-  if (! node?.route_path) return false
-  const [target, queryString = ''] = node.route_path.split('?')
-  const pathMatched = route.path === target || route.path.startsWith(target + '/')
-  if (! pathMatched) return false
+const activeMenuCode = computed(() => findActiveMenuCode(menu.tree, route))
 
-  // `scope` membedakan dua menu yang memakai component/path yang sama,
-  // misalnya Lembur Saya dan Kelola Lembur. Query lain seperti status hanya
-  // filter awal dan tidak menentukan identitas menu.
-  const targetScope = new URLSearchParams(queryString).get('scope')
-  return ! targetScope || route.query.scope === targetScope
+// Exactly one ITEM is active: the most-specific match in the whole tree.
+function pathMatches(node) {
+  return node?.type === 'ITEM' && node.code === activeMenuCode.value
 }
 
 // Cek apakah salah satu descendant ITEM match → parent harus auto-expand.
@@ -132,7 +128,7 @@ const isOpen = computed(() => {
 // pernah memaksa tetap terbuka — sehingga user tetap bisa menutup dropdown
 // secara manual lewat toggle() tanpa langsung "terbuka lagi".
 watch(
-  () => route.path,
+  () => route.fullPath,
   () => {
     if (props.node.type !== 'PARENT') return
     if (hasActiveDescendant(props.node) && ! isOpen.value) {

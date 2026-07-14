@@ -38,9 +38,9 @@ class ApprovalDelegationResolver
      * Cek apakah user sedang dalam masa delegasi (mendelegasikan ke orang lain)
      * untuk module tertentu.
      */
-    public function isOnDelegation(int $userId, string $module = ''): bool
+    public function isOnDelegation(int $userId, int $companyId, string $module = ''): bool
     {
-        return $this->getActiveDelegate($userId, $module) !== null;
+        return $this->getActiveDelegate($userId, $companyId, $module) !== null;
     }
 
     /**
@@ -51,14 +51,16 @@ class ApprovalDelegationResolver
      * @param string $module Optional filter (MPP, RESIGNATION, JIC, ...).
      *                       Kosong → cek semua delegasi (NULL module).
      */
-    public function getActiveDelegate(int $userId, string $module = ''): ?int
+    public function getActiveDelegate(int $userId, int $companyId, string $module = ''): ?int
     {
+        if ($companyId <= 0) return null;
         $db = Database::connect();
         if (! $db->tableExists('approval_delegations')) return null;
 
         $today = date('Y-m-d');
         $b = $db->table('approval_delegations')
             ->select('delegate_to_user_id, module')
+            ->where('company_id', $companyId)
             ->where('user_id', $userId)
             ->where('is_active', 1)
             ->where('date_from <=', $today)
@@ -100,7 +102,7 @@ class ApprovalDelegationResolver
         if (! $expectedUserId) return [];
         $result = [$expectedUserId];
 
-        $delegate = $this->getActiveDelegate($expectedUserId, $module);
+        $delegate = $this->getActiveDelegate($expectedUserId, $companyId, $module);
         if ($delegate && $delegate !== $expectedUserId) {
             $result[] = $delegate;
         }
@@ -115,14 +117,16 @@ class ApprovalDelegationResolver
      *
      * @return array<int, int> Daftar user_id pendelegasi
      */
-    public function findDelegatorsFor(int $delegateUserId, string $module = ''): array
+    public function findDelegatorsFor(int $delegateUserId, int $companyId, string $module = ''): array
     {
+        if ($companyId <= 0) return [];
         $db = Database::connect();
         if (! $db->tableExists('approval_delegations')) return [];
 
         $today = date('Y-m-d');
         $b = $db->table('approval_delegations')
             ->select('user_id, module')
+            ->where('company_id', $companyId)
             ->where('delegate_to_user_id', $delegateUserId)
             ->where('is_active', 1)
             ->where('date_from <=', $today)
@@ -161,7 +165,7 @@ class ApprovalDelegationResolver
         if (! $expectedUserId) return false;
         if ($actorUserId === $expectedUserId) return true;
 
-        $delegate = $this->getActiveDelegate($expectedUserId, $module);
+        $delegate = $this->getActiveDelegate($expectedUserId, $companyId, $module);
         return $delegate === $actorUserId;
     }
 }

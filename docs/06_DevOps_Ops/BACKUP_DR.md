@@ -242,6 +242,15 @@ Audit chain: PASS / FAIL
 Notes:
 ```
 
+Setelah evidence di-review, rekam hasilnya ke ledger operasional. Status `PASSED` akan ditolak kecuali seluruh pemeriksaan record count, hash, attachment, dan login dinyatakan lengkap:
+
+```bash
+php spark db:restore-drill-record <backup-run-id> PASSED isolated-dr-2026q3 87 https://tracker.example/dr/2026q3 \
+  --counts --hashes --attachments --login
+```
+
+Metric `hris_restore_drill_age_seconds` tetap `-1` sampai evidence drill sukses pertama direkam; keberadaan command/metric tidak menggantikan pelaksanaan drill.
+
 ---
 
 ## 7. Monitoring & Alerting

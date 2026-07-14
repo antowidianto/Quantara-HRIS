@@ -26,14 +26,16 @@ class MidtransIrisDisbursementService implements DisbursementServiceInterface
      * @param array $payslipIds
      * @return array
      */
-    public function disbursePayroll(array $payslipIds): array
+    public function disbursePayroll(array $payslipIds, int $companyId): array
     {
         $db = \Config\Database::connect();
         
         // Fetch payslips with employee bank details
         $builder = $db->table('payslips p')
-            ->select('p.id as payslip_id, p.take_home_pay, e.full_name as employee_name, e.bank_account_number, e.bank_name, e.email')
+            ->select('p.id as payslip_id, p.take_home_pay, e.full_name as employee_name, e.bank_account_encrypted, e.bank_name, e.email')
             ->join('employees e', 'e.id = p.employee_id')
+            ->where('p.company_id', $companyId)
+            ->where('e.company_id', $companyId)
             ->whereIn('p.id', $payslipIds);
             
         $payslips = $builder->get()->getResultArray();
@@ -44,11 +46,20 @@ class MidtransIrisDisbursementService implements DisbursementServiceInterface
 
         $payouts = [];
         foreach ($payslips as $slip) {
+            try {
+                $account = $slip['bank_account_encrypted']
+                    ? Services::encryption()->decrypt((string) $slip['bank_account_encrypted']) : '';
+            } catch (\Throwable) {
+                $account = '';
+            }
+            if ($account === '') {
+                return ['success' => false, 'error' => 'A payroll beneficiary has no valid bank account'];
+            }
             // Mapping bank codes. Iris needs standard bank codes (e.g. bca, bni, bri)
             // Assuming e.bank_name is already standardized in the system.
             $payouts[] = [
                 'beneficiary_name' => $slip['employee_name'],
-                'beneficiary_account' => $slip['bank_account_number'],
+                'beneficiary_account' => $account,
                 'beneficiary_bank' => strtolower($slip['bank_name']),
                 'beneficiary_email' => $slip['email'],
                 'amount' => (string) $slip['take_home_pay'],
@@ -83,7 +94,7 @@ class MidtransIrisDisbursementService implements DisbursementServiceInterface
                 $batchId = $body['reference_no'] ?? uniqid('batch-');
                 
                 // Update payslips status to IN_PROGRESS
-                $db->table('payslips')->whereIn('id', $payslipIds)->update([
+                $db->table('payslips')->where('company_id', $companyId)->whereIn('id', $payslipIds)->update([
                     'disbursement_status' => 'IN_PROGRESS',
                     'disbursement_reference' => $batchId,
                 ]);

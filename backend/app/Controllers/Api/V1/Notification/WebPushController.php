@@ -59,6 +59,8 @@ class WebPushController extends ApiController
     {
         $userId = $this->userId();
         if (! $userId) return $this->fail('Unauthenticated', 401);
+        $companyId = $this->requireCompanyId();
+        if (! $companyId) return $this->response;
 
         $data = $this->getJsonInput();
         $endpoint = (string) ($data['endpoint'] ?? '');
@@ -88,7 +90,7 @@ class WebPushController extends ApiController
         ];
 
         $db = \Config\Database::connect();
-        $db->table('users')->where('id', $userId)->update([
+        $db->table('users')->where('id', $userId)->where('company_id', $companyId)->update([
             'web_push_subscription' => json_encode($subscription, JSON_UNESCAPED_SLASHES),
             'updated_at'            => date('Y-m-d H:i:s'),
         ]);
@@ -112,9 +114,11 @@ class WebPushController extends ApiController
     {
         $userId = $this->userId();
         if (! $userId) return $this->fail('Unauthenticated', 401);
+        $companyId = $this->requireCompanyId();
+        if (! $companyId) return $this->response;
 
         $db = \Config\Database::connect();
-        $db->table('users')->where('id', $userId)->update([
+        $db->table('users')->where('id', $userId)->where('company_id', $companyId)->update([
             'web_push_subscription' => null,
             'updated_at'            => date('Y-m-d H:i:s'),
         ]);

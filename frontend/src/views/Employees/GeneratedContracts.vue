@@ -17,15 +17,13 @@ import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
  * dari sini HR bisa preview, ubah status (DRAFT → SENT → SIGNED), atau hapus.
  */
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = useToast()
 
 const items = ref([])
 const meta = ref({ total: 0, page: 1, pages: 1 })
 const loading = ref(false)
 const params = reactive({ page: 1, per_page: 20, status: '', employee_id: '' })
-
-const employees = ref([])
 
 const statusBadge = computed(() => ({
   DRAFT:   { class: 'bg-gray-100 text-gray-700',   label: t('employees.contracts.st_draft') },
@@ -60,17 +58,29 @@ watch(() => [params.status, params.employee_id], () => {
 
 function go(page) { params.page = page; fetchData() }
 
-function openHtml(item) {
+async function openHtml(item) {
   // Buka HTML kontrak di tab baru. Endpoint butuh JWT, jadi kita ambil
   // dulu via api lalu buka object URL.
-  api.get(`/generated-contracts/${item.id}/html`, { responseType: 'text' })
-    .then(res => {
-      const blob = new Blob([res.data], { type: 'text/html' })
-      const url = URL.createObjectURL(blob)
-      const w = window.open(url, '_blank')
-      if (! w) toast.warning(t('employees.contracts.popup_blocked'))
-    })
-    .catch(e => toast.error(e.response?.data?.message || t('employees.contracts.open_failed')))
+  const previewWindow = window.open('', '_blank')
+  if (!previewWindow) {
+    toast.warning(t('employees.contracts.popup_blocked'))
+    return
+  }
+  previewWindow.opener = null
+  try {
+    const res = await api.get(`/generated-contracts/${item.id}/html`, { responseType: 'text' })
+    const blob = new Blob([res.data], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    if (previewWindow.closed) {
+      URL.revokeObjectURL(url)
+      return
+    }
+    previewWindow.location.href = url
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (e) {
+    previewWindow.close()
+    toast.error(e.response?.data?.message || t('employees.contracts.open_failed'))
+  }
 }
 
 async function changeStatus(item, newStatus) {
@@ -117,7 +127,9 @@ async function remove(item) {
 
 function fmtDate(d) {
   if (! d) return '-'
-  return new Date(d).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
+  return new Date(d).toLocaleString(locale.value === 'en' ? 'en-US' : 'id-ID', {
+    dateStyle: 'short', timeStyle: 'short',
+  })
 }
 </script>
 
@@ -141,7 +153,7 @@ function fmtDate(d) {
         <div class="w-full md:w-72">
           <EmployeeSearchSelect
             v-model="params.employee_id"
-            :placeholder="t('employees.contracts.all_employees')"
+            v-bind="{ placeholder: t('employees.contracts.all_employees') }"
             :only-active="false"
           />
         </div>
@@ -183,23 +195,28 @@ function fmtDate(d) {
               <td class="text-xs text-gray-500">{{ fmtDate(item.signed_at) }}</td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openHtml(item)" :title="t('employees.contracts.view_print')">
+                  <button type="button" class="text-gray-500 hover:text-primary-600" @click="openHtml(item)"
+                    v-bind="{ title: t('employees.contracts.view_print'), 'aria-label': t('employees.contracts.view_print') }">
                     <EyeIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="item.status === 'DRAFT'" class="text-blue-600 hover:text-blue-800"
-                    @click="changeStatus(item, 'SENT')" :title="t('employees.contracts.mark_sent')">
+                  <button v-if="item.status === 'DRAFT'" type="button" class="text-blue-600 hover:text-blue-800"
+                    @click="changeStatus(item, 'SENT')"
+                    v-bind="{ title: t('employees.contracts.mark_sent'), 'aria-label': t('employees.contracts.mark_sent') }">
                     <PaperAirplaneIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="item.status === 'SENT'" class="text-green-600 hover:text-green-800"
-                    @click="changeStatus(item, 'SIGNED')" :title="t('employees.contracts.mark_signed')">
+                  <button v-if="item.status === 'SENT'" type="button" class="text-green-600 hover:text-green-800"
+                    @click="changeStatus(item, 'SIGNED')"
+                    v-bind="{ title: t('employees.contracts.mark_signed'), 'aria-label': t('employees.contracts.mark_signed') }">
                     <CheckBadgeIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="['DRAFT','SENT','SIGNED'].includes(item.status)"
+                  <button v-if="['DRAFT','SENT','SIGNED'].includes(item.status)" type="button"
                     class="text-amber-600 hover:text-amber-800"
-                    @click="changeStatus(item, 'REVOKED')" :title="t('employees.contracts.revoke')">
+                    @click="changeStatus(item, 'REVOKED')"
+                    v-bind="{ title: t('employees.contracts.revoke'), 'aria-label': t('employees.contracts.revoke') }">
                     <NoSymbolIcon class="w-4 h-4" />
                   </button>
-                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" :title="t('employees.contracts.delete')">
+                  <button type="button" class="text-gray-500 hover:text-red-600" @click="remove(item)"
+                    v-bind="{ title: t('employees.contracts.delete'), 'aria-label': t('employees.contracts.delete') }">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>

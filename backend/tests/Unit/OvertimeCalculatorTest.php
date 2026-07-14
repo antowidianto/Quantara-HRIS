@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use CodeIgniter\Test\CIUnitTestCase;
 use App\Libraries\Payroll\OvertimeCalculator;
+use App\Libraries\Attendance\OvertimeCalculator as StatutoryOvertimeCalculator;
 
 class OvertimeCalculatorTest extends CIUnitTestCase
 {
@@ -33,5 +34,27 @@ class OvertimeCalculatorTest extends CIUnitTestCase
         
         // 10 jam -> (8 * 2) + (1 * 3) + (1 * 4) = 23
         $this->assertEquals(23.0, OvertimeCalculator::calculatePayableHours(10.0, true, true));
+    }
+
+    public function testPlanRealizationVarianceAndPayrollHandoff(): void
+    {
+        $calculator = new StatutoryOvertimeCalculator();
+
+        $withinTolerance = $calculator->realizationVariance(4.0, 5.0);
+        $this->assertFalse($withinTolerance['requires_note']);
+        $this->assertTrue($withinTolerance['valid']);
+
+        $largeWithoutNote = $calculator->realizationVariance(4.0, 7.0);
+        $this->assertTrue($largeWithoutNote['requires_note']);
+        $this->assertFalse($largeWithoutNote['valid']);
+        $this->assertSame(75.0, $largeWithoutNote['variance_percent']);
+
+        $largeWithNote = $calculator->realizationVariance(4.0, 7.0, 'Urgent production recovery');
+        $this->assertTrue($largeWithNote['valid']);
+        $this->assertGreaterThan(0, $calculator->calculate(10_000_000, 7.0, 'WEEKDAY'));
+
+        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $this->assertNotFalse($payroll);
+        $this->assertStringContainsString("whereIn('status', ['APPROVED', 'REALIZED'])", $payroll);
     }
 }

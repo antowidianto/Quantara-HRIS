@@ -39,7 +39,7 @@ export const IdleLock = {
 
   setThresholdSec(seconds: number): void {
     if (!Number.isFinite(seconds) || seconds <= 0) {
-      mmkv.delete(KEY_THRESHOLD);
+      mmkv.remove(KEY_THRESHOLD);
       return;
     }
     const v = Math.min(Math.floor(seconds), MAX_THRESHOLD_SEC);
@@ -55,8 +55,8 @@ export const IdleLock = {
   },
 
   unlock(): void {
-    mmkv.delete(KEY_LOCKED);
-    mmkv.delete(KEY_LAST_BG);
+    mmkv.remove(KEY_LOCKED);
+    mmkv.remove(KEY_LAST_BG);
   },
 
   /**

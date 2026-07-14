@@ -5,6 +5,7 @@ namespace App\Libraries\Payroll;
 use Config\Services;
 
 use App\Libraries\Attendance\OvertimeCalculator;
+use App\Libraries\Employee\EmployeeEffectiveHistoryService;
 /**
  * PayrollService - Orchestrates payroll calculation per period.
  *
@@ -17,6 +18,92 @@ use App\Libraries\Attendance\OvertimeCalculator;
 class PayrollService
 {
     /**
+     * Calendar-day proration for employees joining or leaving inside a pay period.
+     * The contractual monthly salary remains the basis for overtime and BPJS;
+     * only the BASIC cash earning is prorated.
+     */
+    public static function prorateBasicSalary(
+        float $monthlySalary,
+        string $joinDate,
+        ?string $resignDate,
+        string $periodStart,
+        string $periodEnd,
+    ): float {
+        $start = new \DateTimeImmutable($periodStart);
+        $end = new \DateTimeImmutable($periodEnd);
+        if ($end < $start || $monthlySalary <= 0) {
+            return 0.0;
+        }
+
+        $eligibleStart = max($start, new \DateTimeImmutable($joinDate));
+        $eligibleEnd = $resignDate ? min($end, new \DateTimeImmutable($resignDate)) : $end;
+        if ($eligibleEnd < $eligibleStart) {
+            return 0.0;
+        }
+
+        $periodDays = (int) $start->diff($end)->days + 1;
+        $eligibleDays = (int) $eligibleStart->diff($eligibleEnd)->days + 1;
+
+        return round($monthlySalary * $eligibleDays / $periodDays, 2);
+    }
+
+    /**
+     * Sum approved unpaid-leave days attributable to a payroll period.
+     * Stored leave days already account for half days, weekends and holidays;
+     * overlapping rows are proportionally clipped at period boundaries.
+     */
+    public static function unpaidLeaveDaysInPeriod(array $leaves, string $periodStart, string $periodEnd): float
+    {
+        $periodFrom = new \DateTimeImmutable($periodStart);
+        $periodTo = new \DateTimeImmutable($periodEnd);
+        if ($periodTo < $periodFrom) {
+            return 0.0;
+        }
+
+        $days = 0.0;
+        foreach ($leaves as $leave) {
+            $leaveFrom = new \DateTimeImmutable((string) $leave['start_date']);
+            $leaveTo = new \DateTimeImmutable((string) $leave['end_date']);
+            $overlapFrom = max($periodFrom, $leaveFrom);
+            $overlapTo = min($periodTo, $leaveTo);
+            if ($overlapTo < $overlapFrom) {
+                continue;
+            }
+
+            $storedDays = max(0.0, (float) ($leave['days'] ?? 0));
+            $leaveCalendarDays = (int) $leaveFrom->diff($leaveTo)->days + 1;
+            $overlapCalendarDays = (int) $overlapFrom->diff($overlapTo)->days + 1;
+            $days += $leaveCalendarDays === $overlapCalendarDays
+                ? $storedDays
+                : $storedDays * $overlapCalendarDays / max(1, $leaveCalendarDays);
+        }
+
+        return round($days, 2);
+    }
+
+    public static function unpaidLeaveDeduction(
+        float $monthlySalary,
+        int $workingDaysPerMonth,
+        float $unpaidLeaveDays,
+    ): float {
+        if ($monthlySalary <= 0 || $unpaidLeaveDays <= 0) {
+            return 0.0;
+        }
+
+        return round($monthlySalary / max(1, $workingDaysPerMonth) * $unpaidLeaveDays, 2);
+    }
+
+    public static function approvedReimbursementTotal(array $reimbursements): float
+    {
+        $total = 0.0;
+        foreach ($reimbursements as $reimbursement) {
+            $total += max(0.0, (float) ($reimbursement['amount'] ?? 0));
+        }
+
+        return round($total, 2);
+    }
+
+    /**
      * Calculate payroll for an entire period.
      *
      * @return array summary
@@ -24,9 +111,16 @@ class PayrollService
     public function calculatePeriod(int $payrollPeriodId): array
     {
         $db = \Config\Database::connect();
-        $period = $db->table('payroll_periods')->where('id', $payrollPeriodId)->get()->getRowArray();
+        $activeCompanyId = $this->activeCompanyId();
+        $period = $db->table('payroll_periods')
+            ->where('id', $payrollPeriodId)
+            ->where('company_id', $activeCompanyId)
+            ->get()->getRowArray();
         if (! $period) {
             throw new \InvalidArgumentException('Payroll period not found');
+        }
+        if (! in_array($period['status'], ['DRAFT', 'CALCULATED'], true)) {
+            throw new \RuntimeException('Approved or finalized payroll cannot be recalculated');
         }
 
         // ─── Pending-approval pre-check ──────────────────────────────
@@ -44,11 +138,17 @@ class PayrollService
         }
 
         // Clear existing payslips for THIS period (re-calculation flow).
-        $existing = $db->table('payslips')->where('payroll_period_id', $payrollPeriodId)->get()->getResultArray();
+        $existing = $db->table('payslips')
+            ->where('company_id', $activeCompanyId)
+            ->where('payroll_period_id', $payrollPeriodId)
+            ->get()->getResultArray();
         foreach ($existing as $p) {
             $db->table('payslip_details')->where('payslip_id', $p['id'])->delete();
         }
-        $db->table('payslips')->where('payroll_period_id', $payrollPeriodId)->delete();
+        $db->table('payslips')
+            ->where('company_id', $activeCompanyId)
+            ->where('payroll_period_id', $payrollPeriodId)
+            ->delete();
 
         // Defensive: also clear orphan payslips with the same slip_number
         // prefix (`PS-{period_code}-...`) yang dimiliki perusahaan ini.
@@ -73,11 +173,13 @@ class PayrollService
 
         $employees = $db->table('employees')
             ->where('company_id', $period['company_id'])
-            ->where('is_active', 1)
             ->where('join_date <=', $period['end_date'])
             ->groupStart()
-                ->where('resign_date IS NULL')
-                ->orWhere('resign_date >=', $period['start_date'])
+                ->where('is_active', 1)
+                ->orGroupStart()
+                    ->where('resign_date >=', $period['start_date'])
+                    ->where('resign_date <=', $period['end_date'])
+                ->groupEnd()
             ->groupEnd()
             ->get()
             ->getResultArray();
@@ -118,12 +220,47 @@ class PayrollService
             $pkwtByEmp = [];
         }
 
+        $adjustmentsByEmp = [];
+        if ($db->tableExists('payroll_adjustments')) {
+            $adjustments = $db->table('payroll_adjustments')
+                ->where('company_id', (int) $period['company_id'])
+                ->where('target_period_id', $payrollPeriodId)
+                ->whereIn('status', ['APPROVED', 'POSTED'])
+                ->orderBy('id', 'ASC')->get()->getResultArray();
+            foreach ($adjustments as $adjustment) {
+                $adjustmentsByEmp[(int) $adjustment['employee_id']][] = $adjustment;
+            }
+        }
+
+        $oneTimeByEmp = [];
+        if ($db->tableExists('payroll_one_time_components')) {
+            $oneTimeRows = $db->table('payroll_one_time_components')
+                ->where('company_id', (int) $period['company_id'])
+                ->where('payroll_period_id', $payrollPeriodId)
+                ->orderBy('id', 'ASC')->get()->getResultArray();
+            foreach ($oneTimeRows as $component) {
+                $oneTimeByEmp[(int) $component['employee_id']][] = $component;
+            }
+        }
+
         foreach ($employees as $emp) {
+            if ($db->tableExists('employee_master_history')) {
+                $snapshot = (new EmployeeEffectiveHistoryService($db))->asOf(
+                    (int) $period['company_id'], (int) $emp['id'], (string) $period['end_date'],
+                );
+                if ($snapshot !== null) {
+                    foreach (['position_id', 'manager_id', 'supervisor_id', 'department_id', 'branch_id', 'cost_center_id', 'job_grade_id', 'work_location_id', 'basic_salary', 'fixed_allowance', 'employment_status', 'employment_type', 'contract_end_date'] as $field) {
+                        $emp[$field] = $snapshot[$field] ?? null;
+                    }
+                }
+            }
             $result = $this->calculateEmployee(
                 $emp, $period, $bpjsCalc, $pphCalc, $otCalc,
                 $workingDaysPerMonth, $overtimeHoursPerMonth, $absentDeductionEnabled,
                 $bonusByEmp[(int) $emp['id']] ?? null,
                 $pkwtByEmp[(int) $emp['id']] ?? null,
+                $adjustmentsByEmp[(int) $emp['id']] ?? [],
+                $oneTimeByEmp[(int) $emp['id']] ?? [],
             );
             $totalGross     += $result['gross_earning'];
             $totalDeduction += $result['total_deduction'];
@@ -138,8 +275,36 @@ class PayrollService
                 'total_gross'     => $totalGross,
                 'total_deduction' => $totalDeduction,
                 'total_net'       => $totalNet,
+                'prepared_by'     => Services::tenant()->getUserId() ?: null,
+                'prepared_at'     => date('Y-m-d H:i:s'),
+                'submitted_by'    => null,
+                'submitted_at'    => null,
+                'approved_by'     => null,
+                'approved_at'     => null,
+                'snapshot_json'   => null,
+                'snapshot_hash'   => null,
+                'snapshot_created_at' => null,
                 'updated_at'      => date('Y-m-d H:i:s'),
             ]);
+        if ($db->tableExists('payroll_period_approvals')) {
+            $db->table('payroll_period_approvals')
+                ->where('company_id', (int) $period['company_id'])
+                ->where('payroll_period_id', $payrollPeriodId)
+                ->delete();
+        }
+
+        if ($db->tableExists('payroll_adjustments')) {
+            $db->table('payroll_adjustments')
+                ->where('company_id', (int) $period['company_id'])
+                ->where('target_period_id', $payrollPeriodId)
+                ->where('status', 'APPROVED')
+                ->update([
+                    'status' => 'POSTED',
+                    'posted_by' => Services::tenant()->getUserId() ?: null,
+                    'posted_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+        }
 
         return [
             'period_id'        => $payrollPeriodId,
@@ -404,6 +569,8 @@ class PayrollService
         bool $absentDeductionEnabled = true,
         ?array $bonusInfo = null,
         ?array $pkwtInfo = null,
+        array $adjustments = [],
+        array $oneTimeComponents = [],
     ): array {
         $db = \Config\Database::connect();
         $companyId = (int) $period['company_id'];
@@ -412,7 +579,14 @@ class PayrollService
         $earnings = [];
         $deductions = [];
 
-        $basicSalary = (float) $emp['basic_salary'];
+        $monthlyBasicSalary = (float) $emp['basic_salary'];
+        $basicSalary = self::prorateBasicSalary(
+            $monthlyBasicSalary,
+            (string) $emp['join_date'],
+            isset($emp['resign_date']) ? (string) $emp['resign_date'] : null,
+            (string) $period['start_date'],
+            (string) $period['end_date'],
+        );
         if ($basicSalary > 0) {
             $earnings[] = ['code' => 'BASIC', 'name' => 'Gaji Pokok', 'category' => 'BASIC', 'amount' => $basicSalary, 'is_taxable' => 1];
         }
@@ -438,6 +612,8 @@ class PayrollService
             $recBuilder->join('allowance_types at', 'at.payroll_component_id = c.id', 'left');
         }
         $recurring = $recBuilder
+            ->where('epc.company_id', $companyId)
+            ->where('c.company_id', $companyId)
             ->where('epc.employee_id', $emp['id'])
             ->where('c.is_active', 1)
             ->where('epc.effective_from <=', $period['end_date'])
@@ -490,6 +666,7 @@ class PayrollService
 
         // ─── Attendance summary ───────────────────────────────────────
         $attRows = $db->table('attendances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $emp['id'])
             ->where('work_date >=', $period['start_date'])
             ->where('work_date <=', $period['end_date'])
@@ -509,10 +686,28 @@ class PayrollService
             $lateMins += (int) $a['late_minutes'];
         }
 
+        $unpaidLeaves = $db->table('leaves l')
+            ->select('l.start_date, l.end_date, l.days, l.is_half_day')
+            ->join('leave_types lt', 'lt.id = l.leave_type_id')
+            ->where('l.company_id', $companyId)
+            ->where('lt.company_id', $companyId)
+            ->where('l.employee_id', $emp['id'])
+            ->where('l.status', 'APPROVED')
+            ->where('lt.is_paid', 0)
+            ->where('l.start_date <=', $period['end_date'])
+            ->where('l.end_date >=', $period['start_date'])
+            ->get()->getResultArray();
+        $unpaidLeaveDays = self::unpaidLeaveDaysInPeriod(
+            $unpaidLeaves,
+            (string) $period['start_date'],
+            (string) $period['end_date'],
+        );
+
         // ─── Overtime ────────────────────────────────────────────────
         $otRows = $db->table('overtimes')
+            ->where('company_id', $companyId)
             ->where('employee_id', $emp['id'])
-            ->where('status', 'APPROVED')
+            ->whereIn('status', ['APPROVED', 'REALIZED'])
             ->where('work_date >=', $period['start_date'])
             ->where('work_date <=', $period['end_date'])
             ->where('paid_in_payroll_period_id IS NULL')
@@ -528,7 +723,7 @@ class PayrollService
         foreach ($otRows as $ot) {
             // Sprint 5-6 — pakai overtimeHoursPerMonth dari setting (default 173)
             $amount = $otCalc->calculate(
-                $basicSalary + $fixedAllowance,
+                $monthlyBasicSalary + $fixedAllowance,
                 (float) $ot['hours'],
                 $ot['day_type'],
                 5,
@@ -543,16 +738,15 @@ class PayrollService
 
         // ─── Reimbursements (approved, unpaid) ──────────────────────
         $reimbs = $db->table('reimbursements')
+            ->where('company_id', $companyId)
             ->where('employee_id', $emp['id'])
             ->where('status', 'APPROVED')
+            ->where('expense_date <=', $period['end_date'])
             ->where('paid_in_payroll_period_id IS NULL')
             ->get()
             ->getResultArray();
 
-        $reimbTotal = 0;
-        foreach ($reimbs as $r) {
-            $reimbTotal += (float) $r['amount'];
-        }
+        $reimbTotal = self::approvedReimbursementTotal($reimbs);
         if ($reimbTotal > 0) {
             $earnings[] = ['code' => 'REIMB', 'name' => 'Reimbursement', 'category' => 'REIMBURSEMENT', 'amount' => $reimbTotal, 'is_taxable' => 0];
         }
@@ -615,14 +809,63 @@ class PayrollService
             $pkwtContractId = (int) ($pkwtInfo['contract_id'] ?? 0);
         }
 
+        // Approved corrections are posted into this later period. The
+        // original finalized payslip remains untouched and auditable.
+        foreach ($adjustments as $adjustment) {
+            $entry = [
+                'code' => 'ADJ-' . (int) $adjustment['id'],
+                'name' => 'Koreksi Payroll #' . (int) $adjustment['original_period_id'],
+                'category' => 'ADJUSTMENT',
+                'amount' => (float) $adjustment['amount'],
+                'is_taxable' => (int) $adjustment['is_taxable'],
+            ];
+            if ($adjustment['adjustment_type'] === 'EARNING') {
+                $earnings[] = $entry;
+            } else {
+                $entry['is_taxable'] = 0;
+                $deductions[] = $entry;
+            }
+        }
+
+        foreach ($oneTimeComponents as $component) {
+            $entry = [
+                'code' => (string) $component['code'],
+                'name' => (string) $component['name'],
+                'category' => (string) $component['category'],
+                'amount' => (float) $component['amount'],
+                'is_taxable' => (int) $component['is_taxable'],
+            ];
+            if ($component['component_type'] === 'EARNING') {
+                $earnings[] = $entry;
+            } else {
+                $entry['is_taxable'] = 0;
+                $deductions[] = $entry;
+            }
+        }
+
         // ─── Absent deduction (proportional) ────────────────────────
         // Sprint 5-6 — workingDaysPerMonth dari setting per-company,
         // default 22. Bisa di-disable lewat setting `payroll.absent_deduction_enabled=0`.
         $absentDeduction = 0;
         if ($absentDeductionEnabled && $absent > 0 && $workDays > 0) {
-            $perDay = $basicSalary / max(1, $workingDaysPerMonth);
+            $perDay = $monthlyBasicSalary / max(1, $workingDaysPerMonth);
             $absentDeduction = round($perDay * $absent);
             $deductions[] = ['code' => 'ABSENT', 'name' => 'Potongan Absen', 'category' => 'OTHER', 'amount' => $absentDeduction, 'is_taxable' => 0];
+        }
+        $unpaidLeaveDeduction = 0.0;
+        if ($absentDeductionEnabled && $unpaidLeaveDays > 0) {
+            $unpaidLeaveDeduction = self::unpaidLeaveDeduction(
+                $monthlyBasicSalary,
+                $workingDaysPerMonth,
+                $unpaidLeaveDays,
+            );
+            $deductions[] = [
+                'code' => 'UNPAID_LEAVE',
+                'name' => 'Potongan Cuti Tidak Dibayar',
+                'category' => 'OTHER',
+                'amount' => $unpaidLeaveDeduction,
+                'is_taxable' => 0,
+            ];
         }
 
         // ─── Compute gross / cash / taxable split via pure helper ───
@@ -641,7 +884,7 @@ class PayrollService
         $naturaTotal  = $agg['natura_total'];
 
         // ─── BPJS ────────────────────────────────────────────────────
-        $bpjs = $bpjsCalc->calculate($companyId, $basicSalary, $fixedAllowance);
+        $bpjs = $bpjsCalc->calculate($companyId, $monthlyBasicSalary, $fixedAllowance);
         $deductions[] = ['code' => 'BPJS_KES_EMP', 'name' => 'BPJS Kesehatan', 'category' => 'BPJS_KES', 'amount' => $bpjs['kes_employee'], 'is_taxable' => 0];
         $deductions[] = ['code' => 'BPJS_JHT_EMP', 'name' => 'BPJS JHT', 'category' => 'BPJS_TK', 'amount' => $bpjs['jht_employee'], 'is_taxable' => 0];
         $deductions[] = ['code' => 'BPJS_JP_EMP', 'name' => 'BPJS JP', 'category' => 'BPJS_TK', 'amount' => $bpjs['jp_employee'], 'is_taxable' => 0];
@@ -659,6 +902,8 @@ class PayrollService
             $paidTer = (float) $db->table('payslips ps')
                 ->selectSum('ps.pph21_amount')
                 ->join('payroll_periods pp', 'pp.id = ps.payroll_period_id')
+                ->where('ps.company_id', $companyId)
+                ->where('pp.company_id', $companyId)
                 ->where('ps.employee_id', $emp['id'])
                 ->where('pp.period_year', $period['period_year'])
                 ->where('pp.period_month <', 12)
@@ -681,6 +926,7 @@ class PayrollService
 
         // ─── Loan installments ───────────────────────────────────────
         $loans = $db->table('loans')
+            ->where('company_id', $companyId)
             ->where('employee_id', $emp['id'])
             ->where('status', 'RUNNING')
             ->where('remaining >', 0)
@@ -748,7 +994,7 @@ class PayrollService
             'ter_rate'           => $terRate,
             'ter_category'       => $terCategory,
             'loan_deduction'     => $loanDeduction,
-            'absent_deduction'   => $absentDeduction,
+            'absent_deduction'   => $absentDeduction + $unpaidLeaveDeduction,
             'total_earning'      => $grossEarning,
             'total_deduction'    => $totalDeduction,
             'take_home_pay'      => $takeHome,
@@ -774,6 +1020,22 @@ class PayrollService
 
         $db->table('payslips')->insert($payslipData);
         $payslipId = $db->insertID();
+
+        if ($db->tableExists('payroll_one_time_components')) {
+            $resignationSources = $db->table('payroll_one_time_components')
+                ->select('source_id')->where('company_id', $companyId)
+                ->where('payroll_period_id', (int) $period['id'])
+                ->where('employee_id', (int) $emp['id'])
+                ->where('source_type', 'RESIGNATION')->groupBy('source_id')
+                ->get()->getResultArray();
+            foreach ($resignationSources as $source) {
+                $db->table('resignation_requests')->where('id', (int) $source['source_id'])
+                    ->where('company_id', $companyId)->update([
+                        'final_settlement_payslip_id' => $payslipId,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+            }
+        }
 
         // Insert details
         $sort = 0;
@@ -822,24 +1084,29 @@ class PayrollService
         ];
     }
 
-    /**
-     * Finalize payroll: mark period as PAID, mark overtimes & reimbursements as paid,
-     * decrement loan balances, send notifications.
-     */
+    /** Freeze approved payroll for disbursement; bank confirmation settles payment side-effects. */
     public function finalize(int $payrollPeriodId): void
     {
         $db = \Config\Database::connect();
-        $period = $db->table('payroll_periods')->where('id', $payrollPeriodId)->get()->getRowArray();
-        if (! $period || $period['status'] !== 'CALCULATED') {
-            throw new \RuntimeException('Period must be in CALCULATED status to finalize');
+        $activeCompanyId = $this->activeCompanyId();
+        $period = $db->table('payroll_periods')
+            ->where('id', $payrollPeriodId)
+            ->where('company_id', $activeCompanyId)
+            ->get()->getRowArray();
+        if (! $period || $period['status'] !== 'APPROVED') {
+            throw new \RuntimeException('Period must be in APPROVED status to finalize');
         }
+        // Defense in depth: callers that bypass the HTTP controller still cannot
+        // finalize payroll without intact immutable evidence.
+        (new PayrollSnapshotService($db))->assertValid($period);
 
         $db->transStart();
 
-        // Mark overtime & reimbursement paid
+        // Reserve overtime and reimbursement for this finalized period. Their
+        // financial status changes only after the bank confirms settlement.
         $db->table('overtimes')
             ->where('company_id', $period['company_id'])
-            ->where('status', 'APPROVED')
+            ->whereIn('status', ['APPROVED', 'REALIZED'])
             ->where('work_date >=', $period['start_date'])
             ->where('work_date <=', $period['end_date'])
             ->where('paid_in_payroll_period_id IS NULL')
@@ -848,85 +1115,18 @@ class PayrollService
         $db->table('reimbursements')
             ->where('company_id', $period['company_id'])
             ->where('status', 'APPROVED')
+            ->where('expense_date <=', $period['end_date'])
             ->where('paid_in_payroll_period_id IS NULL')
-            ->update(['paid_in_payroll_period_id' => $payrollPeriodId, 'status' => 'PAID']);
+            ->update(['paid_in_payroll_period_id' => $payrollPeriodId]);
 
-        // Decrement loans
-        $payslips = $db->table('payslips')->where('payroll_period_id', $payrollPeriodId)->get()->getResultArray();
-        foreach ($payslips as $ps) {
-            if ((float) $ps['loan_deduction'] <= 0) continue;
-            $loans = $db->table('loans')
-                ->where('employee_id', $ps['employee_id'])
-                ->where('status', 'RUNNING')
-                ->where('remaining >', 0)
-                ->get()
-                ->getResultArray();
-            $remainingDeduction = (float) $ps['loan_deduction'];
-            foreach ($loans as $loan) {
-                if ($remainingDeduction <= 0) break;
-                $apply = min($remainingDeduction, (float) $loan['installment_amount'], (float) $loan['remaining']);
-                $newRemaining = (float) $loan['remaining'] - $apply;
-                $newPaidInst  = (int) $loan['paid_installments'] + 1;
-                $status = $newRemaining <= 0 ? 'COMPLETED' : 'RUNNING';
-                $db->table('loans')->where('id', $loan['id'])->update([
-                    'remaining'         => $newRemaining,
-                    'paid_installments' => $newPaidInst,
-                    'status'            => $status,
-                    'updated_at'        => date('Y-m-d H:i:s'),
-                ]);
-
-                // Mark the oldest unpaid installment as PAID
-                $unpaidInst = $db->table('loan_installments')
-                    ->where('loan_id', $loan['id'])
-                    ->where('status', 'UNPAID')
-                    ->orderBy('installment_number', 'ASC')
-                    ->limit(1)
-                    ->get()
-                    ->getRowArray();
-                    
-                if ($unpaidInst) {
-                    $db->table('loan_installments')->where('id', $unpaidInst['id'])->update([
-                        'status' => 'PAID',
-                        'paid_at' => date('Y-m-d H:i:s'),
-                        'payroll_period_id' => $payrollPeriodId,
-                        'updated_at' => date('Y-m-d H:i:s'),
-                    ]);
-                }
-
-                $remainingDeduction -= $apply;
-            }
-        }
-
-        // H1.12 — Tandai kompensasi PKWT yang dibayarkan di period ini.
-        // PkwtCompensationService.markPaid() idempotent: hanya kontrak
-        // yang masih `pkwt_compensation_paid=0` & end_date dalam range
-        // periode ini akan di-flag.
-        try {
-            $pkwtSvc = new \App\Libraries\Lifecycle\PkwtCompensationService();
-            if ($db->fieldExists('pkwt_compensation_paid', 'employee_contracts')) {
-                $expiringPkwt = $db->table('employee_contracts')
-                    ->select('id, employee_id, end_date')
-                    ->where('contract_type', 'PKWT')
-                    ->where('end_date >=', $period['start_date'])
-                    ->where('end_date <=', $period['end_date'])
-                    ->groupStart()
-                        ->where('pkwt_compensation_paid', 0)
-                        ->orWhere('pkwt_compensation_paid IS NULL')
-                    ->groupEnd()
-                    ->get()->getResultArray();
-                foreach ($expiringPkwt as $row) {
-                    $calc = $pkwtSvc->compensationForContract((int) $row['id']);
-                    if ($calc['amount'] > 0) {
-                        $pkwtSvc->markPaid((int) $row['id'], $payrollPeriodId, (float) $calc['amount']);
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            log_message('warning', 'PkwtCompensationService.markPaid failed: ' . $e->getMessage());
-        }
-
-        $db->table('payroll_periods')->where('id', $payrollPeriodId)->update([
-            'status'        => 'PAID',
+        // Keep the frozen payslip set for employee notifications. Loan and
+        // contract side-effects are intentionally deferred to bank settlement.
+        $payslips = $db->table('payslips')
+            ->where('company_id', $activeCompanyId)
+            ->where('payroll_period_id', $payrollPeriodId)
+            ->get()->getResultArray();
+        $db->table('payroll_periods')->where('id', $payrollPeriodId)->where('company_id', $activeCompanyId)->update([
+            'status'        => 'FINALIZED',
             'finalized_at'  => date('Y-m-d H:i:s'),
             'finalized_by'  => Services::tenant()->getUserId() ?: null,
             'updated_at'    => date('Y-m-d H:i:s'),
@@ -937,7 +1137,10 @@ class PayrollService
         // Notify employees their payslip is ready
         $notifier = Services::notification();
         foreach ($payslips as $ps) {
-            $emp = $db->table('employees')->where('id', $ps['employee_id'])->get()->getRowArray();
+            $emp = $db->table('employees')
+                ->where('id', $ps['employee_id'])
+                ->where('company_id', $activeCompanyId)
+                ->get()->getRowArray();
             if ($emp && $emp['user_id']) {
                 $notifier->send(
                     (int) $emp['user_id'],
@@ -951,5 +1154,15 @@ class PayrollService
                 );
             }
         }
+    }
+
+    private function activeCompanyId(): int
+    {
+        $companyId = Services::tenant()->getCompanyId();
+        if ($companyId <= 0) {
+            throw new \RuntimeException('Active company context is required for payroll operations');
+        }
+
+        return $companyId;
     }
 }

@@ -2,6 +2,9 @@
 
 namespace App\Libraries\Backup;
 
+use CodeIgniter\Database\BaseConnection;
+use Config\Database;
+
 /**
  * S2.3 — Data Portability (GDPR Art. 20 / UU PDP).
  *
@@ -22,6 +25,13 @@ namespace App\Libraries\Backup;
  */
 class DataExportService
 {
+    private BaseConnection $db;
+
+    public function __construct(?BaseConnection $db = null)
+    {
+        $this->db = $db ?? Database::connect();
+    }
+
     /**
      * Tabel yang diizinkan di-export. Setiap entry:
      *   key   = nama tabel
@@ -154,7 +164,7 @@ class DataExportService
      */
     public function createRequest(int $companyId, int $userId, ?array $scope = null): int
     {
-        $db = \Config\Database::connect();
+        $db = $this->db;
         $now = date('Y-m-d H:i:s');
         $token = bin2hex(random_bytes(32));
 
@@ -178,10 +188,14 @@ class DataExportService
      *
      * @throws \RuntimeException kalau export gagal.
      */
-    public function execute(int $requestId): array
+    public function execute(int $requestId, ?int $expectedCompanyId = null): array
     {
-        $db = \Config\Database::connect();
-        $req = $db->table('data_export_requests')->where('id', $requestId)->get()->getRowArray();
+        $db = $this->db;
+        $requestQuery = $db->table('data_export_requests')->where('id', $requestId);
+        if ($expectedCompanyId !== null) {
+            $requestQuery->where('company_id', $expectedCompanyId);
+        }
+        $req = $requestQuery->get()->getRowArray();
         if (! $req) {
             throw new \RuntimeException('Export request not found: ' . $requestId);
         }
@@ -192,7 +206,11 @@ class DataExportService
         $companyId = (int) $req['company_id'];
         $now = date('Y-m-d H:i:s');
 
-        $db->table('data_export_requests')->where('id', $requestId)->update([
+        $requestUpdate = static fn () => $db->table('data_export_requests')
+            ->where('id', $requestId)
+            ->where('company_id', $companyId);
+
+        $requestUpdate()->update([
             'status'     => 'RUNNING',
             'started_at' => $now,
             'updated_at' => $now,
@@ -235,7 +253,7 @@ class DataExportService
             $size   = filesize($zipPath) ?: 0;
             $sha256 = hash_file('sha256', $zipPath);
 
-            $db->table('data_export_requests')->where('id', $requestId)->update([
+            $requestUpdate()->update([
                 'status'          => 'READY',
                 'finished_at'     => date('Y-m-d H:i:s'),
                 'file_path'       => $zipPath,
@@ -252,7 +270,7 @@ class DataExportService
                 'tables'     => count($tableManifest),
             ];
         } catch (\Throwable $e) {
-            $db->table('data_export_requests')->where('id', $requestId)->update([
+            $requestUpdate()->update([
                 'status'        => 'FAILED',
                 'finished_at'   => date('Y-m-d H:i:s'),
                 'error_message' => $e->getMessage(),

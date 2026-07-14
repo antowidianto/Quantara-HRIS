@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Payroll;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Payroll\PayrollSnapshotService;
 class PayslipController extends ApiController
 {
     public function index()
@@ -83,9 +84,30 @@ class PayslipController extends ApiController
             return $this->fail('Forbidden', 403);
         }
 
-        $period = $db->table('payroll_periods')->where('id', $ps['payroll_period_id'])->get()->getRowArray();
+        $period = $db->table('payroll_periods')
+            ->where('id', $ps['payroll_period_id'])
+            ->where('company_id', $ps['company_id'])
+            ->get()->getRowArray();
         $company = $db->table('companies')->where('id', $ps['company_id'])->get()->getRowArray();
         $details = $db->table('payslip_details')->where('payslip_id', $id)->orderBy('sort_order', 'ASC')->get()->getResultArray();
+
+        // A regenerated PDF for a finalized payroll must use the locked
+        // approval snapshot, even if a database row was changed manually.
+        if ($period && in_array($period['status'], PayrollSnapshotService::LOCKED_STATUSES, true)) {
+            $snapshotService = new PayrollSnapshotService($db);
+            try {
+                $snapshot = $snapshotService->assertValid($period);
+                $snapshotPayslip = $snapshotService->payslip($snapshot, $id);
+            } catch (\RuntimeException $e) {
+                $code = str_contains($e->getMessage(), 'Payslip is missing')
+                    ? 'PAYROLL_SNAPSHOT_MISSING'
+                    : 'PAYROLL_SNAPSHOT_INVALID';
+                return $this->fail($e->getMessage(), 409, $code);
+            }
+            $details = is_array($snapshotPayslip['details'] ?? null) ? $snapshotPayslip['details'] : [];
+            unset($snapshotPayslip['details'], $snapshotPayslip['employee_master']);
+            $ps = $snapshotPayslip;
+        }
 
         $html = view('payslip_pdf', compact('ps', 'period', 'company', 'details'));
 

@@ -79,7 +79,7 @@ class PrivacyScope
         ],
         'attendance' => [
             'all' => ['attendance.view_all', 'attendance.approve'],
-            'own' => ['attendance.view', 'attendance.clock_in', 'attendance.view.own'],
+            'own' => ['attendance.view_self', 'attendance.view', 'attendance.clock', 'attendance.clock_in', 'attendance.view.own'],
         ],
         'attendance_change' => [
             'all' => ['attendance.approve_change', 'attendance.view_all'],

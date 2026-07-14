@@ -42,7 +42,7 @@ export interface OutboxEntry<TPayload = unknown> {
 const OUTBOX_PREFIX = 'outbox.';
 
 const allKeys = (): string[] =>
-  mmkvOutbox.getAllKeys().filter((k) => k.startsWith(OUTBOX_PREFIX));
+  mmkvOutbox.getAllKeys().filter((k: string) => k.startsWith(OUTBOX_PREFIX));
 
 export const Outbox = {
   /** Tulis entry baru. Return idempotencyKey supaya UI bisa show "queued, akan disubmit otomatis". */
@@ -76,7 +76,7 @@ export const Outbox = {
   },
 
   remove(id: string): void {
-    mmkvOutbox.delete(OUTBOX_PREFIX + id);
+    mmkvOutbox.remove(OUTBOX_PREFIX + id);
   },
 
   /**

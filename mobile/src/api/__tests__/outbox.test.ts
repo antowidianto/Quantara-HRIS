@@ -1,5 +1,10 @@
 import { Outbox } from '../outbox';
 import { mmkvOutbox } from '@store/mmkv';
+import { apiClient } from '../client';
+
+jest.mock('../client', () => ({
+  apiClient: { post: jest.fn() },
+}));
 
 /**
  * Outbox unit test — Mobile MOB-3.
@@ -11,7 +16,7 @@ import { mmkvOutbox } from '@store/mmkv';
 describe('Outbox', () => {
   beforeEach(() => {
     // Hapus semua entry sebelum tiap test
-    mmkvOutbox.getAllKeys().forEach((k) => mmkvOutbox.delete(k));
+    mmkvOutbox.getAllKeys().forEach((k: string) => mmkvOutbox.remove(k));
   });
 
   it('enqueue adds entry with idempotency key + count increments', () => {
@@ -43,5 +48,25 @@ describe('Outbox', () => {
     const a = Outbox.enqueue('clock-in', '/attendance/clock-in', { i: 1 });
     const b = Outbox.enqueue('clock-in', '/attendance/clock-in', { i: 2 });
     expect(a.idempotencyKey).not.toBe(b.idempotencyKey);
+  });
+
+  it('replays a network failure with the same key and removes it only after success', async () => {
+    const post = apiClient.post as jest.Mock;
+    post.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ status: 200 });
+    const entry = Outbox.enqueue('clock-out', '/attendance/clock-out', { latitude: -6.2 });
+
+    expect(await Outbox.tryReplay(entry)).toBe(false);
+    const queued = Outbox.list()[0];
+    expect(queued?.attempts).toBe(1);
+    expect(queued?.idempotencyKey).toBe(entry.idempotencyKey);
+
+    expect(await Outbox.tryReplay(queued!)).toBe(true);
+    expect(Outbox.count()).toBe(0);
+    expect(post).toHaveBeenNthCalledWith(1, entry.path, entry.payload, {
+      idempotencyKey: entry.idempotencyKey,
+    });
+    expect(post).toHaveBeenNthCalledWith(2, entry.path, entry.payload, {
+      idempotencyKey: entry.idempotencyKey,
+    });
   });
 });

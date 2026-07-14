@@ -61,7 +61,8 @@ class S1_3_SignupAttempts extends Migration
             $forge->addUniqueKey('verification_token', 'idx_signup_token');
             $forge->addKey('email', false, false, 'idx_signup_email');
             $forge->addKey(['status', 'expires_at'], false, false, 'idx_signup_status_expires');
-            $forge->createTable('signup_attempts', true, ['ENGINE' => 'InnoDB']);
+            $attributes = $db->DBDriver === 'SQLite3' ? [] : ['ENGINE' => 'InnoDB'];
+            $forge->createTable('signup_attempts', true, $attributes);
         }
 
         // ─── ALTER companies (tambah kolom signup attribution) ─────

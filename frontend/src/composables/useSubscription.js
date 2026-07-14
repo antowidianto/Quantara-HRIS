@@ -86,3 +86,7 @@ export function useSubscription() {
     refresh: () => ensureLoaded(true),
   }
 }
+
+export async function ensureSubscriptionLoaded() {
+  return ensureLoaded()
+}

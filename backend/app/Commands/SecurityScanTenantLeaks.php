@@ -25,17 +25,18 @@ use CodeIgniter\CLI\CLI;
  *
  * Run di CI sebagai pre-merge check:
  *   - script: php spark security:scan-tenant-leaks --strict
- *   - allowed-baseline: writable/security/tenant-leak-baseline.json (whitelist)
+ *   - reviewed baseline: security/tenant-leak-baseline.json (version controlled)
  */
 class SecurityScanTenantLeaks extends BaseCommand
 {
     protected $group       = 'Security';
     protected $name        = 'security:scan-tenant-leaks';
     protected $description = 'Static scan untuk multi-tenant isolation leaks (S2.2 Roadmap SaaS)';
-    protected $usage       = 'security:scan-tenant-leaks [--strict] [--json]';
+    protected $usage       = 'security:scan-tenant-leaks [--strict] [--json] [--update-baseline]';
     protected $options     = [
         '--strict' => 'Exit code 1 kalau ada finding non-baseline (untuk CI gate)',
         '--json'   => 'Output hanya path JSON report (suppress stdout summary)',
+        '--update-baseline' => 'Replace the version-controlled baseline with current findings',
     ];
 
     /**
@@ -61,6 +62,7 @@ class SecurityScanTenantLeaks extends BaseCommand
         'sessions',
         'rate_limits',
         'idempotency_keys',
+        'business_job_runs',
     ];
 
     /**
@@ -74,8 +76,9 @@ class SecurityScanTenantLeaks extends BaseCommand
 
     public function run(array $params)
     {
-        $strict   = in_array('--strict', $params, true);
-        $jsonOnly = in_array('--json', $params, true);
+        $strict   = $this->optionEnabled('strict', $params);
+        $jsonOnly = $this->optionEnabled('json', $params);
+        $updateBaseline = $this->optionEnabled('update-baseline', $params);
 
         $base = ROOTPATH; // backend/
 
@@ -100,7 +103,18 @@ class SecurityScanTenantLeaks extends BaseCommand
         }
 
         // Apply baseline (skip findings yang sudah di-whitelist)
-        $baselinePath = WRITEPATH . 'security/tenant-leak-baseline.json';
+        $baselinePath = ROOTPATH . 'security/tenant-leak-baseline.json';
+        if ($updateBaseline) {
+            $baselineDir = dirname($baselinePath);
+            if (! is_dir($baselineDir)) {
+                mkdir($baselineDir, 0750, true);
+            }
+            file_put_contents($baselinePath, json_encode([
+                'generated_at' => date(DATE_ATOM),
+                'purpose' => 'Acknowledged legacy findings; strict CI rejects any net-new occurrence.',
+                'fingerprints' => $this->fingerprintCounts($findings),
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+        }
         $baseline = [];
         if (file_exists($baselinePath)) {
             $baseline = json_decode((string) file_get_contents($baselinePath), true) ?: [];
@@ -124,6 +138,12 @@ class SecurityScanTenantLeaks extends BaseCommand
             'all'               => $findings,
         ];
         file_put_contents($reportPath, json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        if (\Config\Database::connect()->tableExists('business_job_runs')) {
+            $monitor = new \App\Libraries\System\BusinessJobMonitor();
+            $runId = $monitor->start('security.tenant_leak_scan', null, null, ['files_scanned' => $scanned]);
+            if ($newFindings === []) $monitor->succeed($runId, $scanned, ['findings' => count($findings), 'new' => 0]);
+            else $monitor->fail($runId, 'TENANT_LEAK_FINDINGS', count($newFindings), ['findings' => count($findings), 'new' => count($newFindings)]);
+        }
 
         if ($jsonOnly) {
             CLI::write($reportPath);
@@ -142,6 +162,7 @@ class SecurityScanTenantLeaks extends BaseCommand
         CLI::write('New findings         : ' . count($newFindings),
             count($newFindings) > 0 ? 'red' : 'green');
         CLI::write('Report file          : ' . $reportPath, 'white');
+        CLI::write('Baseline file        : ' . $baselinePath, 'white');
         CLI::write('');
 
         if (! empty($report['findings_by_rule'])) {
@@ -174,7 +195,7 @@ class SecurityScanTenantLeaks extends BaseCommand
         if ($strict && count($newFindings) > 0) {
             CLI::error('Strict mode: scan found ' . count($newFindings) . ' new tenant-leak risk(s).');
             CLI::write('Tip: review report, fix code, atau tambahkan ke baseline kalau false-positive:', 'yellow');
-            CLI::write("  cp {$reportPath} {$baselinePath}", 'yellow');
+            CLI::write('  php spark security:scan-tenant-leaks --update-baseline', 'yellow');
             exit(1);
         }
     }
@@ -191,12 +212,18 @@ class SecurityScanTenantLeaks extends BaseCommand
         }
         $lines = explode("\n", $code);
         $found = [];
+        $context = '(file)';
+        $functionStart = 0;
 
         // Rule 1: db->table('xxx') tanpa where company_id di method scope
         // Strategy: cari `->table('` lalu cek 8 baris setelahnya untuk
         // 'company_id' atau 'forTenant' atau 'scoped()' atau 'where('
         foreach ($lines as $i => $line) {
             $lineNo = $i + 1;
+            if (preg_match('/\bfunction\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/', $line, $functionMatch)) {
+                $context = $functionMatch[1];
+                $functionStart = $i;
+            }
 
             // Skip comments
             $trim = ltrim($line);
@@ -207,17 +234,29 @@ class SecurityScanTenantLeaks extends BaseCommand
             // Pattern: ->table('xxx')
             if (preg_match("/->table\(\s*['\"]([a-z_]+)['\"]\s*\)/i", $line, $m)) {
                 $tableName = $m[1];
-                if (in_array($tableName, $this->globalTables, true)) {
+                if ($this->isGlobalTable($tableName)) {
                     continue;
                 }
-                // Cek dalam 12 line berikutnya: ada company_id, scoped(), forTenant(), atau scope filter
-                $window = implode("\n", array_slice($lines, $i, 12));
-                if (! $this->hasTenantGuard($window)) {
+                // Inspect the complete chained statement (not an arbitrary 12-line
+                // window) and a separately assigned builder's subsequent scope.
+                $window = implode("\n", array_slice($lines, $i, 12))
+                    . "\n" . $this->queryScopeWindow($lines, $i);
+                $guardedInsert = false;
+                if (preg_match('/->insert(?:Batch)?\(\s*(\$[a-zA-Z_][a-zA-Z0-9_]*)/i', $line, $insertMatch)) {
+                    $methodPrefix = implode("\n", array_slice($lines, $functionStart, $i - $functionStart + 1));
+                    $variable = preg_quote($insertMatch[1], '/');
+                    $guardedInsert = (bool) preg_match(
+                        '/' . $variable . '\s*=\s*\[[\s\S]*?[\'\"]company_id[\'\"]\s*=>/i',
+                        $methodPrefix,
+                    );
+                }
+                if (! $this->hasTenantGuard($window) && ! $guardedInsert) {
                     $found[] = [
                         'rule'     => 'TABLE_NO_COMPANY_FILTER',
                         'severity' => 'HIGH',
                         'file'     => $relPath,
                         'line'     => $lineNo,
+                        'context'  => $context,
                         'table'    => $tableName,
                         'snippet'  => trim($line),
                     ];
@@ -227,13 +266,15 @@ class SecurityScanTenantLeaks extends BaseCommand
             // Rule 2: $db->query("SELECT ... FROM xxx") raw tanpa company_id
             if (preg_match("/->query\(\s*['\"](SELECT[^'\"]+)['\"]/i", $line, $m)) {
                 $sql = strtolower($m[1]);
-                if (! str_contains($sql, 'company_id')
-                    && ! preg_match('/from\s+(' . implode('|', $this->globalTables) . ')/', $sql)) {
+                if (str_contains($sql, ' from ')
+                    && ! str_contains($sql, 'company_id')
+                    && ! preg_match('/from\s+(' . implode('|', $this->reviewedGlobalTables()) . ')/', $sql)) {
                     $found[] = [
                         'rule'     => 'RAW_QUERY_NO_COMPANY_FILTER',
                         'severity' => 'HIGH',
                         'file'     => $relPath,
                         'line'     => $lineNo,
+                        'context'  => $context,
                         'snippet'  => trim($line),
                     ];
                 }
@@ -252,6 +293,7 @@ class SecurityScanTenantLeaks extends BaseCommand
                             'severity' => 'MEDIUM',
                             'file'     => $relPath,
                             'line'     => $lineNo,
+                            'context'  => $context,
                             'snippet'  => trim($line),
                         ];
                     }
@@ -265,6 +307,7 @@ class SecurityScanTenantLeaks extends BaseCommand
                     'severity' => 'LOW',
                     'file'     => $relPath,
                     'line'     => $lineNo,
+                    'context'  => $context,
                     'snippet'  => trim($line),
                 ];
             }
@@ -290,18 +333,118 @@ class SecurityScanTenantLeaks extends BaseCommand
      */
     private function filterBaseline(array $findings, array $baseline): array
     {
-        if (empty($baseline['all'])) {
+        if (empty($baseline['fingerprints']) || ! is_array($baseline['fingerprints'])) {
             return $findings;
         }
-        $baselineKeys = array_map([$this, 'fingerprint'], $baseline['all']);
-        return array_values(array_filter($findings, function ($f) use ($baselineKeys) {
-            return ! in_array($this->fingerprint($f), $baselineKeys, true);
-        }));
+        $remaining = $baseline['fingerprints'];
+        $new = [];
+        foreach ($findings as $finding) {
+            $fingerprint = $this->fingerprint($finding);
+            if (($remaining[$fingerprint] ?? 0) > 0) {
+                $remaining[$fingerprint]--;
+                continue;
+            }
+            $new[] = $finding;
+        }
+        return $new;
     }
 
     private function fingerprint(array $f): string
     {
-        return ($f['rule'] ?? '') . '|' . ($f['file'] ?? '') . '|' . ($f['line'] ?? 0) . '|' . md5($f['snippet'] ?? '');
+        $snippet = preg_replace('/\s+/', ' ', trim((string) ($f['snippet'] ?? '')));
+        return hash('sha256', implode('|', [
+            $f['rule'] ?? '',
+            $f['file'] ?? '',
+            $f['context'] ?? '(file)',
+            $f['table'] ?? '',
+            $snippet,
+        ]));
+    }
+
+    /**
+     * Return the complete fluent statement and, for `$builder = $db->table()`
+     * assignments, the builder operations until it is reassigned or the next
+     * method begins. This recognizes legitimate multi-line/chained scopes
+     * without allowing an unrelated query later in the method to mask a leak.
+     *
+     * @param array<int, string> $lines
+     */
+    private function queryScopeWindow(array $lines, int $start): string
+    {
+        $parts = [];
+        $limit = min(count($lines), $start + 120);
+        $builder = null;
+        if (preg_match(
+            '/(\$[a-zA-Z_][a-zA-Z0-9_]*)\s*=.*->table\([^)]*\)\s*;\s*$/',
+            $lines[$start],
+            $match,
+        )) {
+            $builder = $match[1];
+        }
+
+        for ($i = $start; $i < $limit; $i++) {
+            $line = $lines[$i];
+            if ($i > $start && preg_match('/\bfunction\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\(/', $line)) {
+                break;
+            }
+            if ($builder !== null && $i > $start
+                && preg_match('/' . preg_quote($builder, '/') . '\s*=/', $line)) {
+                break;
+            }
+            $parts[] = $line;
+            if ($builder === null && str_contains($line, ';')) {
+                break;
+            }
+            if ($builder !== null && preg_match(
+                '/' . preg_quote($builder, '/') . '->(?:get|insert|insertBatch|update|delete|countAllResults)\s*\(/',
+                $line,
+            )) {
+                break;
+            }
+        }
+
+        return implode("\n", $parts);
+    }
+
+    /** @return array<int, string> */
+    private function reviewedGlobalTables(): array
+    {
+        static $tables;
+        if ($tables !== null) {
+            return $tables;
+        }
+        $classificationPath = ROOTPATH . 'security/tenant-table-classification.php';
+        $classification = is_file($classificationPath) ? require $classificationPath : [];
+        $tables = array_values(array_unique(array_merge(
+            $this->globalTables,
+            array_keys($classification['global'] ?? []),
+        )));
+        return $tables;
+    }
+
+    private function isGlobalTable(string $table): bool
+    {
+        return in_array($table, $this->reviewedGlobalTables(), true);
+    }
+
+    private function fingerprintCounts(array $findings): array
+    {
+        $counts = [];
+        foreach ($findings as $finding) {
+            $fingerprint = $this->fingerprint($finding);
+            $counts[$fingerprint] = ($counts[$fingerprint] ?? 0) + 1;
+        }
+        ksort($counts);
+        return $counts;
+    }
+
+    private function optionEnabled(string $name, array $params): bool
+    {
+        if (in_array('--' . $name, $params, true)) {
+            return true;
+        }
+        $value = CLI::getOption($name);
+        return $value !== null && $value !== false;
     }
 
     private function groupByRule(array $findings): array

@@ -11,7 +11,7 @@ use CodeIgniter\Database\Seeder;
  *  - FREE_TRIAL : 14 hari trial penuh fitur core, max 25 employees
  *  - STARTER    : SMB <50 emp, payroll & attendance basic
  *  - PRO        : Mid-market 50-300 emp, semua fitur HR + analytics
- *  - ENTERPRISE : 300+ emp, white-label, SSO, API, custom contract
+ *  - ENTERPRISE : 300+ emp, white-label, API key access, custom contract
  *
  * Aman di-run berkali-kali (idempotent via INSERT IGNORE / upsert).
  */
@@ -74,7 +74,7 @@ class SubscriptionPlanSeeder extends Seeder
             [
                 'code'                => 'ENTERPRISE',
                 'name'                => 'Enterprise',
-                'description'         => 'Custom quote untuk 300+ karyawan. White-label, SSO, dedicated support, custom integration.',
+                'description'         => 'Custom quote untuk 300+ karyawan. White-label, API key access, dedicated support, custom integration.',
                 'price_monthly'       => 0, // custom_price di subscriptions
                 'price_yearly'        => 0,
                 'currency'            => 'IDR',
@@ -147,8 +147,8 @@ class SubscriptionPlanSeeder extends Seeder
 
             // Integration
             ['key' => 'integration.webhooks',    'category' => 'INTEGRATION', 'description' => 'Outbound webhooks dengan retry', 'default_enabled' => 1, 'is_paid_only' => 1],
-            ['key' => 'integration.api_access',  'category' => 'INTEGRATION', 'description' => 'API key + OAuth 2.0', 'default_enabled' => 0, 'is_paid_only' => 1],
-            ['key' => 'integration.sso',         'category' => 'INTEGRATION', 'description' => 'Single Sign-On (SAML/OIDC)', 'default_enabled' => 0, 'is_paid_only' => 1],
+            ['key' => 'integration.api_access',  'category' => 'INTEGRATION', 'description' => 'Scoped API key access', 'default_enabled' => 0, 'is_paid_only' => 1],
+            ['key' => 'integration.sso',         'category' => 'INTEGRATION', 'description' => 'Reserved placeholder: Single Sign-On (SAML/OIDC) belum diimplementasikan', 'default_enabled' => 0, 'is_paid_only' => 1],
             ['key' => 'integration.erp',         'category' => 'INTEGRATION', 'description' => 'Accurate/Zahir/Odoo journal posting', 'default_enabled' => 0, 'is_paid_only' => 1],
 
             // Notification
@@ -175,7 +175,8 @@ class SubscriptionPlanSeeder extends Seeder
         // Plan FREE_TRIAL = sama dengan PRO (full access selama trial)
         // STARTER = subset: payroll + attendance + recruitment basic + email notif
         // PRO = STARTER + analytics + intel basic + integration webhooks
-        // ENTERPRISE = semua + white-label + SSO + ERP + dedicated CSM
+        // ENTERPRISE = semua fitur yang tersedia + white-label + ERP + dedicated CSM.
+        // SSO tetap 0 sampai provider SAML/OIDC dan acceptance test tersedia.
 
         $matrix = [
             // module       => [STARTER, PRO, ENTERPRISE]  (FREE_TRIAL = sama dengan PRO)
@@ -210,7 +211,7 @@ class SubscriptionPlanSeeder extends Seeder
             'compliance.wlkp_export'    => [1, 1, 1],
             'integration.webhooks'      => [0, 1, 1],
             'integration.api_access'    => [0, 1, 1],
-            'integration.sso'           => [0, 0, 1],
+            'integration.sso'           => [0, 0, 0],
             'integration.erp'           => [0, 0, 1],
             'notification.email'        => [1, 1, 1],
             'notification.whatsapp'     => [0, 1, 1],

@@ -13,20 +13,21 @@
  * loan, business trip, bonus, severance. Lihat docs/COST_CENTER.md.
  */
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
-import { fmtCurrency } from '@/composables/useResource'
 import {
   PlusIcon, PencilIcon, TrashIcon, MagnifyingGlassIcon,
   ChartBarIcon, BanknotesIcon, CheckCircleIcon, ChevronRightIcon,
-  ChevronDownIcon, ArrowPathIcon, BuildingOffice2Icon,
+  ArrowPathIcon, BuildingOffice2Icon,
 } from '@heroicons/vue/24/outline'
 import CostCenterNode from './CostCenterNode.vue'
 import EmployeePicker from '@/components/EmployeePicker.vue'
 import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const toast = useToast()
+const { t, locale } = useI18n()
 
 // ─── State ──────────────────────────────────────────────────────
 const tab = ref('list') // 'list' | 'tree' | 'budget'
@@ -63,26 +64,32 @@ const showBudgetForm = ref(false)
 const budgetForm = ref(emptyBudgetForm())
 
 // ─── Categories (sync with backend CostCenterService::BUDGET_CATEGORIES) ──
-const CATEGORIES = [
-  { value: '',           label: '— Semua kategori —' },
-  { value: 'SALARY',     label: 'Gaji' },
-  { value: 'ALLOWANCE',  label: 'Tunjangan' },
-  { value: 'OVERTIME',   label: 'Lembur' },
-  { value: 'BONUS',      label: 'Bonus / THR' },
-  { value: 'BENEFIT',    label: 'BPJS Employer' },
-  { value: 'TRAINING',   label: 'Training' },
-  { value: 'TRAVEL',     label: 'Business Trip' },
-  { value: 'SEVERANCE',  label: 'Pesangon' },
-  { value: 'REIMBURSE',  label: 'Reimbursement' },
-  { value: 'ASSET',      label: 'Asset' },
-  { value: 'OTHER',      label: 'Lain-lain' },
-]
+const CATEGORIES = computed(() => [
+  { value: '',          label: t('cost_centers.category_all') },
+  { value: 'SALARY',    label: t('cost_centers.category_salary') },
+  { value: 'ALLOWANCE', label: t('cost_centers.category_allowance') },
+  { value: 'OVERTIME',  label: t('cost_centers.category_overtime') },
+  { value: 'BONUS',     label: t('cost_centers.category_bonus') },
+  { value: 'BENEFIT',   label: t('cost_centers.category_benefit') },
+  { value: 'TRAINING',  label: t('cost_centers.category_training') },
+  { value: 'TRAVEL',    label: t('cost_centers.category_travel') },
+  { value: 'SEVERANCE', label: t('cost_centers.category_severance') },
+  { value: 'REIMBURSE', label: t('cost_centers.category_reimburse') },
+  { value: 'ASSET',     label: t('cost_centers.category_asset') },
+  { value: 'OTHER',     label: t('cost_centers.category_other') },
+])
 
-const PERIOD_TYPES = [
-  { value: 'ANNUAL',    label: 'Tahunan' },
-  { value: 'QUARTERLY', label: 'Triwulan' },
-  { value: 'MONTHLY',   label: 'Bulanan' },
-]
+const PERIOD_TYPES = computed(() => [
+  { value: 'ANNUAL',    label: t('cost_centers.period_annual') },
+  { value: 'QUARTERLY', label: t('cost_centers.period_quarterly') },
+  { value: 'MONTHLY',   label: t('cost_centers.period_monthly') },
+])
+
+const tabs = computed(() => [
+  { id: 'list', label: t('cost_centers.tab_list'), icon: BuildingOffice2Icon },
+  { id: 'tree', label: t('cost_centers.tab_tree'), icon: ChevronRightIcon },
+  { id: 'budget', label: t('cost_centers.tab_budget'), icon: ChartBarIcon },
+])
 
 function emptyForm() {
   return {
@@ -119,7 +126,7 @@ async function fetchList() {
     items.value = res.data.data || []
     meta.value = res.data.meta || meta.value
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat data')
+    toast.error(e.response?.data?.message || t('cost_centers.load_failed'))
   } finally {
     loading.value = false
   }
@@ -145,7 +152,7 @@ async function fetchTree() {
     // Expand top-level by default
     treeData.value.forEach(n => { treeExpanded.value[n.id] = true })
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat tree')
+    toast.error(e.response?.data?.message || t('cost_centers.tree_load_failed'))
   } finally {
     treeLoading.value = false
   }
@@ -206,10 +213,10 @@ async function saveForm() {
   try {
     if (editing.value) {
       await api.put(`/cost-centers/${form.value.id}`, form.value)
-      toast.success('Cost center diperbarui')
+      toast.success(t('cost_centers.updated'))
     } else {
       await api.post('/cost-centers', form.value)
-      toast.success('Cost center dibuat')
+      toast.success(t('cost_centers.created'))
     }
     showModal.value = false
     // Refresh list + picker supaya CC baru langsung tersedia sebagai parent.
@@ -221,7 +228,7 @@ async function saveForm() {
     if (Array.isArray(errs)) {
       toast.error(`${msg}: ${errs.join(', ')}`)
     } else {
-      toast.error(msg || 'Gagal menyimpan')
+      toast.error(msg || t('cost_centers.save_failed'))
     }
   } finally {
     saving.value = false
@@ -230,36 +237,36 @@ async function saveForm() {
 
 async function remove(item) {
   const ok = await confirmDialog({
-    title: 'Hapus cost center',
-    message: `Yakin hapus cost center ${item.code} - ${item.name}?`,
-    okText: 'Hapus',
+    title: t('cost_centers.delete_title'),
+    message: t('cost_centers.delete_message', { code: item.code, name: item.name }),
+    okText: t('cost_centers.delete_action'),
     variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/cost-centers/${item.id}`)
-    toast.success('Cost center dihapus')
+    toast.success(t('cost_centers.deleted'))
     fetchList()
     reloadParentOptions()
     if (tab.value === 'tree') fetchTree()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('cost_centers.delete_failed'))
   }
 }
 
 async function backfillEmployees() {
   const ok = await confirmDialog({
-    title: 'Backfill cost center karyawan',
-    message: 'Apply default cost_center_id ke karyawan yang belum di-tag (idempotent — yang sudah di-tag tidak diubah). Lanjutkan?',
-    okText: 'Backfill',
+    title: t('cost_centers.backfill_title'),
+    message: t('cost_centers.backfill_message'),
+    okText: t('cost_centers.backfill'),
   })
   if (! ok) return
   try {
     const res = await api.post('/cost-centers/backfill-employees')
     const d = res.data.data
-    toast.success(`Selesai: ${d.updated} karyawan ditag, ${d.skipped} dilewati`)
+    toast.success(t('cost_centers.backfill_result', { updated: d.updated, skipped: d.skipped }))
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal backfill')
+    toast.error(e.response?.data?.message || t('cost_centers.backfill_failed'))
   }
 }
 
@@ -287,7 +294,7 @@ async function fetchBudgets() {
     })
     budgetRows.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat budget')
+    toast.error(e.response?.data?.message || t('cost_centers.budget_load_failed'))
   } finally {
     budgetLoading.value = false
   }
@@ -304,7 +311,7 @@ async function fetchBudgetVsActual() {
     bvaReport.value = res.data.data
   } catch (e) {
     bvaReport.value = null
-    toast.error(e.response?.data?.message || 'Gagal memuat laporan')
+    toast.error(e.response?.data?.message || t('cost_centers.report_load_failed'))
   } finally {
     bvaLoading.value = false
   }
@@ -326,7 +333,7 @@ function openBudgetForm() {
 async function saveBudget() {
   if (! selectedCcId.value) return
   if (budgetForm.value.amount < 0) {
-    toast.error('Amount tidak boleh negatif')
+    toast.error(t('cost_centers.amount_negative'))
     return
   }
   // Normalize period_no
@@ -338,47 +345,55 @@ async function saveBudget() {
     await api.post(`/cost-centers/${selectedCcId.value}/budgets`, {
       budgets: [payload],
     })
-    toast.success('Budget disimpan')
+    toast.success(t('cost_centers.budget_saved'))
     showBudgetForm.value = false
     await fetchBudgets()
     await fetchBudgetVsActual()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan budget')
+    toast.error(e.response?.data?.message || t('cost_centers.budget_save_failed'))
   }
 }
 
 async function removeBudget(row) {
   const ok = await confirmDialog({
-    title: 'Hapus budget',
-    message: `Hapus budget ${row.period_type} ${row.period_year}${row.period_no ? '-' + row.period_no : ''}?`,
-    okText: 'Hapus',
+    title: t('cost_centers.budget_delete_title'),
+    message: t('cost_centers.budget_delete_message', { periodType: periodTypeLabel(row.period_type), year: row.period_year, periodNo: row.period_no ? `-${row.period_no}` : '' }),
+    okText: t('cost_centers.delete_action'),
     variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/cost-center-budgets/${row.id}`)
-    toast.success('Budget dihapus')
+    toast.success(t('cost_centers.budget_deleted'))
     fetchBudgets()
     fetchBudgetVsActual()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('cost_centers.delete_failed'))
   }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
+function periodTypeLabel(type) {
+  return PERIOD_TYPES.value.find(period => period.value === type)?.label || type
+}
+
 function periodLabel(row) {
-  if (row.period_type === 'ANNUAL') return `Tahunan ${row.period_year}`
+  if (row.period_type === 'ANNUAL') return t('cost_centers.annual_label', { year: row.period_year })
   if (row.period_type === 'QUARTERLY') return `Q${row.period_no} ${row.period_year}`
   if (row.period_type === 'MONTHLY') {
-    const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des']
-    return `${months[(row.period_no - 1)] || row.period_no} ${row.period_year}`
+    const date = new Date(row.period_year, row.period_no - 1, 1)
+    return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-US' : 'id-ID', { month: 'short', year: 'numeric' }).format(date)
   }
   return `${row.period_type} ${row.period_year}`
 }
 
 function categoryLabel(value) {
-  const found = CATEGORIES.find(c => c.value === value)
-  return found?.label || value || '— Semua —'
+  const found = CATEGORIES.value.find(c => c.value === value)
+  return found?.label || value || t('cost_centers.category_all')
+}
+
+function fmtCurrency(value) {
+  return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value) || 0)
 }
 
 function utilColor(pct) {
@@ -407,25 +422,25 @@ watch(tab, async (val) => {
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2">
           <BuildingOffice2Icon class="w-6 h-6 text-primary-600" />
-          Cost Center
+          {{ t('cost_centers.title') }}
         </h1>
         <p class="text-sm text-gray-500 mt-0.5">
-          Dimensi accounting untuk transaksi payroll, reimbursement, loan, travel, bonus, dan severance.
+          {{ t('cost_centers.subtitle') }}
         </p>
       </div>
       <div class="flex gap-2 flex-wrap">
         <ExcelImporter
           resource="cost_centers"
-          button-label="Import Excel"
+          :button-label="t('cost_centers.import_excel')"
           @committed="fetchList(); fetchTree()"
         />
-        <button class="btn-secondary" @click="backfillEmployees">
+        <button type="button" class="btn-secondary" @click="backfillEmployees">
           <ArrowPathIcon class="w-4 h-4" />
-          Backfill Karyawan
+          {{ t('cost_centers.backfill') }}
         </button>
-        <button class="btn-primary" @click="openCreate">
+        <button type="button" class="btn-primary" @click="openCreate">
           <PlusIcon class="w-4 h-4" />
-          Tambah
+          {{ t('cost_centers.add') }}
         </button>
       </div>
     </div>
@@ -434,20 +449,17 @@ watch(tab, async (val) => {
     <div class="border-b border-gray-200 dark:border-gray-700 mb-4">
       <nav class="-mb-px flex gap-4">
         <button
-          v-for="t in [
-            { id: 'list',   label: 'List',                icon: BuildingOffice2Icon },
-            { id: 'tree',   label: 'Hirarki',             icon: ChevronRightIcon },
-            { id: 'budget', label: 'Budget vs Actual',    icon: ChartBarIcon },
-          ]"
-          :key="t.id"
-          @click="tab = t.id"
+          v-for="tabOption in tabs"
+          :key="tabOption.id"
+          type="button"
+          @click="tab = tabOption.id"
           class="py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5"
-          :class="tab === t.id
+          :class="tab === tabOption.id
             ? 'border-primary-600 text-primary-600'
             : 'border-transparent text-gray-500 hover:text-gray-700'"
         >
-          <component :is="t.icon" class="w-4 h-4" />
-          {{ t.label }}
+          <component :is="tabOption.icon" class="w-4 h-4" />
+          {{ tabOption.label }}
         </button>
       </nav>
     </div>
@@ -457,12 +469,12 @@ watch(tab, async (val) => {
       <div class="card-header flex flex-wrap gap-3 items-center">
         <div class="relative w-full md:w-64">
           <MagnifyingGlassIcon class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input v-model="params.q" placeholder="Cari kode/nama..." class="input pl-9" />
+          <input v-model="params.q" v-bind="{ placeholder: t('cost_centers.search_ph') }" class="input pl-9" />
         </div>
         <select v-model="params.is_active" class="input w-auto">
-          <option value="">Semua status</option>
-          <option value="1">Aktif</option>
-          <option value="0">Non-aktif</option>
+          <option value="">{{ t('cost_centers.all_statuses') }}</option>
+          <option value="1">{{ t('cost_centers.active') }}</option>
+          <option value="0">{{ t('cost_centers.inactive') }}</option>
         </select>
       </div>
 
@@ -470,21 +482,21 @@ watch(tab, async (val) => {
         <table class="table">
           <thead>
             <tr>
-              <th>Kode</th>
-              <th>Nama</th>
-              <th>Parent</th>
-              <th>Manager</th>
-              <th class="text-right">Budget Tahunan</th>
-              <th>Status</th>
-              <th class="text-right">Aksi</th>
+              <th>{{ t('cost_centers.col_code') }}</th>
+              <th>{{ t('cost_centers.col_name') }}</th>
+              <th>{{ t('cost_centers.col_parent') }}</th>
+              <th>{{ t('cost_centers.col_manager') }}</th>
+              <th class="text-right">{{ t('cost_centers.col_annual_budget') }}</th>
+              <th>{{ t('cost_centers.col_status') }}</th>
+              <th class="text-right">{{ t('cost_centers.col_actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
             <tr v-if="loading">
-              <td colspan="7" class="text-center py-8 text-gray-400">Memuat...</td>
+              <td colspan="7" class="text-center py-8 text-gray-400">{{ t('cost_centers.loading') }}</td>
             </tr>
             <tr v-else-if="items.length === 0">
-              <td colspan="7" class="text-center py-8 text-gray-400">Tidak ada cost center</td>
+              <td colspan="7" class="text-center py-8 text-gray-400">{{ t('cost_centers.no_cost_centers') }}</td>
             </tr>
             <tr v-for="item in items" :key="item.id">
               <td class="font-mono">{{ item.code }}</td>
@@ -496,7 +508,7 @@ watch(tab, async (val) => {
                 <span v-if="item.parent_code" class="text-xs">
                   {{ item.parent_code }} — {{ item.parent_name }}
                 </span>
-                <span v-else class="text-xs text-gray-400">root</span>
+                <span v-else class="text-xs text-gray-400">{{ t('cost_centers.root') }}</span>
               </td>
               <td>
                 <span v-if="item.manager_name" class="text-xs">{{ item.manager_name }}</span>
@@ -510,24 +522,26 @@ watch(tab, async (val) => {
                     ? 'bg-green-100 text-green-700'
                     : 'bg-gray-100 text-gray-600'"
                 >
-                  {{ item.is_active ? 'Aktif' : 'Non-aktif' }}
+                  {{ item.is_active ? t('cost_centers.active') : t('cost_centers.inactive') }}
                 </span>
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
                   <button
+                    type="button"
                     class="text-gray-500 hover:text-primary-600"
-                    title="Lihat budget"
+                    v-bind="{ title: t('cost_centers.view_budget'), 'aria-label': t('cost_centers.view_budget') }"
                     @click="tab = 'budget'; selectCostCenterForBudget(item.id)"
                   >
                     <ChartBarIcon class="w-4 h-4" />
                   </button>
-                  <button class="text-gray-500 hover:text-primary-600" @click="openEdit(item)">
+                  <button type="button" class="text-gray-500 hover:text-primary-600" v-bind="{ title: t('cost_centers.edit'), 'aria-label': t('cost_centers.edit') }" @click="openEdit(item)">
                     <PencilIcon class="w-4 h-4" />
                   </button>
                   <button
                     v-if="item.code !== 'DEFAULT'"
-                    class="text-gray-500 hover:text-red-600"
+                    type="button" class="text-gray-500 hover:text-red-600"
+                    v-bind="{ title: t('cost_centers.delete_action'), 'aria-label': t('cost_centers.delete_action') }"
                     @click="remove(item)"
                   >
                     <TrashIcon class="w-4 h-4" />
@@ -540,11 +554,11 @@ watch(tab, async (val) => {
       </div>
 
       <div class="card-body flex items-center justify-between">
-        <div class="text-sm text-gray-500">Total: {{ meta.total }}</div>
+        <div class="text-sm text-gray-500">{{ t('cost_centers.total', { count: meta.total }) }}</div>
         <div class="flex gap-2">
-          <button class="btn-secondary" :disabled="meta.page <= 1" @click="go(meta.page - 1)">Sebelumnya</button>
+          <button type="button" class="btn-secondary" :disabled="meta.page <= 1" @click="go(meta.page - 1)">{{ t('cost_centers.previous') }}</button>
           <span class="px-3 py-2 text-sm">{{ meta.page }} / {{ meta.pages || 1 }}</span>
-          <button class="btn-secondary" :disabled="meta.page >= meta.pages" @click="go(meta.page + 1)">Berikutnya</button>
+          <button type="button" class="btn-secondary" :disabled="meta.page >= meta.pages" @click="go(meta.page + 1)">{{ t('cost_centers.next') }}</button>
         </div>
       </div>
     </div>
@@ -552,9 +566,9 @@ watch(tab, async (val) => {
     <!-- ─── TREE TAB ─── -->
     <div v-if="tab === 'tree'" class="card">
       <div class="card-body">
-        <div v-if="treeLoading" class="text-center py-8 text-gray-400">Memuat...</div>
+        <div v-if="treeLoading" class="text-center py-8 text-gray-400">{{ t('cost_centers.loading') }}</div>
         <div v-else-if="treeData.length === 0" class="text-center py-8 text-gray-400">
-          Belum ada cost center
+          {{ t('cost_centers.no_tree') }}
         </div>
         <ul v-else class="space-y-1">
           <li v-for="node in treeData" :key="node.id">
@@ -575,20 +589,20 @@ watch(tab, async (val) => {
       <!-- Picker -->
       <div class="card">
         <div class="card-body flex flex-wrap gap-3 items-center">
-          <label class="label mb-0">Cost Center:</label>
+          <label class="label mb-0">{{ t('cost_centers.cost_center') }}</label>
           <select
             :value="selectedCcId"
             @change="(e) => selectCostCenterForBudget(Number(e.target.value) || null)"
             class="input w-auto min-w-[16rem]"
           >
-            <option :value="null">— Pilih cost center —</option>
+            <option :value="null">{{ t('cost_centers.select_cost_center') }}</option>
             <option v-for="cc in parentOptions" :key="cc.id" :value="cc.id">
               {{ cc.code }} — {{ cc.name }}
               <template v-if="cc.parent_code">({{ cc.parent_code }})</template>
             </option>
           </select>
 
-          <label class="label mb-0">Tahun:</label>
+          <label class="label mb-0">{{ t('cost_centers.year') }}</label>
           <input
             v-model.number="budgetYear"
             type="number"
@@ -597,9 +611,9 @@ watch(tab, async (val) => {
             :max="2100"
           />
 
-          <button v-if="selectedCcId" class="btn-primary ml-auto" @click="openBudgetForm">
+          <button v-if="selectedCcId" type="button" class="btn-primary ml-auto" @click="openBudgetForm">
             <PlusIcon class="w-4 h-4" />
-            Tambah Budget
+            {{ t('cost_centers.add_budget') }}
           </button>
         </div>
       </div>
@@ -608,34 +622,34 @@ watch(tab, async (val) => {
       <div v-if="selectedCcId && bvaReport" class="grid gap-4 md:grid-cols-4">
         <div class="card">
           <div class="card-body">
-            <div class="text-xs text-gray-500 uppercase">Budget {{ budgetYear }}</div>
+            <div class="text-xs text-gray-500 uppercase">{{ t('cost_centers.budget_year', { year: budgetYear }) }}</div>
             <div class="text-xl font-bold mt-1">{{ fmtCurrency(bvaReport.budget) }}</div>
           </div>
         </div>
         <div class="card">
           <div class="card-body">
-            <div class="text-xs text-gray-500 uppercase">Actual YTD</div>
+            <div class="text-xs text-gray-500 uppercase">{{ t('cost_centers.actual_ytd') }}</div>
             <div class="text-xl font-bold mt-1">{{ fmtCurrency(bvaReport.actual) }}</div>
             <div class="text-xs mt-1" :class="utilColor(bvaReport.utilization_pct)">
-              Utilization: {{ bvaReport.utilization_pct }}%
+              {{ t('cost_centers.utilization', { percent: bvaReport.utilization_pct }) }}
             </div>
-            <div class="text-[10px] text-gray-400 mt-0.5">Sudah direalisasi (payslip + reimbursement, dll)</div>
+            <div class="text-[10px] text-gray-400 mt-0.5">{{ t('cost_centers.actual_help') }}</div>
           </div>
         </div>
         <div class="card">
           <div class="card-body">
-            <div class="text-xs text-gray-500 uppercase">Committed</div>
+            <div class="text-xs text-gray-500 uppercase">{{ t('cost_centers.committed') }}</div>
             <div class="text-xl font-bold mt-1 text-amber-700">
               {{ fmtCurrency(bvaReport.committed || 0) }}
             </div>
             <div class="text-[10px] text-gray-400 mt-1">
-              MPP APPROVED, hire baru, bonus DRAFT, reimburse pending
+              {{ t('cost_centers.committed_help') }}
             </div>
           </div>
         </div>
         <div class="card">
           <div class="card-body">
-            <div class="text-xs text-gray-500 uppercase">Forecast Total</div>
+            <div class="text-xs text-gray-500 uppercase">{{ t('cost_centers.forecast_total') }}</div>
             <div
               class="text-xl font-bold mt-1"
               :class="(bvaReport.forecast_variance ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'"
@@ -643,9 +657,9 @@ watch(tab, async (val) => {
               {{ fmtCurrency(bvaReport.forecast || bvaReport.actual) }}
             </div>
             <div class="text-xs mt-1" :class="utilColor(bvaReport.forecast_pct)">
-              Forecast: {{ bvaReport.forecast_pct }}%
+              {{ t('cost_centers.forecast', { percent: bvaReport.forecast_pct }) }}
               <span v-if="(bvaReport.forecast_variance ?? 0) < 0" class="ml-1 text-red-600 font-semibold">
-                ⚠ over budget
+                {{ t('cost_centers.over_budget') }}
               </span>
             </div>
           </div>
@@ -656,18 +670,18 @@ watch(tab, async (val) => {
       <div v-if="selectedCcId && bvaReport && (bvaReport.committed || 0) > 0" class="card">
         <div class="card-header">
           <h3 class="font-semibold flex items-center gap-2">
-            <span>Sumber Committed</span>
-            <span class="text-xs font-normal text-gray-500">— biaya yang sudah di-pesan tapi belum direalisasi</span>
+            <span>{{ t('cost_centers.committed_sources') }}</span>
+            <span class="text-xs font-normal text-gray-500">{{ t('cost_centers.committed_sources_help') }}</span>
           </h3>
         </div>
         <div class="overflow-x-auto">
           <table class="table">
             <thead>
               <tr>
-                <th>Sumber</th>
-                <th class="text-right">Jumlah Item</th>
-                <th class="text-right">Estimasi Biaya</th>
-                <th>Catatan</th>
+                <th>{{ t('cost_centers.col_source') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_item_count') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_estimated_cost') }}</th>
+                <th>{{ t('cost_centers.col_notes') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -685,18 +699,18 @@ watch(tab, async (val) => {
       <!-- Per-category breakdown -->
       <div v-if="selectedCcId && bvaReport" class="card">
         <div class="card-header">
-          <h3 class="font-semibold">Breakdown per Kategori</h3>
+          <h3 class="font-semibold">{{ t('cost_centers.category_breakdown') }}</h3>
         </div>
         <div class="overflow-x-auto">
           <table class="table">
             <thead>
               <tr>
-                <th>Kategori</th>
-                <th class="text-right">Budget</th>
-                <th class="text-right">Actual</th>
-                <th class="text-right">Committed</th>
-                <th class="text-right">Forecast</th>
-                <th class="text-right">Forecast vs Budget</th>
+                <th>{{ t('cost_centers.col_category') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_budget') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_actual') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_committed') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_forecast') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_forecast_vs_budget') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -723,26 +737,26 @@ watch(tab, async (val) => {
       <!-- Budget rows -->
       <div v-if="selectedCcId" class="card">
         <div class="card-header">
-          <h3 class="font-semibold">Detail Budget {{ budgetYear }}</h3>
+          <h3 class="font-semibold">{{ t('cost_centers.budget_detail', { year: budgetYear }) }}</h3>
         </div>
         <div class="overflow-x-auto">
           <table class="table">
             <thead>
               <tr>
-                <th>Periode</th>
-                <th>Kategori</th>
-                <th class="text-right">Amount</th>
-                <th>Notes</th>
-                <th class="text-right">Aksi</th>
+                <th>{{ t('cost_centers.col_period') }}</th>
+                <th>{{ t('cost_centers.col_category') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_amount') }}</th>
+                <th>{{ t('cost_centers.col_notes') }}</th>
+                <th class="text-right">{{ t('cost_centers.col_actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
               <tr v-if="budgetLoading">
-                <td colspan="5" class="text-center py-6 text-gray-400">Memuat...</td>
+                <td colspan="5" class="text-center py-6 text-gray-400">{{ t('cost_centers.loading') }}</td>
               </tr>
               <tr v-else-if="budgetRows.length === 0">
                 <td colspan="5" class="text-center py-6 text-gray-400">
-                  Belum ada budget untuk tahun ini
+                  {{ t('cost_centers.no_budget_year') }}
                 </td>
               </tr>
               <tr v-for="row in budgetRows" :key="row.id">
@@ -751,7 +765,7 @@ watch(tab, async (val) => {
                 <td class="text-right tabular-nums">{{ fmtCurrency(row.amount) }}</td>
                 <td class="text-xs text-gray-500">{{ row.notes || '—' }}</td>
                 <td class="text-right">
-                  <button class="text-gray-500 hover:text-red-600" @click="removeBudget(row)">
+                  <button type="button" class="text-gray-500 hover:text-red-600" v-bind="{ title: t('cost_centers.delete_action'), 'aria-label': t('cost_centers.delete_action') }" @click="removeBudget(row)">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </td>
@@ -764,40 +778,40 @@ watch(tab, async (val) => {
 
     <!-- ─── CRUD MODAL ─── -->
     <div v-if="showModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40">
-      <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editing ? t('cost_centers.edit_title') : t('cost_centers.add_title') }">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h2 class="font-semibold">{{ editing ? 'Edit Cost Center' : 'Tambah Cost Center' }}</h2>
-          <button class="text-gray-500" @click="showModal = false">&times;</button>
+          <h2 class="font-semibold">{{ editing ? t('cost_centers.edit_title') : t('cost_centers.add_title') }}</h2>
+          <button type="button" class="text-gray-500" v-bind="{ title: t('cost_centers.close'), 'aria-label': t('cost_centers.close') }" @click="showModal = false">&times;</button>
         </div>
         <form @submit.prevent="saveForm" class="px-6 py-4 space-y-4">
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label">Kode *</label>
+              <label class="label">{{ t('cost_centers.code_required') }}</label>
               <input
                 v-model="form.code"
                 class="input font-mono uppercase"
                 required
                 :disabled="editing"
-                placeholder="e.g. HQ-FIN"
+                v-bind="{ placeholder: t('cost_centers.code_ph') }"
               />
-              <p class="text-xs text-gray-500 mt-1">Huruf, angka, hyphen, underscore. Min 1 huruf.</p>
+              <p class="text-xs text-gray-500 mt-1">{{ t('cost_centers.code_help') }}</p>
             </div>
             <div>
-              <label class="label">Nama *</label>
+              <label class="label">{{ t('cost_centers.name_required') }}</label>
               <input v-model="form.name" class="input" required />
             </div>
           </div>
 
           <div>
-            <label class="label">Deskripsi</label>
+            <label class="label">{{ t('cost_centers.description') }}</label>
             <textarea v-model="form.description" class="input" rows="2"></textarea>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label">Parent Cost Center</label>
+              <label class="label">{{ t('cost_centers.parent_cost_center') }}</label>
               <select v-model="form.parent_id" class="input">
-                <option :value="null">— Root (no parent) —</option>
+                <option :value="null">{{ t('cost_centers.root_option') }}</option>
                 <option
                   v-for="o in parentOptions.filter(o => !editing || o.id !== form.id)"
                   :key="o.id"
@@ -809,23 +823,22 @@ watch(tab, async (val) => {
             </div>
             <div>
               <label class="label">
-                Manager
+                {{ t('cost_centers.manager') }}
                 <span class="text-xs font-normal text-gray-500">
-                  (level Manager keatas)
+                  {{ t('cost_centers.manager_level') }}
                 </span>
               </label>
               <EmployeePicker
                 v-model="form.manager_employee_id"
                 :min-grade-level="7"
-                placeholder="— Tidak ada / cari & pilih manager —"
-                help-text="Hanya menampilkan Manager, GM/VP, Direktur, dan Komisaris. Ketik untuk cari nama, NIK, atau email."
+                v-bind="{ placeholder: t('cost_centers.manager_ph'), 'help-text': t('cost_centers.manager_help') }"
               />
             </div>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label">Default Branch</label>
+              <label class="label">{{ t('cost_centers.default_branch') }}</label>
               <select v-model="form.default_branch_id" class="input">
                 <option :value="null">—</option>
                 <option v-for="b in branches" :key="b.id" :value="b.id">
@@ -834,7 +847,7 @@ watch(tab, async (val) => {
               </select>
             </div>
             <div>
-              <label class="label">Default Department</label>
+              <label class="label">{{ t('cost_centers.default_department') }}</label>
               <select v-model="form.default_department_id" class="input">
                 <option :value="null">—</option>
                 <option v-for="d in departments" :key="d.id" :value="d.id">
@@ -846,33 +859,33 @@ watch(tab, async (val) => {
 
           <div class="grid grid-cols-3 gap-3">
             <div>
-              <label class="label">Budget Tahunan (cache)</label>
+              <label class="label">{{ t('cost_centers.annual_budget_cache') }}</label>
               <input v-model.number="form.budget_yearly" type="number" class="input" min="0" />
-              <p class="text-xs text-gray-500 mt-1">Auto-update saat set budget detail.</p>
+              <p class="text-xs text-gray-500 mt-1">{{ t('cost_centers.annual_budget_help') }}</p>
             </div>
             <div>
-              <label class="label">Sort Order</label>
+              <label class="label">{{ t('cost_centers.sort_order') }}</label>
               <input v-model.number="form.sort_order" type="number" class="input" />
             </div>
             <div>
-              <label class="label">Status</label>
+              <label class="label">{{ t('cost_centers.status') }}</label>
               <select v-model.number="form.is_active" class="input">
-                <option :value="1">Aktif</option>
-                <option :value="0">Non-aktif</option>
+                <option :value="1">{{ t('cost_centers.active') }}</option>
+                <option :value="0">{{ t('cost_centers.inactive') }}</option>
               </select>
             </div>
           </div>
 
           <div>
-            <label class="label">Notes</label>
+            <label class="label">{{ t('cost_centers.notes') }}</label>
             <textarea v-model="form.notes" class="input" rows="2"></textarea>
           </div>
 
           <div class="flex justify-end gap-2 pt-2">
-            <button type="button" class="btn-secondary" @click="showModal = false">Batal</button>
+            <button type="button" class="btn-secondary" @click="showModal = false">{{ t('cost_centers.cancel') }}</button>
             <button type="submit" class="btn-primary" :disabled="saving">
               <CheckCircleIcon class="w-4 h-4" />
-              {{ saving ? 'Menyimpan...' : 'Simpan' }}
+              {{ saving ? t('cost_centers.saving') : t('cost_centers.save') }}
             </button>
           </div>
         </form>
@@ -881,19 +894,19 @@ watch(tab, async (val) => {
 
     <!-- ─── BUDGET FORM MODAL ─── -->
     <div v-if="showBudgetForm" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40">
-      <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-md">
+      <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-md" role="dialog" aria-modal="true" v-bind="{ 'aria-label': t('cost_centers.budget_form_title') }">
         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h2 class="font-semibold">Tambah / Update Budget</h2>
-          <button class="text-gray-500" @click="showBudgetForm = false">&times;</button>
+          <h2 class="font-semibold">{{ t('cost_centers.budget_form_title') }}</h2>
+          <button type="button" class="text-gray-500" v-bind="{ title: t('cost_centers.close'), 'aria-label': t('cost_centers.close') }" @click="showBudgetForm = false">&times;</button>
         </div>
         <form @submit.prevent="saveBudget" class="px-6 py-4 space-y-3">
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="label">Tahun *</label>
+              <label class="label">{{ t('cost_centers.year_required') }}</label>
               <input v-model.number="budgetForm.period_year" type="number" class="input" required />
             </div>
             <div>
-              <label class="label">Tipe Periode *</label>
+              <label class="label">{{ t('cost_centers.period_type_required') }}</label>
               <select v-model="budgetForm.period_type" class="input">
                 <option v-for="p in PERIOD_TYPES" :key="p.value" :value="p.value">{{ p.label }}</option>
               </select>
@@ -902,9 +915,9 @@ watch(tab, async (val) => {
 
           <div v-if="showPeriodNo">
             <label class="label">
-              Periode No
+              {{ t('cost_centers.period_number') }}
               <span class="text-xs text-gray-500">
-                ({{ budgetForm.period_type === 'QUARTERLY' ? 'Q1-Q4' : 'Jan=1 ... Des=12' }})
+                ({{ budgetForm.period_type === 'QUARTERLY' ? t('cost_centers.period_quarter_hint') : t('cost_centers.period_month_hint') }})
               </span>
             </label>
             <input v-model.number="budgetForm.period_no" type="number" class="input"
@@ -912,30 +925,30 @@ watch(tab, async (val) => {
           </div>
 
           <div>
-            <label class="label">Kategori (opsional)</label>
+            <label class="label">{{ t('cost_centers.category_optional') }}</label>
             <select v-model="budgetForm.category" class="input">
               <option v-for="c in CATEGORIES" :key="c.value" :value="c.value">{{ c.label }}</option>
             </select>
             <p class="text-xs text-gray-500 mt-1">
-              Kosongkan kalau ini budget gabungan (semua kategori).
+              {{ t('cost_centers.category_help') }}
             </p>
           </div>
 
           <div>
-            <label class="label">Amount (Rp) *</label>
+            <label class="label">{{ t('cost_centers.amount_required') }}</label>
             <input v-model.number="budgetForm.amount" type="number" class="input" min="0" required />
           </div>
 
           <div>
-            <label class="label">Notes</label>
+            <label class="label">{{ t('cost_centers.notes') }}</label>
             <textarea v-model="budgetForm.notes" class="input" rows="2"></textarea>
           </div>
 
           <div class="flex justify-end gap-2 pt-2">
-            <button type="button" class="btn-secondary" @click="showBudgetForm = false">Batal</button>
+            <button type="button" class="btn-secondary" @click="showBudgetForm = false">{{ t('cost_centers.cancel') }}</button>
             <button type="submit" class="btn-primary">
               <BanknotesIcon class="w-4 h-4" />
-              Simpan Budget
+              {{ t('cost_centers.save_budget') }}
             </button>
           </div>
         </form>

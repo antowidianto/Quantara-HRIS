@@ -1,6 +1,6 @@
 # Quantara — HRIS
 
-Sistem **Human Resource Information System** untuk perusahaan Indonesia: payroll patuh PMK 168/2023 (PPh 21 TER), compliance UU 13/2003 + UU Cipta Kerja + PP 35/2021, multi business unit, multi-channel notification (in-app + email + Web Push + FCM), keamanan berlapis (2FA TOTP, password policy R1–R6, magic-byte upload validation, rate limit per endpoint, audit log immutable dengan hash chain).
+Sistem **Human Resource Information System** untuk perusahaan Indonesia: payroll patuh PMK 168/2023 (PPh 21 TER), compliance UU 13/2003 + UU Cipta Kerja + PP 35/2021, multi business unit, multi-channel notification (in-app + email + FCM; Web Push VAPID beta), keamanan berlapis (2FA TOTP, password policy R1–R6, magic-byte upload validation, rate limit per endpoint, audit log immutable dengan hash chain).
 
 Tiga aplikasi terintegrasi:
 
@@ -30,7 +30,7 @@ Tiga aplikasi terintegrasi:
 | Auth     | JWT (access + refresh, single-flight refresh) + 2FA TOTP + 8 backup codes |
 | Mail     | SMTP (PHPMailer) + queue + exponential backoff                        |
 | Cache    | Redis (production) / File handler (dev)                               |
-| Push     | Web Push (VAPID + minishlink/web-push) + FCM HTTP v1                  |
+| Push     | FCM HTTP v1; Web Push subscription tersedia, delivery VAPID berstatus beta dan memerlukan dependency opsional `minishlink/web-push` |
 | PDF      | dompdf 2                                                              |
 | Excel    | phpoffice/phpspreadsheet 2                                            |
 | Charts   | Chart.js 4 + vue-chartjs                                              |

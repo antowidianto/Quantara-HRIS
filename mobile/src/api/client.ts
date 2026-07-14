@@ -7,6 +7,7 @@ import axios, {
 import { v4 as uuidv4 } from 'uuid';
 
 import { env } from '@/config';
+import { requiresIdempotencyKey } from '@/api/idempotencyPolicy';
 import { SecureStorage, type AuthTokens } from '@store/secureStorage';
 
 /**
@@ -22,9 +23,9 @@ import { SecureStorage, type AuthTokens } from '@store/secureStorage';
  *      concurrency: hanya 1 refresh berjalan pada satu waktu (request
  *      lain antri).
  *
- *   3. **Idempotency-Key** untuk POST critical (clock-in/out, leaves,
- *      reimbursement, approval decisions). Auto-generate UUID v4 kalau
- *      caller tidak supply via config.idempotencyKey. Backend Filter
+ *   3. **Idempotency-Key** untuk semua operasi yang mengubah data. Auto-
+ *      generate UUID v4 kalau caller tidak supply via config.idempotencyKey.
+ *      Backend Filter
  *      `idempotency` (lihat backend/app/Filters/IdempotencyFilter.php)
  *      akan replay response cached kalau retry.
  *
@@ -64,22 +65,6 @@ export class ApiError extends Error {
   }
 }
 
-const IDEMPOTENT_PATH_PATTERNS: RegExp[] = [
-  /^\/attendance\/clock-(in|out)$/,
-  /^\/leaves$/,
-  /^\/overtimes$/,
-  /^\/reimbursements$/,
-  /^\/loans$/,
-  /^\/business-trips$/,
-  /^\/approval-requests\/\d+\/(approve|reject)$/,
-  /^\/approval-requests\/bulk-(approve|reject)$/,
-  /^\/payroll-periods\/\d+\/(calculate|finalize|disburse)$/,
-  /^\/bonus-runs$/,
-  /^\/bonus-runs\/\d+\/(calculate|approve|mark-paid|cancel)$/,
-  /^\/bonus-runs\/\d+\/recipients\/include-all$/,
-  /^\/devices\/register$/,
-];
-
 const PUBLIC_PATHS = new Set<string>([
   '/auth/login',
   '/auth/refresh',
@@ -91,7 +76,7 @@ const PUBLIC_PATHS = new Set<string>([
 ]);
 
 interface RequestExtras {
-  /** Force-set Idempotency-Key. Kalau undefined dan path matchidempotent, generate auto. */
+  /** Force-set Idempotency-Key. Kalau undefined pada mutasi, generate auto. */
   idempotencyKey?: string;
   /** Skip auth header (untuk public route). */
   skipAuth?: boolean;
@@ -111,9 +96,6 @@ let activeCompanyId: number | null = null; // di-set dari auth store saat login 
 export const setActiveCompanyId = (companyId: number | null): void => {
   activeCompanyId = companyId;
 };
-
-const isIdempotentPath = (path: string): boolean =>
-  IDEMPOTENT_PATH_PATTERNS.some((re) => re.test(path));
 
 const isPublicPath = (path: string): boolean => {
   for (const p of PUBLIC_PATHS) {
@@ -150,9 +132,8 @@ const buildClient = (): AxiosInstance => {
       cfg.headers.set('X-Company-Id', String(activeCompanyId));
     }
 
-    // 3. Idempotency-Key for critical POSTs
-    const method = (cfg.method ?? 'get').toUpperCase();
-    if (method === 'POST' && isIdempotentPath(path)) {
+    // 3. Idempotency-Key for every mutation. Preserve it on refresh retry.
+    if (requiresIdempotencyKey(cfg.method) && !cfg.headers.get('Idempotency-Key')) {
       const key = cfg.idempotencyKey ?? uuidv4();
       cfg.headers.set('Idempotency-Key', key);
     }
@@ -222,7 +203,7 @@ const ensureRefresh = async (): Promise<AuthTokens | null> => {
       const resp = await axios.post(
         `${env.apiBaseUrl}/auth/refresh`,
         { refresh_token: current.refreshToken },
-        { timeout: 15_000 },
+        { timeout: 15_000, headers: { 'Idempotency-Key': uuidv4() } },
       );
       const data = resp.data?.data;
       if (!data?.access_token || !data?.refresh_token) return null;
