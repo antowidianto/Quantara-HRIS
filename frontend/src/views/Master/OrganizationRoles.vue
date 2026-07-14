@@ -254,26 +254,24 @@ function toggleScope(scope) {
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2">
           <BuildingOffice2Icon class="w-7 h-7 text-primary-600" />
-          Master Jabatan Kunci
+          {{ t('organization_roles.title') }}
         </h1>
         <p class="text-sm text-gray-500">
-          Tetapkan siapa karyawan yang menempati jabatan strategis
-          (Direktur, HR Manager, Finance Manager, dst). Dipakai sebagai
-          single source of truth untuk routing approval di seluruh modul.
+          {{ t('organization_roles.subtitle') }}
         </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
         <ExcelImporter
           v-if="canManage"
           resource="organization_structures"
-          button-label="Import Excel"
+          :button-label="t('organization_roles.import_excel')"
           @committed="load()"
         />
-        <button class="btn-secondary" @click="load" :disabled="loading">
-          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Refresh
+        <button type="button" class="btn-secondary" @click="load" :disabled="loading">
+          <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> {{ t('organization_roles.refresh') }}
         </button>
-        <button v-if="canManage" class="btn-primary" @click="openCreate">
-          <PlusIcon class="w-4 h-4" /> Role Baru
+        <button v-if="canManage" type="button" class="btn-primary" @click="openCreate">
+          <PlusIcon class="w-4 h-4" /> {{ t('organization_roles.new_role') }}
         </button>
       </div>
     </div>
@@ -282,47 +280,47 @@ function toggleScope(scope) {
     <div class="card card-body mb-4">
       <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
         <div>
-          <label class="label">Cari role / title</label>
-          <input v-model="filters.q" class="input" placeholder="HRD_MANAGER, Direktur..." @keydown.enter="applyFilter" />
+          <label class="label">{{ t('organization_roles.search_label') }}</label>
+          <input v-model="filters.q" class="input" v-bind="{ placeholder: t('organization_roles.search_ph') }" @keydown.enter="applyFilter" />
         </div>
         <div>
-          <label class="label">Level</label>
+          <label class="label">{{ t('organization_roles.level') }}</label>
           <SearchableSelect
             v-model="filters.level"
             :items="LEVELS"
             value-key="value"
             label-key="label"
-            placeholder="Semua"
+            v-bind="{ placeholder: t('organization_roles.all') }"
           />
         </div>
         <div>
-          <label class="label">Approval scope</label>
+          <label class="label">{{ t('organization_roles.approval_scope') }}</label>
           <SearchableSelect
             v-model="filters.has_scope"
             :items="STANDARD_SCOPES.map(s => ({ value: s, label: s }))"
             value-key="value"
             label-key="label"
-            placeholder="Semua scope"
+            v-bind="{ placeholder: t('organization_roles.all_scopes') }"
           />
         </div>
         <div class="flex items-end">
           <label class="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" :checked="!!filters.assigned_only"
               @change="filters.assigned_only = $event.target.checked ? 1 : 0; applyFilter()" />
-            Hanya yang sudah ada penjabat
+            {{ t('organization_roles.assigned_only') }}
           </label>
         </div>
         <div class="flex items-end gap-2">
-          <button class="btn-secondary flex-1" @click="applyFilter">Filter</button>
-          <button class="btn-secondary" @click="resetFilter" title="Reset">↺</button>
+          <button type="button" class="btn-secondary flex-1" @click="applyFilter">{{ t('organization_roles.filter') }}</button>
+          <button type="button" class="btn-secondary" @click="resetFilter" v-bind="{ title: t('organization_roles.reset'), 'aria-label': t('organization_roles.reset') }">↺</button>
         </div>
       </div>
     </div>
 
     <!-- Body: grouped by level -->
-    <div v-if="loading" class="card card-body text-center text-gray-400 py-12">Memuat...</div>
+    <div v-if="loading" class="card card-body text-center text-gray-400 py-12">{{ t('organization_roles.loading') }}</div>
     <div v-else-if="roles.length === 0" class="card card-body text-center text-gray-400 py-12">
-      Tidak ada role yang cocok dengan filter.
+      {{ t('organization_roles.no_results') }}
     </div>
     <div v-else class="space-y-4">
       <div v-for="group in groupedRoles" :key="group.value" class="card">
@@ -332,16 +330,16 @@ function toggleScope(scope) {
               :class="group.badge">
               {{ group.label }}
             </span>
-            <span class="text-gray-500">{{ group.items.length }} jabatan</span>
+            <span class="text-gray-500">{{ t('organization_roles.positions_count', { count: group.items.length }) }}</span>
           </span>
         </div>
         <table class="table">
           <thead>
             <tr>
-              <th>Jabatan</th>
-              <th>Penjabat Saat Ini</th>
-              <th>Cakupan / Scope</th>
-              <th>Backup (PJS)</th>
+              <th>{{ t('organization_roles.col_position') }}</th>
+              <th>{{ t('organization_roles.col_holder') }}</th>
+              <th>{{ t('organization_roles.col_scope') }}</th>
+              <th>{{ t('organization_roles.col_backup') }}</th>
               <th></th>
             </tr>
           </thead>
@@ -358,7 +356,7 @@ function toggleScope(scope) {
               <td>
                 <div v-if="r.is_vacant" class="text-xs text-amber-700 flex items-center gap-1">
                   <ExclamationCircleIcon class="w-4 h-4" />
-                  Belum di-assign
+                  {{ t('organization_roles.unassigned') }}
                 </div>
                 <div v-else class="flex items-center gap-2">
                   <div class="w-7 h-7 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-semibold">
@@ -369,7 +367,7 @@ function toggleScope(scope) {
                     <div class="text-[10px] text-gray-500 font-mono">{{ r.employee_number }}</div>
                   </div>
                   <CheckBadgeIcon v-if="r.user_id" class="w-4 h-4 text-emerald-500"
-                    title="User account aktif — bisa terima notifikasi & approve" />
+                    v-bind="{ title: t('organization_roles.active_account'), 'aria-label': t('organization_roles.active_account') }" />
                 </div>
               </td>
               <td>
@@ -378,27 +376,27 @@ function toggleScope(scope) {
                     class="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded font-mono">
                     {{ s }}
                   </span>
-                  <span v-if="!(r.approval_scopes || []).length" class="text-[11px] text-gray-400 italic">tanpa scope</span>
+                  <span v-if="!(r.approval_scopes || []).length" class="text-[11px] text-gray-400 italic">{{ t('organization_roles.no_scope') }}</span>
                 </div>
               </td>
               <td>
                 <div v-if="(r.backup_employee_ids || []).length" class="flex items-center gap-1 text-xs">
-                  <span class="text-gray-500">{{ r.backup_employee_ids.length }} PJS</span>
+                  <span class="text-gray-500">{{ t('organization_roles.backup_count', { count: r.backup_employee_ids.length }) }}</span>
                 </div>
                 <div v-else class="text-xs text-gray-400">—</div>
               </td>
               <td class="text-right">
                 <div class="flex items-center justify-end gap-1">
-                  <button v-if="canManage"
-                    class="text-blue-600 hover:text-blue-800 p-1" title="Set/ganti penjabat" @click="openAssign(r)">
+                  <button v-if="canManage" type="button"
+                    class="text-blue-600 hover:text-blue-800 p-1" v-bind="{ title: t('organization_roles.assign_action'), 'aria-label': t('organization_roles.assign_action') }" @click="openAssign(r)">
                     <UserCircleIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage"
-                    class="text-gray-600 hover:text-primary-600 p-1" title="Edit role" @click="openEdit(r)">
+                  <button v-if="canManage" type="button"
+                    class="text-gray-600 hover:text-primary-600 p-1" v-bind="{ title: t('organization_roles.edit_action'), 'aria-label': t('organization_roles.edit_action') }" @click="openEdit(r)">
                     <PencilIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage"
-                    class="text-red-600 hover:text-red-800 p-1" title="Hapus role" @click="deleteRole(r)">
+                  <button v-if="canManage" type="button"
+                    class="text-red-600 hover:text-red-800 p-1" v-bind="{ title: t('organization_roles.delete_action_title'), 'aria-label': t('organization_roles.delete_action_title') }" @click="deleteRole(r)">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>
@@ -411,24 +409,24 @@ function toggleScope(scope) {
 
     <!-- Modal: Assign penjabat -->
     <div v-if="showAssign" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40">
-      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" v-bind="{ 'aria-label': t('organization_roles.assign_title') }">
         <div class="px-5 py-3 border-b flex items-center justify-between">
           <div>
-            <h2 class="font-semibold">Assign Penjabat</h2>
+            <h2 class="font-semibold">{{ t('organization_roles.assign_title') }}</h2>
             <p class="text-xs text-gray-500">{{ showAssign.title }} ({{ showAssign.role_key }})</p>
           </div>
-          <button class="text-gray-400 hover:text-gray-700" @click="showAssign = null">
+          <button type="button" class="text-gray-400 hover:text-gray-700" v-bind="{ title: t('organization_roles.close'), 'aria-label': t('organization_roles.close') }" @click="showAssign = null">
             <XMarkIcon class="w-5 h-5" />
           </button>
         </div>
         <div class="px-5 py-4 space-y-3">
           <div>
-            <label class="label">Karyawan Penjabat Utama</label>
-            <input v-model="empSearch" class="input mb-2" placeholder="Cari nama / NIP..." />
+            <label class="label">{{ t('organization_roles.primary_holder') }}</label>
+            <input v-model="empSearch" class="input mb-2" v-bind="{ placeholder: t('organization_roles.employee_search_ph') }" />
             <div class="border rounded max-h-60 overflow-y-auto">
               <label class="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm border-b">
                 <input type="radio" :value="null" v-model="assignForm.employee_id" />
-                <span class="italic text-gray-500">- Tidak ada (vacant) -</span>
+                <span class="italic text-gray-500">{{ t('organization_roles.vacant_option') }}</span>
               </label>
               <label v-for="e in filteredEmployees" :key="e.id"
                 class="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm border-b last:border-b-0">
@@ -437,16 +435,16 @@ function toggleScope(scope) {
                   <div class="font-medium">{{ e.full_name }}</div>
                   <div class="text-xs text-gray-500 font-mono">{{ e.employee_number }}</div>
                 </div>
-                <span v-if="!e.user_id" class="text-[10px] text-amber-600" title="Tidak punya user account — tidak bisa terima approval">
-                  No login
+                <span v-if="!e.user_id" class="text-[10px] text-amber-600" v-bind="{ title: t('organization_roles.no_login_help') }">
+                  {{ t('organization_roles.no_login') }}
                 </span>
               </label>
             </div>
           </div>
           <div>
-            <label class="label">Backup / Pejabat Pengganti Sementara (PJS)</label>
+            <label class="label">{{ t('organization_roles.backup_label') }}</label>
             <p class="text-xs text-gray-500 mb-1">
-              Dipakai sebagai fallback bila penjabat utama vacant / cuti panjang.
+              {{ t('organization_roles.backup_help') }}
             </p>
             <div class="border rounded max-h-40 overflow-y-auto p-2 space-y-1">
               <label v-for="e in filteredEmployees.filter(e => e.id !== assignForm.employee_id)"
@@ -460,41 +458,41 @@ function toggleScope(scope) {
               </label>
             </div>
             <div v-if="assignForm.backup_employee_ids.length" class="text-xs text-gray-500 mt-1">
-              {{ assignForm.backup_employee_ids.length }} PJS dipilih
+              {{ t('organization_roles.backup_selected', { count: assignForm.backup_employee_ids.length }) }}
             </div>
           </div>
         </div>
         <div class="px-5 py-3 border-t flex justify-end gap-2">
-          <button class="btn-secondary" @click="showAssign = null">Batal</button>
-          <button class="btn-primary" @click="saveAssign">Simpan</button>
+          <button type="button" class="btn-secondary" @click="showAssign = null">{{ t('organization_roles.cancel') }}</button>
+          <button type="button" class="btn-primary" @click="saveAssign">{{ t('organization_roles.save') }}</button>
         </div>
       </div>
     </div>
 
     <!-- Modal: Create / Edit role -->
     <div v-if="showForm" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40">
-      <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editing.id ? t('organization_roles.edit_title') : t('organization_roles.create_title') }">
         <div class="px-5 py-3 border-b flex items-center justify-between">
-          <h2 class="font-semibold">{{ editing.id ? 'Edit Role' : 'Role Baru' }}</h2>
-          <button class="text-gray-400 hover:text-gray-700" @click="showForm = false">
+          <h2 class="font-semibold">{{ editing.id ? t('organization_roles.edit_title') : t('organization_roles.create_title') }}</h2>
+          <button type="button" class="text-gray-400 hover:text-gray-700" v-bind="{ title: t('organization_roles.close'), 'aria-label': t('organization_roles.close') }" @click="showForm = false">
             <XMarkIcon class="w-5 h-5" />
           </button>
         </div>
         <div class="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label class="label">Role Key * <span class="text-gray-400">(uppercase + _)</span></label>
+            <label class="label">{{ t('organization_roles.role_key') }} <span class="text-gray-400">{{ t('organization_roles.uppercase_hint') }}</span></label>
             <input v-model="editing.role_key" class="input font-mono" :disabled="!! editing.id"
-              placeholder="HRD_MANAGER" maxlength="64" />
+              v-bind="{ placeholder: t('organization_roles.role_key_ph') }" maxlength="64" />
             <p class="text-[10px] text-gray-500 mt-1">
-              Identifier stabil yang dipakai di kode. Tidak bisa diubah setelah dibuat.
+              {{ t('organization_roles.role_key_help') }}
             </p>
           </div>
           <div>
-            <label class="label">Title *</label>
-            <input v-model="editing.title" class="input" placeholder="HR Manager" maxlength="200" />
+            <label class="label">{{ t('organization_roles.role_title') }}</label>
+            <input v-model="editing.title" class="input" v-bind="{ placeholder: t('organization_roles.role_title_ph') }" maxlength="200" />
           </div>
           <div>
-            <label class="label">Level *</label>
+            <label class="label">{{ t('organization_roles.level') }} *</label>
             <SearchableSelect
               v-model="editing.level"
               :items="LEVELS"
@@ -504,33 +502,33 @@ function toggleScope(scope) {
             />
           </div>
           <div>
-            <label class="label">Sort Order</label>
+            <label class="label">{{ t('organization_roles.sort_order') }}</label>
             <input type="number" v-model.number="editing.sort_order" class="input" />
           </div>
           <div>
-            <label class="label">Department Scope</label>
+            <label class="label">{{ t('organization_roles.department_scope') }}</label>
             <SearchableSelect
               v-model="editing.department_id"
               :items="departments"
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              placeholder="- Lintas dept / korporat -"
+              v-bind="{ placeholder: t('organization_roles.department_scope_ph') }"
             />
           </div>
           <div>
-            <label class="label">Branch Scope</label>
+            <label class="label">{{ t('organization_roles.branch_scope') }}</label>
             <SearchableSelect
               v-model="editing.branch_id"
               :items="branches"
               value-key="id"
               label-key="name"
               :search-keys="['name','code','city']"
-              placeholder="- Semua cabang -"
+              v-bind="{ placeholder: t('organization_roles.branch_scope_ph') }"
             />
           </div>
           <div>
-            <label class="label">Parent Role (atasan strategis)</label>
+            <label class="label">{{ t('organization_roles.parent_role') }}</label>
             <SearchableSelect
               v-model="editing.parent_role_id"
               :items="roles.filter(r => r.id !== editing.id)"
@@ -538,11 +536,11 @@ function toggleScope(scope) {
               label-key="title"
               sub-label-key="role_key"
               :search-keys="['title','role_key']"
-              placeholder="- Tanpa parent (top level) -"
+              v-bind="{ placeholder: t('organization_roles.parent_role_ph') }"
             />
           </div>
           <div>
-            <label class="label">Penjabat Saat Ini</label>
+            <label class="label">{{ t('organization_roles.current_holder') }}</label>
             <SearchableSelect
               v-model="editing.employee_id"
               :items="employees"
@@ -550,14 +548,13 @@ function toggleScope(scope) {
               label-key="full_name"
               sub-label-key="employee_number"
               :search-keys="['full_name','employee_number']"
-              placeholder="- Vacant -"
+              v-bind="{ placeholder: t('organization_roles.vacant_ph') }"
             />
           </div>
           <div class="md:col-span-2">
-            <label class="label">Approval Scopes</label>
+            <label class="label">{{ t('organization_roles.approval_scopes') }}</label>
             <p class="text-xs text-gray-500 mb-1">
-              Modul/aksi yang di-approve oleh penjabat role ini.
-              Dipakai oleh routing engine untuk filter dropdown approver.
+              {{ t('organization_roles.approval_scopes_help') }}
             </p>
             <div class="flex flex-wrap gap-1.5">
               <button v-for="s in STANDARD_SCOPES" :key="s"
@@ -572,25 +569,25 @@ function toggleScope(scope) {
             </div>
           </div>
           <div class="md:col-span-2">
-            <label class="label">Deskripsi</label>
+            <label class="label">{{ t('organization_roles.description') }}</label>
             <textarea v-model="editing.description" class="input" rows="2"></textarea>
           </div>
           <div class="md:col-span-2 flex items-center gap-4 text-sm">
             <label class="flex items-center gap-2">
               <input type="checkbox" :checked="!!editing.is_active"
                 @change="editing.is_active = $event.target.checked ? 1 : 0" />
-              Aktif
+              {{ t('organization_roles.active') }}
             </label>
             <label class="flex items-center gap-2">
               <input type="checkbox" :checked="!!editing.is_key_role"
                 @change="editing.is_key_role = $event.target.checked ? 1 : 0" />
-              Key role (muncul di picker)
+              {{ t('organization_roles.key_role') }}
             </label>
           </div>
         </div>
         <div class="px-5 py-3 border-t flex justify-end gap-2">
-          <button class="btn-secondary" @click="showForm = false">Batal</button>
-          <button class="btn-primary" @click="saveRole">Simpan</button>
+          <button type="button" class="btn-secondary" @click="showForm = false">{{ t('organization_roles.cancel') }}</button>
+          <button type="button" class="btn-primary" @click="saveRole">{{ t('organization_roles.save') }}</button>
         </div>
       </div>
     </div>

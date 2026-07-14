@@ -154,7 +154,10 @@ class AllowanceService
                 ];
             }
             $db = \Config\Database::connect();
-            $branch = $db->table('branches')->where('id', $branchId)->get()->getRowArray();
+            $branch = $db->table('branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
         }
 
         $branchLat = $branch['lat'] ?? null;
@@ -196,19 +199,26 @@ class AllowanceService
      * Recompute semua assignment untuk satu karyawan (kecuali yang punya
      * `manual_override`). Mengembalikan jumlah row yang di-upsert.
      */
-    public function recomputeEmployee(int $employeeId): int
+    public function recomputeEmployee(int $employeeId, int $expectedCompanyId): int
     {
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $expectedCompanyId)
+            ->get()->getRowArray();
         if (! $emp) return 0;
+        $companyId = (int) $emp['company_id'];
 
         $branch = null;
         if (! empty($emp['branch_id'])) {
-            $branch = $db->table('branches')->where('id', $emp['branch_id'])->get()->getRowArray();
+            $branch = $db->table('branches')
+                ->where('id', $emp['branch_id'])
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
         }
 
         $types = $db->table('allowance_types')
-            ->where('company_id', $emp['company_id'])
+            ->where('company_id', $companyId)
             ->where('is_active', 1)
             ->where('deleted_at IS NULL')
             ->get()->getResultArray();
@@ -218,6 +228,7 @@ class AllowanceService
         foreach ($types as $type) {
             // Skip kalau ada manual override
             $existing = $db->table('employee_allowance_assignments')
+                ->where('company_id', $companyId)
                 ->where('employee_id', $employeeId)
                 ->where('allowance_type_id', $type['id'])
                 ->get()->getRowArray();
@@ -226,7 +237,7 @@ class AllowanceService
             $result = $this->computeForEmployee($emp, $type, $branch);
 
             $row = [
-                'company_id'        => $emp['company_id'],
+                'company_id'        => $companyId,
                 'employee_id'       => $employeeId,
                 'allowance_type_id' => (int) $type['id'],
                 'allowance_rate_id' => $result['rate_id'],
@@ -244,6 +255,7 @@ class AllowanceService
             if ($existing) {
                 $db->table('employee_allowance_assignments')
                     ->where('id', $existing['id'])
+                    ->where('company_id', $companyId)
                     ->update($row);
             } else {
                 $row['created_at'] = $now;
@@ -269,7 +281,7 @@ class AllowanceService
             ->get()->getResultArray();
         $total = 0;
         foreach ($emps as $e) {
-            $total += $this->recomputeEmployee((int) $e['id']);
+            $total += $this->recomputeEmployee((int) $e['id'], $companyId);
         }
         return $total;
     }
@@ -278,14 +290,15 @@ class AllowanceService
      * Ambil seluruh assignment yang aktif untuk seorang karyawan. Dipakai
      * PayrollService untuk menambahkan ke earnings.
      *
-     * @return array<int, array{code:string,name:string,amount:float,is_taxable:int,category:string}>
+     * @return array<int, array{code:string,name:string,amount:float,is_taxable:int,category:string,is_natura:int,natura_tax_base?:float}>
      */
-    public function earningsForPayroll(int $employeeId): array
+    public function earningsForPayroll(int $employeeId, int $companyId): array
     {
         $db = \Config\Database::connect();
         $rows = $db->table('employee_allowance_assignments a')
-            ->select('a.amount, a.eligible, t.code, t.name, t.is_taxable, t.category')
-            ->join('allowance_types t', 't.id = a.allowance_type_id')
+            ->select('a.amount, a.eligible, t.code, t.name, t.is_taxable, t.category, t.is_taxable_natura, t.natura_tax_threshold')
+            ->join('allowance_types t', 't.id = a.allowance_type_id AND t.company_id = a.company_id')
+            ->where('a.company_id', $companyId)
             ->where('a.employee_id', $employeeId)
             ->where('t.is_active', 1)
             ->where('t.deleted_at IS NULL')
@@ -294,7 +307,7 @@ class AllowanceService
 
         $earnings = [];
         foreach ($rows as $r) {
-            $earnings[] = [
+            $entry = [
                 'code'       => $r['code'],
                 'name'       => $r['name'],
                 'amount'     => (float) $r['amount'],
@@ -303,6 +316,15 @@ class AllowanceService
                     ? 'ALLOWANCE'
                     : ($r['category'] ?: 'ALLOWANCE'),
             ];
+            if ((int) ($r['is_taxable_natura'] ?? 0) === 1) {
+                $entry = NaturaTaxCalculator::buildEntry(
+                    $entry,
+                    (float) ($r['natura_tax_threshold'] ?? 0),
+                );
+            } else {
+                $entry['is_natura'] = 0;
+            }
+            $earnings[] = $entry;
         }
         return $earnings;
     }

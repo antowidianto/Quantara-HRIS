@@ -19,6 +19,9 @@ import employeeModal from './id/employee_modal.js'
 import costCenters from './id/cost_centers.js'
 import orgStructure from './id/org_structure.js'
 import organizationRoles from './id/organization_roles.js'
+import recruitmentPipelines from './id/recruitment_pipelines.js'
+import benefitPolicies from './id/benefit_policies.js'
+import allowanceNatura from './id/allowance_natura.js'
 
 export default {
   ...core,
@@ -42,4 +45,7 @@ export default {
   ...costCenters,
   ...orgStructure,
   ...organizationRoles,
+  ...recruitmentPipelines,
+  ...benefitPolicies,
+  ...allowanceNatura,
 }

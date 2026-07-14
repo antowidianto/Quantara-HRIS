@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
+use CodeIgniter\Database\BaseConnection;
 use Config\Services;
 
 /**
@@ -33,7 +34,7 @@ class ShiftPatternController extends ApiController
         $isActive = $this->request->getGet('is_active');
 
         $builder = $db->table('shift_patterns p')
-            ->select('p.*, (SELECT COUNT(*) FROM shift_pattern_assignments spa WHERE spa.pattern_id = p.id AND spa.is_active = 1) AS assignment_count')
+            ->select('p.*, (SELECT COUNT(*) FROM shift_pattern_assignments spa WHERE spa.pattern_id = p.id AND spa.company_id = p.company_id AND spa.is_active = 1) AS assignment_count')
             ->where('p.deleted_at IS NULL');
         $this->tenant()->applyScope($builder, 'p.company_id');
 
@@ -53,23 +54,23 @@ class ShiftPatternController extends ApiController
 
     public function show($id = null)
     {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('shift_patterns')->where('id', (int) $id)->get()->getRowArray();
+        $row = $db->table('shift_patterns')->where('id', (int) $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $row['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
         $row['pattern_data'] = $row['pattern_data'] ? json_decode((string) $row['pattern_data'], true) : [];
 
         // Sertakan assignments + nama referensi-nya
         $assignments = $db->table('shift_pattern_assignments spa')
             ->select('spa.*, e.full_name AS employee_name, b.name AS branch_name, d.name AS department_name, w.name AS work_location_name, g.name AS grade_name')
-            ->join('employees e', 'e.id = spa.employee_id', 'left')
-            ->join('branches b', 'b.id = spa.branch_id', 'left')
-            ->join('departments d', 'd.id = spa.department_id', 'left')
-            ->join('work_locations w', 'w.id = spa.work_location_id', 'left')
-            ->join('job_grades g', 'g.id = spa.job_grade_id', 'left')
+            ->join('employees e', 'e.id = spa.employee_id AND e.company_id = spa.company_id', 'left')
+            ->join('branches b', 'b.id = spa.branch_id AND b.company_id = spa.company_id', 'left')
+            ->join('departments d', 'd.id = spa.department_id AND d.company_id = spa.company_id', 'left')
+            ->join('work_locations w', 'w.id = spa.work_location_id AND w.company_id = spa.company_id', 'left')
+            ->join('job_grades g', 'g.id = spa.job_grade_id AND g.company_id = spa.company_id', 'left')
             ->where('spa.pattern_id', (int) $id)
+            ->where('spa.company_id', $companyId)
             ->orderBy('spa.priority', 'ASC')
             ->get()->getResultArray();
         $row['assignments'] = $assignments;
@@ -93,6 +94,8 @@ class ShiftPatternController extends ApiController
         $patternData = $this->normalizePatternData($data['pattern_data'] ?? [], (int) $data['cycle_days']);
 
         $db = \Config\Database::connect();
+        $invalidShiftId = $this->invalidPatternShiftId($db, $patternData, $companyId);
+        if ($invalidShiftId !== null) return $this->fail("Shift {$invalidShiftId} tidak tersedia pada tenant aktif", 422, 'INVALID_SHIFT');
         $exists = $db->table('shift_patterns')
             ->where('company_id', $companyId)
             ->where('code', $data['code'])
@@ -124,26 +127,37 @@ class ShiftPatternController extends ApiController
     public function update($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('shift_patterns')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('shift_patterns')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
 
         $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'name' => 'permit_empty|max_length[200]',
+            'cycle_days' => 'permit_empty|integer|greater_than[0]|less_than[366]',
+        ]);
+        if (! $valid) return null;
+        if (array_key_exists('name', $data) && trim((string) $data['name']) === '') {
+            return $this->fail('Nama pola wajib', 422);
+        }
+        if (array_key_exists('cycle_days', $data) && ((int) $data['cycle_days'] < 1 || (int) $data['cycle_days'] > 365)) {
+            return $this->fail('cycle_days harus antara 1 dan 365', 422);
+        }
         $update = array_intersect_key($data, array_flip([
             'name','description','cycle_days','is_active',
         ]));
-        if (array_key_exists('pattern_data', $data)) {
+        if (array_key_exists('pattern_data', $data) || array_key_exists('cycle_days', $data)) {
             $cycle = (int) ($data['cycle_days'] ?? $existing['cycle_days']);
-            $update['pattern_data'] = json_encode(
-                $this->normalizePatternData($data['pattern_data'], $cycle),
-                JSON_UNESCAPED_UNICODE
-            );
+            $inputPattern = $data['pattern_data'] ?? json_decode((string) $existing['pattern_data'], true);
+            $patternData = $this->normalizePatternData($inputPattern, $cycle);
+            $invalidShiftId = $this->invalidPatternShiftId($db, $patternData, $companyId);
+            if ($invalidShiftId !== null) return $this->fail("Shift {$invalidShiftId} tidak tersedia pada tenant aktif", 422, 'INVALID_SHIFT');
+            $update['pattern_data'] = json_encode($patternData, JSON_UNESCAPED_UNICODE);
         }
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('shift_patterns')->where('id', $id)->update($update);
+        $db->table('shift_patterns')->where('id', $id)->where('company_id', $companyId)->update($update);
 
         Services::audit()
             ->forModule('MASTER')
@@ -156,13 +170,12 @@ class ShiftPatternController extends ApiController
     public function delete($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('shift_patterns')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('shift_patterns')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
-        $db->table('shift_patterns')->where('id', $id)->update([
+        $db->table('shift_patterns')->where('id', $id)->where('company_id', $companyId)->update([
             'deleted_at' => date('Y-m-d H:i:s'),
             'is_active'  => 0,
         ]);
@@ -185,12 +198,12 @@ class ShiftPatternController extends ApiController
                 . ' e.full_name AS employee_name, b.name AS branch_name,'
                 . ' d.name AS department_name, w.name AS work_location_name,'
                 . ' g.name AS grade_name')
-            ->join('shift_patterns p', 'p.id = spa.pattern_id', 'left')
-            ->join('employees e', 'e.id = spa.employee_id', 'left')
-            ->join('branches b', 'b.id = spa.branch_id', 'left')
-            ->join('departments d', 'd.id = spa.department_id', 'left')
-            ->join('work_locations w', 'w.id = spa.work_location_id', 'left')
-            ->join('job_grades g', 'g.id = spa.job_grade_id', 'left');
+            ->join('shift_patterns p', 'p.id = spa.pattern_id AND p.company_id = spa.company_id', 'left')
+            ->join('employees e', 'e.id = spa.employee_id AND e.company_id = spa.company_id', 'left')
+            ->join('branches b', 'b.id = spa.branch_id AND b.company_id = spa.company_id', 'left')
+            ->join('departments d', 'd.id = spa.department_id AND d.company_id = spa.company_id', 'left')
+            ->join('work_locations w', 'w.id = spa.work_location_id AND w.company_id = spa.company_id', 'left')
+            ->join('job_grades g', 'g.id = spa.job_grade_id AND g.company_id = spa.company_id', 'left');
         $this->tenant()->applyScope($builder, 'spa.company_id');
         if ($patternId)  $builder->where('spa.pattern_id', $patternId);
         if ($employeeId) $builder->where('spa.employee_id', $employeeId);
@@ -214,11 +227,8 @@ class ShiftPatternController extends ApiController
         if ($companyId === null) return null;
 
         $db = \Config\Database::connect();
-        $pattern = $db->table('shift_patterns')->where('id', (int) $data['pattern_id'])->get()->getRowArray();
+        $pattern = $db->table('shift_patterns')->where('id', (int) $data['pattern_id'])->where('company_id', $companyId)->get()->getRowArray();
         if (! $pattern) return $this->fail('Pola tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $pattern['company_id'] !== $companyId) {
-            return $this->fail('Pola di luar perusahaan Anda', 403);
-        }
 
         // Validasi: minimal salah satu scope diisi.
         $hasScope = ! empty($data['employee_id'])
@@ -228,6 +238,11 @@ class ShiftPatternController extends ApiController
             || ! empty($data['job_grade_id']);
         if (! $hasScope) {
             return $this->fail('Minimal pilih salah satu: employee, department, branch, work_location, atau job_grade.', 422, 'SCOPE_REQUIRED');
+        }
+        $invalidScope = $this->invalidAssignmentScope($db, $data, $companyId);
+        if ($invalidScope !== null) return $this->fail("Referensi {$invalidScope} tidak tersedia pada tenant aktif", 422, 'INVALID_SCOPE');
+        if (! empty($data['date_to']) && $data['date_to'] < $data['date_from']) {
+            return $this->fail('date_to harus setelah atau sama dengan date_from', 422, 'INVALID_DATE_RANGE');
         }
 
         $now = date('Y-m-d H:i:s');
@@ -261,13 +276,12 @@ class ShiftPatternController extends ApiController
     public function deleteAssignment($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('shift_pattern_assignments')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('shift_pattern_assignments')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
-        $db->table('shift_pattern_assignments')->where('id', $id)->delete();
+        $db->table('shift_pattern_assignments')->where('id', $id)->where('company_id', $companyId)->delete();
         Services::audit()
             ->forModule('MASTER')
             ->logDelete('shift_pattern_assignment', $id, $existing,
@@ -297,5 +311,37 @@ class ShiftPatternController extends ApiController
             ];
         }
         return $out;
+    }
+
+    private function invalidPatternShiftId(BaseConnection $db, array $patternData, int $companyId): ?int
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            static fn (array $slot): ?int => isset($slot['shift_id']) && $slot['shift_id'] !== null ? (int) $slot['shift_id'] : null,
+            $patternData,
+        ))));
+        if ($ids === []) return null;
+        $rows = $db->table('shifts')->select('id')->where('company_id', $companyId)->whereIn('id', $ids)->get()->getResultArray();
+        $found = array_map('intval', array_column($rows, 'id'));
+        foreach ($ids as $id) {
+            if (! in_array($id, $found, true)) return $id;
+        }
+        return null;
+    }
+
+    private function invalidAssignmentScope(BaseConnection $db, array $data, int $companyId): ?string
+    {
+        $scopes = [
+            'employee_id' => 'employees',
+            'department_id' => 'departments',
+            'branch_id' => 'branches',
+            'work_location_id' => 'work_locations',
+            'job_grade_id' => 'job_grades',
+        ];
+        foreach ($scopes as $field => $table) {
+            if (empty($data[$field])) continue;
+            $exists = $db->table($table)->where('id', (int) $data[$field])->where('company_id', $companyId)->countAllResults();
+            if ($exists === 0) return $field;
+        }
+        return null;
     }
 }

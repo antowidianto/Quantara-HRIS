@@ -654,12 +654,12 @@ class PayrollService
         // Pastikan snapshot terbaru — recompute defensif untuk karyawan
         // ini sebelum membaca assignment-nya.
         try {
-            Services::allowance()->recomputeEmployee((int) $emp['id']);
+            Services::allowance()->recomputeEmployee((int) $emp['id'], $companyId);
         } catch (\Throwable $e) {
             // Jangan gagalkan payroll hanya karena recompute error.
             log_message('warning', 'AllowanceService recompute failed: ' . $e->getMessage());
         }
-        $allowanceEarnings = Services::allowance()->earningsForPayroll((int) $emp['id']);
+        $allowanceEarnings = Services::allowance()->earningsForPayroll((int) $emp['id'], $companyId);
         foreach ($allowanceEarnings as $ae) {
             $earnings[] = $ae;
         }

@@ -1,0 +1,21 @@
+export default {
+  allowance_natura: {
+    title: 'Natura / Kenikmatan (PMK 66/2023)',
+    description: 'Komponen non-tunai seperti mobil dinas, perumahan, atau keanggotaan gym. Nilainya menambah basis penghasilan bruto PPh 21 tanpa menambah take-home pay tunai.',
+    threshold_label: 'Ambang batas tahunan bebas pajak (Rp)',
+    threshold_placeholder: 'Contoh: 3000000 untuk paket sembako',
+    threshold_hint: 'Kosongkan jika seluruh nilai natura langsung kena pajak. Ambang batas dialokasikan bulanan saat perhitungan PPh 21.',
+    validation_type_required: 'Kode dan nama wajib diisi.',
+    validation_threshold: 'Ambang batas Natura tidak boleh negatif.',
+    validation_rate: 'Nilai jarak dan tarif tidak boleh negatif.',
+    validation_date_range: 'Tanggal selesai tidak boleh lebih awal dari tanggal mulai.',
+    masters_load_failed: 'Gagal memuat referensi cabang dan job grade.',
+    loading: 'Memuat data tunjangan…',
+    saving: 'Menyimpan…',
+    close: 'Tutup dialog',
+    edit_type: 'Ubah tipe tunjangan {name}',
+    delete_type: 'Hapus tipe tunjangan {name}',
+    edit_rate: 'Ubah tarif {name}',
+    delete_rate: 'Hapus tarif {name}',
+  },
+}

@@ -4,6 +4,7 @@ namespace App\Controllers\Api\V1\Recruitment;
 
 use App\Controllers\Api\V1\ApiController;
 use App\Libraries\Import\XlsxImportService;
+use CodeIgniter\Database\BaseConnection;
 use Config\Services;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -102,14 +103,19 @@ class OnlineTestController extends ApiController
     public function showTest($id = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
         $row = $db->table('online_tests')
-            ->where('id', (int) $id)->where('deleted_at IS NULL')->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+            ->where('id', (int) $id)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $row) {
             return $this->fail('Test tidak ditemukan', 404);
         }
-        $questionCount = $db->table('online_test_questions')
-            ->where('online_test_id', (int) $row['id'])->countAllResults();
+        $questionCount = $db->table('online_test_questions q')
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.online_test_id', (int) $row['id'])
+            ->where('t.company_id', $companyId)->countAllResults();
         $row['question_count'] = $questionCount;
         $row['pool_filters'] = $row['pool_filters'] ? json_decode((string) $row['pool_filters'], true) : null;
         return $this->ok($row);
@@ -123,6 +129,8 @@ class OnlineTestController extends ApiController
             'name'             => 'required|max_length[200]',
             'duration_minutes' => 'required|integer|greater_than[0]',
             'category'         => 'permit_empty|in_list[TPA,ENGLISH,DISC,TECHNICAL,CUSTOM]',
+            'passing_score_pct'=> 'permit_empty|integer|greater_than_equal_to[0]|less_than_equal_to[100]',
+            'max_attempts'     => 'permit_empty|integer|greater_than_equal_to[1]|less_than_equal_to[10]',
         ]);
         if (! $valid) return null;
 
@@ -176,15 +184,28 @@ class OnlineTestController extends ApiController
     public function updateTest($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_tests')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_tests', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Test tidak ditemukan', 404);
         }
         if ((int) ($row['is_template'] ?? 0) === 1) {
             return $this->fail('Test template built-in tidak dapat diubah', 422);
         }
         $body = $this->getJsonInput();
+        $valid = $this->validateOrFail($body, [
+            'name' => 'permit_empty|max_length[200]',
+            'category' => 'permit_empty|in_list[TPA,ENGLISH,DISC,TECHNICAL,CUSTOM]',
+            'duration_minutes' => 'permit_empty|integer|greater_than[0]',
+            'passing_score_pct' => 'permit_empty|integer|greater_than_equal_to[0]|less_than_equal_to[100]',
+            'max_attempts' => 'permit_empty|integer|greater_than_equal_to[1]|less_than_equal_to[10]',
+        ]);
+        if (! $valid) return null;
+        if (array_key_exists('name', $body) && trim((string) $body['name']) === '') {
+            return $this->fail('Nama test wajib diisi', 422, 'INVALID_TEST_NAME');
+        }
         $update = array_intersect_key($body, array_flip([
             'name', 'description', 'instructions_html', 'category',
             'duration_minutes', 'passing_score_pct', 'max_attempts',
@@ -199,32 +220,35 @@ class OnlineTestController extends ApiController
                 ? json_encode($update['pool_filters']) : null;
         }
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('online_tests')->where('id', (int) $id)->update($update);
+        $db->table('online_tests')->where('id', (int) $id)->where('company_id', $companyId)->update($update);
         return $this->ok(null, 'Updated');
     }
 
     public function deleteTest($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_tests')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_tests', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Test tidak ditemukan', 404);
         }
         if ((int) ($row['is_template'] ?? 0) === 1) {
             return $this->fail('Test template built-in tidak dapat dihapus', 422);
         }
         $assigned = $db->table('online_test_assignments')
+            ->where('company_id', $companyId)
             ->where('online_test_id', (int) $id)->countAllResults();
         if ($assigned > 0) {
             // Soft-delete saja supaya data attempt history tidak hilang
-            $db->table('online_tests')->where('id', (int) $id)->update([
+            $db->table('online_tests')->where('id', (int) $id)->where('company_id', $companyId)->update([
                 'deleted_at' => date('Y-m-d H:i:s'),
                 'is_active' => 0,
             ]);
             return $this->ok(null, 'Soft-deleted (ada assignment terkait)');
         }
-        $db->table('online_tests')->where('id', (int) $id)->delete();
+        $db->table('online_tests')->where('id', (int) $id)->where('company_id', $companyId)->delete();
         return $this->ok(null, 'Deleted');
     }
 
@@ -236,13 +260,17 @@ class OnlineTestController extends ApiController
     public function seedTemplate($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_tests')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_tests', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Test tidak ditemukan', 404);
         }
-        $existing = $db->table('online_test_questions')
-            ->where('online_test_id', (int) $id)->countAllResults();
+        $existing = $db->table('online_test_questions q')
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.online_test_id', (int) $id)
+            ->where('t.company_id', $companyId)->countAllResults();
         if ($existing > 0) {
             return $this->fail('Test ini sudah punya soal — hapus dulu sebelum seed template', 422);
         }
@@ -281,14 +309,19 @@ class OnlineTestController extends ApiController
     public function listQuestions($testId = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $test = $db->table('online_tests')->where('id', (int) $testId)->get()->getRowArray();
-        if (! $test || ! $this->ownsCompany((int) $test['company_id'])) {
+        $test = $this->tenantRow($db, 'online_tests', (int) $testId, $companyId);
+        if (! $test) {
             return $this->fail('Test tidak ditemukan', 404);
         }
-        $rows = $db->table('online_test_questions')
-            ->where('online_test_id', (int) $testId)
-            ->orderBy('sort_order', 'ASC')->orderBy('id', 'ASC')
+        $rows = $db->table('online_test_questions q')
+            ->select('q.*')
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.online_test_id', (int) $testId)
+            ->where('t.company_id', $companyId)
+            ->orderBy('q.sort_order', 'ASC')->orderBy('q.id', 'ASC')
             ->get()->getResultArray();
         foreach ($rows as &$r) {
             $r['choices']        = $r['choices'] ? json_decode((string) $r['choices'], true) : null;
@@ -301,21 +334,26 @@ class OnlineTestController extends ApiController
     public function createQuestion($testId = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $test = $db->table('online_tests')->where('id', (int) $testId)->get()->getRowArray();
-        if (! $test || ! $this->ownsCompany((int) $test['company_id'])) {
+        $test = $this->tenantRow($db, 'online_tests', (int) $testId, $companyId);
+        if (! $test) {
             return $this->fail('Test tidak ditemukan', 404);
         }
         $body = $this->getJsonInput();
         $valid = $this->validateOrFail($body, [
             'prompt'        => 'required',
             'question_type' => 'required|in_list[' . implode(',', \App\Libraries\Recruitment\OnlineTestService::ALL_TYPES) . ']',
+            'points' => 'permit_empty|numeric|greater_than[0]',
         ]);
         if (! $valid) return null;
         $now = date('Y-m-d H:i:s');
-        $maxOrder = (int) ($db->table('online_test_questions')
+        $maxOrder = (int) ($db->table('online_test_questions q')
             ->selectMax('sort_order', 'mx')
-            ->where('online_test_id', (int) $testId)
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.online_test_id', (int) $testId)
+            ->where('t.company_id', $companyId)
             ->get()->getRowArray()['mx'] ?? 0);
         $insert = [
             'online_test_id' => (int) $testId,
@@ -340,14 +378,22 @@ class OnlineTestController extends ApiController
     public function updateQuestion($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_questions')->where('id', (int) $id)->get()->getRowArray();
+        $row = $this->tenantQuestion($db, (int) $id, $companyId);
         if (! $row) return $this->fail('Question tidak ditemukan', 404);
-        $test = $db->table('online_tests')->where('id', (int) $row['online_test_id'])->get()->getRowArray();
-        if (! $test || ! $this->ownsCompany((int) $test['company_id'])) {
-            return $this->fail('Forbidden', 403);
-        }
         $body = $this->getJsonInput();
+        $valid = $this->validateOrFail($body, [
+            'prompt' => 'permit_empty',
+            'question_type' => 'permit_empty|in_list[' . implode(',', \App\Libraries\Recruitment\OnlineTestService::ALL_TYPES) . ']',
+            'points' => 'permit_empty|numeric|greater_than[0]',
+            'sort_order' => 'permit_empty|integer|greater_than_equal_to[0]',
+        ]);
+        if (! $valid) return null;
+        if (array_key_exists('prompt', $body) && trim((string) $body['prompt']) === '') {
+            return $this->fail('Prompt soal wajib diisi', 422, 'INVALID_QUESTION_PROMPT');
+        }
         $update = array_intersect_key($body, array_flip([
             'prompt', 'question_type', 'category', 'disc_weight',
             'points', 'explanation', 'sort_order',
@@ -368,13 +414,11 @@ class OnlineTestController extends ApiController
     public function deleteQuestion($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_questions')->where('id', (int) $id)->get()->getRowArray();
+        $row = $this->tenantQuestion($db, (int) $id, $companyId);
         if (! $row) return $this->fail('Question tidak ditemukan', 404);
-        $test = $db->table('online_tests')->where('id', (int) $row['online_test_id'])->get()->getRowArray();
-        if (! $test || ! $this->ownsCompany((int) $test['company_id'])) {
-            return $this->fail('Forbidden', 403);
-        }
         $db->table('online_test_questions')->where('id', (int) $id)->delete();
         return $this->ok(null, 'Deleted');
     }
@@ -382,9 +426,11 @@ class OnlineTestController extends ApiController
     public function importFromBank($testId = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $test = $db->table('online_tests')->where('id', (int) $testId)->get()->getRowArray();
-        if (! $test || ! $this->ownsCompany((int) $test['company_id'])) {
+        $test = $this->tenantRow($db, 'online_tests', (int) $testId, $companyId);
+        if (! $test) {
             return $this->fail('Test tidak ditemukan', 404);
         }
         $body = $this->getJsonInput();
@@ -398,8 +444,11 @@ class OnlineTestController extends ApiController
             ->get()->getResultArray();
         if (! $bankRows) return $this->fail('Tidak ada soal yang ditemukan', 422);
 
-        $maxOrder = (int) ($db->table('online_test_questions')
-            ->selectMax('sort_order', 'mx')->where('online_test_id', (int) $testId)
+        $maxOrder = (int) ($db->table('online_test_questions q')
+            ->selectMax('q.sort_order', 'mx')
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.online_test_id', (int) $testId)
+            ->where('t.company_id', $companyId)
             ->get()->getRowArray()['mx'] ?? 0);
         $now = date('Y-m-d H:i:s');
         $rows = [];
@@ -664,9 +713,11 @@ class OnlineTestController extends ApiController
     public function updateBank($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_question_bank')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_test_question_bank', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Bank question tidak ditemukan', 404);
         }
         $body = $this->getJsonInput();
@@ -681,19 +732,21 @@ class OnlineTestController extends ApiController
         }
         if (isset($update['is_active'])) $update['is_active'] = (int) (bool) $update['is_active'];
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('online_test_question_bank')->where('id', (int) $id)->update($update);
+        $db->table('online_test_question_bank')->where('id', (int) $id)->where('company_id', $companyId)->update($update);
         return $this->ok(null, 'Updated');
     }
 
     public function deleteBank($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_question_bank')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_test_question_bank', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Bank question tidak ditemukan', 404);
         }
-        $db->table('online_test_question_bank')->where('id', (int) $id)->update([
+        $db->table('online_test_question_bank')->where('id', (int) $id)->where('company_id', $companyId)->update([
             'deleted_at' => date('Y-m-d H:i:s'),
         ]);
         return $this->ok(null, 'Deleted');
@@ -715,9 +768,9 @@ class OnlineTestController extends ApiController
             ->select('oa.*, c.full_name AS candidate_name, c.email AS candidate_email,'
                 . ' ot.name AS test_name, ot.category AS test_category,'
                 . ' jp.title AS job_title, jp.reference_number AS job_ref')
-            ->join('candidates c', 'c.id = oa.candidate_id')
-            ->join('online_tests ot', 'ot.id = oa.online_test_id')
-            ->join('job_postings jp', 'jp.id = oa.job_posting_id', 'left');
+            ->join('candidates c', 'c.id = oa.candidate_id AND c.company_id = oa.company_id')
+            ->join('online_tests ot', 'ot.id = oa.online_test_id AND ot.company_id = oa.company_id')
+            ->join('job_postings jp', 'jp.id = oa.job_posting_id AND jp.company_id = oa.company_id', 'left');
         $this->tenant()->applyScope($b, 'oa.company_id');
         if ($status !== '') $b->where('oa.status', $status);
         if ($candidateId) $b->where('oa.candidate_id', $candidateId);
@@ -733,16 +786,21 @@ class OnlineTestController extends ApiController
     public function showAssignment($id = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_assignments')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_test_assignments', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Assignment tidak ditemukan', 404);
         }
-        $candidate = $db->table('candidates')->where('id', (int) $row['candidate_id'])->get()->getRowArray();
-        $test = $db->table('online_tests')->where('id', (int) $row['online_test_id'])->get()->getRowArray();
-        $attempts = $db->table('online_test_attempts')
-            ->where('assignment_id', (int) $row['id'])
-            ->orderBy('attempt_number', 'ASC')
+        $candidate = $db->table('candidates')->where('id', (int) $row['candidate_id'])->where('company_id', $companyId)->get()->getRowArray();
+        $test = $db->table('online_tests')->where('id', (int) $row['online_test_id'])->where('company_id', $companyId)->get()->getRowArray();
+        $attempts = $db->table('online_test_attempts a')
+            ->select('a.*')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.assignment_id', (int) $row['id'])
+            ->where('x.company_id', $companyId)
+            ->orderBy('a.attempt_number', 'ASC')
             ->get()->getResultArray();
         return $this->ok([
             'assignment' => $row,
@@ -759,18 +817,24 @@ class OnlineTestController extends ApiController
         $valid = $this->validateOrFail($body, [
             'online_test_id' => 'required|integer',
             'candidate_id'   => 'required|integer',
+            'available_from' => 'permit_empty|valid_date',
+            'due_at' => 'permit_empty|valid_date',
+            'max_attempts' => 'permit_empty|integer|greater_than_equal_to[1]|less_than_equal_to[10]',
         ]);
         if (! $valid) return null;
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return null;
+        if (! empty($body['available_from']) && ! empty($body['due_at']) && $body['due_at'] < $body['available_from']) {
+            return $this->fail('due_at harus setelah atau sama dengan available_from', 422, 'INVALID_DATE_RANGE');
+        }
 
         $db = \Config\Database::connect();
-        $test = $db->table('online_tests')->where('id', (int) $body['online_test_id'])->get()->getRowArray();
-        if (! $test || (int) $test['company_id'] !== $companyId) {
+        $test = $this->tenantRow($db, 'online_tests', (int) $body['online_test_id'], $companyId);
+        if (! $test) {
             return $this->fail('Test tidak ditemukan', 404);
         }
-        $candidate = $db->table('candidates')->where('id', (int) $body['candidate_id'])->get()->getRowArray();
-        if (! $candidate || (int) $candidate['company_id'] !== $companyId) {
+        $candidate = $this->tenantRow($db, 'candidates', (int) $body['candidate_id'], $companyId);
+        if (! $candidate) {
             return $this->fail('Kandidat tidak ditemukan', 404);
         }
         if (($candidate['current_stage'] ?? '') === 'HIRED' || ! empty($candidate['converted_employee_id'])) {
@@ -779,6 +843,7 @@ class OnlineTestController extends ApiController
 
         // Cegah double-assign test yang sama ke candidate yang sama (kecuali expired/cancelled)
         $existing = $db->table('online_test_assignments')
+            ->where('company_id', $companyId)
             ->where('candidate_id', (int) $body['candidate_id'])
             ->where('online_test_id', (int) $body['online_test_id'])
             ->whereIn('status', ['PENDING','IN_PROGRESS','COMPLETED'])
@@ -823,7 +888,7 @@ class OnlineTestController extends ApiController
             $currentIdx = $stageIdx[$candidate['current_stage']] ?? -1;
             $targetIdx = $stageIdx[$targetStage] ?? -1;
             if ($currentIdx >= 0 && $targetIdx >= 0 && $currentIdx < $targetIdx) {
-                $db->table('candidates')->where('id', (int) $body['candidate_id'])->update([
+                $db->table('candidates')->where('id', (int) $body['candidate_id'])->where('company_id', $companyId)->update([
                     'current_stage' => $targetStage,
                     'updated_at'    => $now,
                 ]);
@@ -885,33 +950,51 @@ class OnlineTestController extends ApiController
     public function updateAssignment($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_assignments')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_test_assignments', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Assignment tidak ditemukan', 404);
         }
         if ($row['status'] !== 'PENDING') {
             return $this->fail('Assignment tidak bisa diubah setelah test dimulai', 422);
         }
         $body = $this->getJsonInput();
+        $valid = $this->validateOrFail($body, [
+            'available_from' => 'permit_empty|valid_date',
+            'due_at' => 'permit_empty|valid_date',
+            'max_attempts' => 'permit_empty|integer|greater_than_equal_to[1]|less_than_equal_to[10]',
+        ]);
+        if (! $valid) return null;
+        $availableFrom = $body['available_from'] ?? $row['available_from'];
+        $dueAt = $body['due_at'] ?? $row['due_at'];
+        if ($availableFrom && $dueAt && $dueAt < $availableFrom) {
+            return $this->fail('due_at harus setelah atau sama dengan available_from', 422, 'INVALID_DATE_RANGE');
+        }
+        if (isset($body['max_attempts']) && (int) $body['max_attempts'] < (int) $row['attempts_used']) {
+            return $this->fail('max_attempts tidak boleh lebih kecil dari attempts_used', 422, 'INVALID_ATTEMPT_LIMIT');
+        }
         $update = array_intersect_key($body, array_flip(['available_from', 'due_at', 'max_attempts', 'notes']));
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('online_test_assignments')->where('id', (int) $id)->update($update);
+        $db->table('online_test_assignments')->where('id', (int) $id)->where('company_id', $companyId)->update($update);
         return $this->ok(null, 'Updated');
     }
 
     public function cancelAssignment($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_assignments')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_test_assignments', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Assignment tidak ditemukan', 404);
         }
         if (in_array($row['status'], ['COMPLETED', 'CANCELLED', 'EXPIRED'], true)) {
             return $this->fail('Assignment sudah selesai/dibatalkan', 422);
         }
-        $db->table('online_test_assignments')->where('id', (int) $id)->update([
+        $db->table('online_test_assignments')->where('id', (int) $id)->where('company_id', $companyId)->update([
             'status'     => 'CANCELLED',
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -921,15 +1004,17 @@ class OnlineTestController extends ApiController
     public function deleteAssignment($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_assignments')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row || ! $this->ownsCompany((int) $row['company_id'])) {
+        $row = $this->tenantRow($db, 'online_test_assignments', (int) $id, $companyId);
+        if (! $row) {
             return $this->fail('Assignment tidak ditemukan', 404);
         }
         if ($row['status'] !== 'PENDING') {
             return $this->fail('Hanya assignment PENDING yang boleh dihapus', 422);
         }
-        $db->table('online_test_assignments')->where('id', (int) $id)->delete();
+        $db->table('online_test_assignments')->where('id', (int) $id)->where('company_id', $companyId)->delete();
         return $this->ok(null, 'Deleted');
     }
 
@@ -938,17 +1023,17 @@ class OnlineTestController extends ApiController
     public function showAttempt($attemptId = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_attempts')->where('id', (int) $attemptId)->get()->getRowArray();
+        $row = $this->tenantAttempt($db, (int) $attemptId, $companyId);
         if (! $row) return $this->fail('Attempt tidak ditemukan', 404);
-        $assign = $db->table('online_test_assignments')->where('id', (int) $row['assignment_id'])->get()->getRowArray();
-        if (! $assign || ! $this->ownsCompany((int) $assign['company_id'])) {
-            return $this->fail('Forbidden', 403);
-        }
+        $assign = $this->tenantRow($db, 'online_test_assignments', (int) $row['assignment_id'], $companyId);
+        if (! $assign) return $this->fail('Attempt tidak ditemukan', 404);
         // HR view: include correct_answer + explanation
         $result = Services::onlineTest()->buildResultView((int) $attemptId, true);
         $result['assignment'] = $assign;
-        $candidate = $db->table('candidates')->where('id', (int) $assign['candidate_id'])->get()->getRowArray();
+        $candidate = $db->table('candidates')->where('id', (int) $assign['candidate_id'])->where('company_id', $companyId)->get()->getRowArray();
         $result['candidate'] = $candidate ? [
             'id'        => (int) $candidate['id'],
             'full_name' => $candidate['full_name'],
@@ -968,13 +1053,11 @@ class OnlineTestController extends ApiController
         ]);
         if (! $valid) return null;
 
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_attempts')->where('id', (int) $attemptId)->get()->getRowArray();
+        $row = $this->tenantAttempt($db, (int) $attemptId, $companyId);
         if (! $row) return $this->fail('Attempt tidak ditemukan', 404);
-        $assign = $db->table('online_test_assignments')->where('id', (int) $row['assignment_id'])->get()->getRowArray();
-        if (! $assign || ! $this->ownsCompany((int) $assign['company_id'])) {
-            return $this->fail('Forbidden', 403);
-        }
 
         try {
             $result = Services::onlineTest()->gradeManualAnswer(
@@ -992,11 +1075,32 @@ class OnlineTestController extends ApiController
 
     // ─── Internal helpers ──────────────────────────────────────────
 
-    private function ownsCompany(int $rowCompanyId): bool
+    private function tenantRow(BaseConnection $db, string $table, int $id, int $companyId): ?array
     {
-        $t = $this->tenant();
-        if ($t->isSuperAdmin()) return true;
-        return (int) $t->getCompanyId() === $rowCompanyId;
+        $row = $db->table($table)->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
+        return $row ?: null;
+    }
+
+    private function tenantQuestion(BaseConnection $db, int $id, int $companyId): ?array
+    {
+        $row = $db->table('online_test_questions q')
+            ->select('q.*')
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.id', $id)
+            ->where('t.company_id', $companyId)
+            ->get()->getRowArray();
+        return $row ?: null;
+    }
+
+    private function tenantAttempt(BaseConnection $db, int $id, int $companyId): ?array
+    {
+        $row = $db->table('online_test_attempts a')
+            ->select('a.*')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.id', $id)
+            ->where('x.company_id', $companyId)
+            ->get()->getRowArray();
+        return $row ?: null;
     }
 
     private function bankImportColumns(): array

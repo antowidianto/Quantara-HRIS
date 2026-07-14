@@ -17,7 +17,7 @@ final class EmployeeTransferBusinessFlowTest extends TestCase
         foreach (['branch_id', 'department_id', 'position_id', 'work_location_id'] as $field) {
             self::assertStringContainsString("\$update['{$field}']", $transfer);
         }
-        self::assertStringContainsString('recomputeEmployee($empId)', $transfer);
+        self::assertStringContainsString("recomputeEmployee(\$empId, (int) \$row['company_id'])", $transfer);
         self::assertStringContainsString('resolveForEmployee((int) $emp[\'id\'])', $payroll);
     }
 }

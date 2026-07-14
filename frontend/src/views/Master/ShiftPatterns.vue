@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -20,6 +20,11 @@ const shifts = ref([])
 const showEditor = ref(false)
 const editing = ref(false)
 const form = ref(emptyForm())
+const saving = ref(false)
+const deletingId = ref(null)
+const editorLabel = computed(() => editing.value
+  ? t('master.shift_patterns.modal_edit')
+  : t('master.shift_patterns.modal_create'))
 
 function emptyForm() {
   return {
@@ -107,10 +112,12 @@ watch(() => form.value.cycle_days, (n) => {
 })
 
 async function save() {
+  if (saving.value) return
   if (! form.value.code || ! form.value.name) {
     toast.warning(t('master.shift_patterns.code_name_required'))
     return
   }
+  saving.value = true
   try {
     const payload = { ...form.value }
     if (editing.value) {
@@ -121,13 +128,16 @@ async function save() {
       toast.success(t('master.shift_patterns.saved_create'))
     }
     showEditor.value = false
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.shift_patterns.save_failed'))
+  } finally {
+    saving.value = false
   }
 }
 
 async function remove(item) {
+  if (deletingId.value !== null) return
   const ok = await confirmDialog({
     title: t('master.shift_patterns.delete_title'),
     message: t('master.shift_patterns.delete_msg', { name: item.name }),
@@ -135,12 +145,15 @@ async function remove(item) {
     variant: 'danger',
   })
   if (! ok) return
+  deletingId.value = item.id
   try {
     await api.delete(`/shift-patterns/${item.id}`)
     toast.success(t('master.shift_patterns.deleted'))
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.shift_patterns.delete_failed'))
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -194,7 +207,7 @@ function shiftLabel(slot) {
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <CalendarDaysIcon class="w-6 h-6" /> {{ t('master.shift_patterns.title') }}
       </h1>
-      <button class="btn-primary" @click="openCreate">
+      <button type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.shift_patterns.btn_create') }}
       </button>
     </div>
@@ -227,7 +240,7 @@ function shiftLabel(slot) {
                     :key="i"
                     class="inline-block w-4 h-5 rounded-sm border border-white shadow-sm"
                     :style="{ background: shiftColor(slot) }"
-                    :title="shiftLabel(slot)"
+                    v-bind="{ title: shiftLabel(slot) }"
                   ></span>
                   <span v-if="(item.pattern_data || []).length > 28" class="text-xs text-gray-400 ml-1">
                     +{{ item.pattern_data.length - 28 }}
@@ -244,8 +257,8 @@ function shiftLabel(slot) {
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openEdit(item)"><PencilIcon class="w-4 h-4" /></button>
-                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)"><TrashIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind="{ title: t('common.edit'), 'aria-label': t('common.edit') }"><PencilIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" :disabled="deletingId !== null" v-bind="{ title: t('common.delete'), 'aria-label': t('common.delete') }"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
@@ -254,35 +267,35 @@ function shiftLabel(slot) {
       </div>
     </div>
 
-    <div v-if="showEditor" class="fixed inset-0 z-40 flex items-stretch bg-black/40 p-4">
+    <div v-if="showEditor" class="fixed inset-0 z-40 flex items-stretch bg-black/40 p-4" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editorLabel }">
       <div class="bg-white w-full m-auto rounded-lg shadow-xl flex flex-col max-h-[95vh]" style="max-width: 1100px">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
           <h2 class="font-semibold">{{ editing ? t('master.shift_patterns.modal_edit') : t('master.shift_patterns.modal_create') }}</h2>
-          <button class="text-gray-500" @click="showEditor = false"><XMarkIcon class="w-5 h-5" /></button>
+          <button type="button" class="text-gray-500" @click="showEditor = false" v-bind="{ title: t('master.shift_patterns.btn_close'), 'aria-label': t('master.shift_patterns.btn_close') }"><XMarkIcon class="w-5 h-5" /></button>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-6 gap-3 px-6 py-3 border-b border-gray-100 bg-gray-50">
           <div class="md:col-span-1">
             <label class="label">{{ t('master.shift_patterns.f_code') }}</label>
-            <input v-model="form.code" class="input" :disabled="editing" :placeholder="t('master.shift_patterns.f_code_ph')" required />
+            <input v-model="form.code" class="input" :disabled="editing" v-bind="{ placeholder: t('master.shift_patterns.f_code_ph') }" required />
           </div>
           <div class="md:col-span-2">
             <label class="label">{{ t('master.shift_patterns.f_name') }}</label>
-            <input v-model="form.name" class="input" :placeholder="t('master.shift_patterns.f_name_ph')" required />
+            <input v-model="form.name" class="input" v-bind="{ placeholder: t('master.shift_patterns.f_name_ph') }" required />
           </div>
           <div class="md:col-span-1">
             <label class="label">{{ t('master.shift_patterns.f_cycle_days') }}</label>
             <input v-model.number="form.cycle_days" type="number" min="1" max="366" class="input" />
           </div>
           <div class="md:col-span-2 flex items-end gap-3 flex-wrap">
-            <button class="btn-secondary text-xs" @click="quickFill('5-2')">{{ t('master.shift_patterns.qf_5_2') }}</button>
-            <button class="btn-secondary text-xs" @click="quickFill('4-2')">{{ t('master.shift_patterns.qf_4_2') }}</button>
-            <button class="btn-secondary text-xs" @click="quickFill('all-on')">{{ t('master.shift_patterns.qf_all_on') }}</button>
-            <button class="btn-secondary text-xs" @click="quickFill('all-off')">{{ t('master.shift_patterns.qf_all_off') }}</button>
+            <button type="button" class="btn-secondary text-xs" @click="quickFill('5-2')">{{ t('master.shift_patterns.qf_5_2') }}</button>
+            <button type="button" class="btn-secondary text-xs" @click="quickFill('4-2')">{{ t('master.shift_patterns.qf_4_2') }}</button>
+            <button type="button" class="btn-secondary text-xs" @click="quickFill('all-on')">{{ t('master.shift_patterns.qf_all_on') }}</button>
+            <button type="button" class="btn-secondary text-xs" @click="quickFill('all-off')">{{ t('master.shift_patterns.qf_all_off') }}</button>
           </div>
           <div class="md:col-span-6">
             <label class="label">{{ t('master.shift_patterns.f_description') }}</label>
-            <input v-model="form.description" class="input" :placeholder="t('master.shift_patterns.f_description_ph')" />
+            <input v-model="form.description" class="input" v-bind="{ placeholder: t('master.shift_patterns.f_description_ph') }" />
           </div>
         </div>
 
@@ -302,7 +315,7 @@ function shiftLabel(slot) {
                 value-key="id"
                 label-key="name"
                 :search-keys="['name','code']"
-                :placeholder="t('master.shift_patterns.f_pick_shift')"
+                v-bind="{ placeholder: t('master.shift_patterns.f_pick_shift') }"
                 :disabled="slot.is_off || slot.is_holiday"
                 size="sm"
                 class="mb-2"
@@ -332,9 +345,9 @@ function shiftLabel(slot) {
         </div>
 
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end gap-2 bg-white">
-          <button class="btn-secondary" @click="showEditor = false">{{ t('master.shift_patterns.btn_close') }}</button>
-          <button class="btn-primary" @click="save">
-            {{ editing ? t('master.shift_patterns.btn_save_changes') : t('master.shift_patterns.btn_save') }}
+          <button type="button" class="btn-secondary" @click="showEditor = false">{{ t('master.shift_patterns.btn_close') }}</button>
+          <button type="button" class="btn-primary" @click="save" :disabled="saving">
+            {{ saving ? t('common.saving') : (editing ? t('master.shift_patterns.btn_save_changes') : t('master.shift_patterns.btn_save')) }}
           </button>
         </div>
       </div>

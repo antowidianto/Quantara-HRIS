@@ -423,7 +423,7 @@ class EmployeeTransferService
         if (isset($update['branch_id']) || isset($update['work_location_id'])) {
             try {
                 if (method_exists(Services::allowance(), 'recomputeEmployee')) {
-                    Services::allowance()->recomputeEmployee($empId);
+                    Services::allowance()->recomputeEmployee($empId, (int) $row['company_id']);
                     $allowanceRecomputed = 1;
                 }
             } catch (\Throwable $e) { /* non-fatal */ }

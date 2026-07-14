@@ -75,4 +75,25 @@ final class CriticalTransactionTenantPolicyTest extends TestCase
             );
         }
     }
+
+    public function testContractRenderingFailsClosedAcrossTenantBoundaries(): void
+    {
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Lifecycle/ContractTemplateController.php');
+        self::assertNotFalse($controller);
+        self::assertStringContainsString('->where(\'company_id\', $companyId)', $controller);
+        self::assertStringContainsString('buildContext($empId, $contractId, $data[\'extras\'] ?? [], $companyId)', $controller);
+
+        $renderer = file_get_contents(APPPATH . 'Libraries/Lifecycle/ContractRenderer.php');
+        self::assertNotFalse($renderer);
+        self::assertStringContainsString('?int $expectedCompanyId = null', $renderer);
+        self::assertStringContainsString('$employeeBuilder->where(\'company_id\', $expectedCompanyId)', $renderer);
+        self::assertStringContainsString('->where(\'employee_id\', $employeeId)', $renderer);
+        foreach (['positions', 'departments', 'branches', 'work_locations', 'employees', 'job_grades', 'employee_contracts'] as $table) {
+            self::assertMatchesRegularExpression(
+                "/table\\('{$table}'\\)[\\s\\S]{0,250}where\\('company_id'/",
+                $renderer,
+                "ContractRenderer must tenant-scope {$table}",
+            );
+        }
+    }
 }
