@@ -58,7 +58,7 @@ final class CentralAuthorizationPolicyTest extends TestCase
         );
         $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Attendance/AttendanceController.php');
         self::assertNotFalse($controller);
-        self::assertStringContainsString('->where(\'company_id\', $tenant->getCompanyId())', $controller);
+        self::assertStringContainsString('(new EmployeeModel())->findScoped((int) $employeeId)', $controller);
         self::assertStringContainsString('EMPLOYEE_TENANT_MISMATCH', $controller);
     }
 }

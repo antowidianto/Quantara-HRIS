@@ -23,6 +23,9 @@ const jobGrades = ref([])
 
 const showCreate = ref(false)
 const form = reactive(emptyForm())
+const saving = ref(false)
+const deletingId = ref(null)
+const createDialogLabel = computed(() => t('master.shift_assignments.modal_title'))
 
 const preview = reactive({ employee_id: '', date: new Date().toISOString().slice(0, 10) })
 const previewResult = ref(null)
@@ -85,6 +88,7 @@ function openCreate() {
 }
 
 async function save() {
+  if (saving.value) return
   if (! form.shift_id) {
     toast.warning(t('master.shift_assignments.pick_shift_first'))
     return
@@ -94,19 +98,27 @@ async function save() {
     toast.warning(t('master.shift_assignments.need_scope'))
     return
   }
+  if (form.effective_from && form.effective_to && form.effective_to < form.effective_from) {
+    toast.warning(t('master.shift_assignments.save_failed'))
+    return
+  }
+  saving.value = true
   try {
     const payload = { ...form }
     Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null })
     await api.post('/shift-assignments', payload)
     toast.success(t('master.shift_assignments.saved'))
     showCreate.value = false
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.shift_assignments.save_failed'))
+  } finally {
+    saving.value = false
   }
 }
 
 async function remove(item) {
+  if (deletingId.value !== null) return
   const ok = await confirmDialog({
     title: t('master.shift_assignments.delete_title'),
     message: t('master.shift_assignments.delete_msg', { name: item.shift_name }),
@@ -114,20 +126,25 @@ async function remove(item) {
     variant: 'danger',
   })
   if (! ok) return
+  deletingId.value = item.id
   try {
     await api.delete(`/shift-assignments/${item.id}`)
     toast.success(t('master.shift_assignments.deleted'))
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.shift_assignments.delete_failed'))
+  } finally {
+    deletingId.value = null
   }
 }
 
 async function runPreview() {
+  if (previewLoading.value) return
   if (! preview.employee_id || ! preview.date) {
     toast.warning(t('master.shift_assignments.preview_required'))
     return
   }
+  previewResult.value = null
   previewLoading.value = true
   try {
     const res = await api.get('/shift-assignments/preview', { params: preview })
@@ -168,7 +185,7 @@ function sourceLabel(s) {
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <ClockIcon class="w-6 h-6" /> {{ t('master.shift_assignments.title') }}
       </h1>
-      <button class="btn-primary" @click="openCreate">
+      <button type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.shift_assignments.btn_create') }}
       </button>
     </div>
@@ -184,7 +201,7 @@ function sourceLabel(s) {
           <label class="label">{{ t('master.shift_assignments.f_employee') }}</label>
           <EmployeeSearchSelect
             v-model="preview.employee_id"
-            :placeholder="t('master.shift_assignments.f_employee_ph')"
+            v-bind="{ placeholder: t('master.shift_assignments.f_employee_ph') }"
             :only-active="true"
           />
         </div>
@@ -193,7 +210,7 @@ function sourceLabel(s) {
           <input v-model="preview.date" type="date" class="input" />
         </div>
         <div class="flex items-end">
-          <button class="btn-primary w-full" :disabled="previewLoading" @click="runPreview">
+          <button type="button" class="btn-primary w-full" :disabled="previewLoading" @click="runPreview">
             {{ previewLoading ? t('master.shift_assignments.btn_processing') : t('master.shift_assignments.btn_check') }}
           </button>
         </div>
@@ -222,7 +239,7 @@ function sourceLabel(s) {
           value-key="id"
           label-key="name"
           :search-keys="['name','code']"
-          :placeholder="t('master.shift_assignments.filter_all_shifts')"
+          v-bind="{ placeholder: t('master.shift_assignments.filter_all_shifts') }"
           @change="fetchData"
         />
         <SearchableSelect
@@ -231,7 +248,7 @@ function sourceLabel(s) {
           value-key="id"
           label-key="name"
           :search-keys="['name','code','city']"
-          :placeholder="t('master.shift_assignments.filter_all_branches')"
+          v-bind="{ placeholder: t('master.shift_assignments.filter_all_branches') }"
           @change="fetchData"
         />
         <SearchableSelect
@@ -240,7 +257,7 @@ function sourceLabel(s) {
           value-key="id"
           label-key="name"
           :search-keys="['name','code']"
-          :placeholder="t('master.shift_assignments.filter_all_departments')"
+          v-bind="{ placeholder: t('master.shift_assignments.filter_all_departments') }"
           @change="fetchData"
         />
         <select v-model="filters.is_active" class="input" @change="fetchData">
@@ -285,7 +302,7 @@ function sourceLabel(s) {
                 </span>
               </td>
               <td class="text-right">
-                <button class="text-gray-500 hover:text-red-600" @click="remove(item)">
+                <button type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" :disabled="deletingId !== null" v-bind="{ title: t('master.shift_assignments.delete_ok'), 'aria-label': t('master.shift_assignments.delete_ok') }">
                   <TrashIcon class="w-4 h-4" />
                 </button>
               </td>
@@ -295,11 +312,11 @@ function sourceLabel(s) {
       </div>
     </div>
 
-    <div v-if="showCreate" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+    <div v-if="showCreate" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" v-bind="{ 'aria-label': createDialogLabel }">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
           <h2 class="font-semibold">{{ t('master.shift_assignments.modal_title') }}</h2>
-          <button class="text-gray-500" @click="showCreate = false">&times;</button>
+          <button type="button" class="text-gray-500" @click="showCreate = false" v-bind="{ title: t('master.shift_assignments.f_cancel'), 'aria-label': t('master.shift_assignments.f_cancel') }">&times;</button>
         </div>
         <form @submit.prevent="save" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="md:col-span-2">
@@ -310,7 +327,7 @@ function sourceLabel(s) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              :placeholder="t('master.shift_assignments.f_shift_ph')"
+              v-bind="{ placeholder: t('master.shift_assignments.f_shift_ph') }"
             >
               <template #item="{ item }">
                 <span class="block text-sm truncate">
@@ -339,7 +356,7 @@ function sourceLabel(s) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code','city']"
-              :placeholder="t('master.shift_assignments.f_branch_ph')"
+              v-bind="{ placeholder: t('master.shift_assignments.f_branch_ph') }"
             />
           </div>
           <div>
@@ -350,7 +367,7 @@ function sourceLabel(s) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code','address']"
-              :placeholder="t('master.shift_assignments.f_branch_ph')"
+              v-bind="{ placeholder: t('master.shift_assignments.f_branch_ph') }"
             />
           </div>
           <div>
@@ -361,7 +378,7 @@ function sourceLabel(s) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              :placeholder="t('master.shift_assignments.f_branch_ph')"
+              v-bind="{ placeholder: t('master.shift_assignments.f_branch_ph') }"
             />
           </div>
           <div>
@@ -372,7 +389,7 @@ function sourceLabel(s) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              :placeholder="t('master.shift_assignments.f_branch_ph')"
+              v-bind="{ placeholder: t('master.shift_assignments.f_branch_ph') }"
             />
           </div>
 
@@ -402,7 +419,7 @@ function sourceLabel(s) {
 
           <div class="md:col-span-2 flex justify-end gap-2 pt-2">
             <button type="button" class="btn-secondary" @click="showCreate = false">{{ t('master.shift_assignments.f_cancel') }}</button>
-            <button type="submit" class="btn-primary">{{ t('master.shift_assignments.f_save') }}</button>
+            <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? t('common.saving') : t('master.shift_assignments.f_save') }}</button>
           </div>
         </form>
       </div>

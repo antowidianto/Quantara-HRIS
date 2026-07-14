@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Models\Employee\EmployeeModel;
 use Config\Services;
 
 class AttendanceController extends ApiController
@@ -98,10 +99,7 @@ class AttendanceController extends ApiController
         $tenant = $this->tenant();
         $employeeId = $tenant->getEmployeeId();
         if (! $employeeId) return $this->fail('User tidak terhubung dengan karyawan', 400, 'NO_EMPLOYEE_LINK');
-        $employee = \Config\Database::connect()->table('employees')
-            ->select('id')->where('id', (int) $employeeId)
-            ->where('company_id', $tenant->getCompanyId())
-            ->get()->getRowArray();
+        $employee = (new EmployeeModel())->findScoped((int) $employeeId);
         if (! $employee) return $this->fail('Karyawan tidak tersedia pada tenant aktif', 403, 'EMPLOYEE_TENANT_MISMATCH');
 
         $today = date('Y-m-d');

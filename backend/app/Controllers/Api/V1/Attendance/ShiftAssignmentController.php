@@ -3,6 +3,8 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Models\Employee\EmployeeModel;
+use CodeIgniter\Database\BaseConnection;
 use Config\Services;
 
 /**
@@ -31,11 +33,11 @@ class ShiftAssignmentController extends ApiController
             ->select('sa.*, s.code AS shift_code, s.name AS shift_name, s.start_time, s.end_time,'
                 . ' b.name AS branch_name, w.name AS work_location_name,'
                 . ' d.name AS department_name, g.name AS grade_name')
-            ->join('shifts s', 's.id = sa.shift_id', 'left')
-            ->join('branches b', 'b.id = sa.branch_id', 'left')
-            ->join('work_locations w', 'w.id = sa.work_location_id', 'left')
-            ->join('departments d', 'd.id = sa.department_id', 'left')
-            ->join('job_grades g', 'g.id = sa.job_grade_id', 'left');
+            ->join('shifts s', 's.id = sa.shift_id AND s.company_id = sa.company_id', 'left')
+            ->join('branches b', 'b.id = sa.branch_id AND b.company_id = sa.company_id', 'left')
+            ->join('work_locations w', 'w.id = sa.work_location_id AND w.company_id = sa.company_id', 'left')
+            ->join('departments d', 'd.id = sa.department_id AND d.company_id = sa.company_id', 'left')
+            ->join('job_grades g', 'g.id = sa.job_grade_id AND g.company_id = sa.company_id', 'left');
 
         $this->tenant()->applyScope($builder, 'sa.company_id');
 
@@ -50,12 +52,11 @@ class ShiftAssignmentController extends ApiController
 
     public function show($id = null)
     {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $row = $db->table('shift_assignments')->where('id', (int) $id)->get()->getRowArray();
+        $row = $db->table('shift_assignments')->where('id', (int) $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $row['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
         return $this->ok($row);
     }
 
@@ -65,6 +66,8 @@ class ShiftAssignmentController extends ApiController
         $valid = $this->validateOrFail($data, [
             'shift_id' => 'required|integer',
             'priority' => 'permit_empty|integer',
+            'effective_from' => 'permit_empty|valid_date',
+            'effective_to' => 'permit_empty|valid_date',
         ]);
         if (! $valid) return null;
 
@@ -77,10 +80,12 @@ class ShiftAssignmentController extends ApiController
         $db = \Config\Database::connect();
 
         // Verifikasi shift ada & sesuai company.
-        $shift = $db->table('shifts')->where('id', (int) $data['shift_id'])->get()->getRowArray();
+        $shift = $db->table('shifts')->where('id', (int) $data['shift_id'])->where('company_id', $companyId)->get()->getRowArray();
         if (! $shift) return $this->fail('Shift tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $shift['company_id'] !== $companyId) {
-            return $this->fail('Shift di luar perusahaan Anda', 403);
+        $invalidScope = $this->invalidScopeReference($db, $data, $companyId);
+        if ($invalidScope !== null) return $this->fail("Referensi {$invalidScope} tidak tersedia pada tenant aktif", 422, 'INVALID_SCOPE');
+        if (! empty($data['effective_from']) && ! empty($data['effective_to']) && $data['effective_to'] < $data['effective_from']) {
+            return $this->fail('effective_to harus setelah atau sama dengan effective_from', 422, 'INVALID_DATE_RANGE');
         }
 
         $now = date('Y-m-d H:i:s');
@@ -112,21 +117,39 @@ class ShiftAssignmentController extends ApiController
     public function update($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('shift_assignments')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('shift_assignments')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
 
         $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'shift_id' => 'permit_empty|integer',
+            'priority' => 'permit_empty|integer',
+            'effective_from' => 'permit_empty|valid_date',
+            'effective_to' => 'permit_empty|valid_date',
+        ]);
+        if (! $valid) return null;
+        if (isset($data['shift_id'])) {
+            if ((int) $data['shift_id'] <= 0) return $this->fail('shift_id wajib', 422);
+            $shiftExists = $db->table('shifts')->where('id', (int) $data['shift_id'])->where('company_id', $companyId)->countAllResults();
+            if ($shiftExists === 0) return $this->fail('Shift tidak ditemukan', 404);
+        }
+        $invalidScope = $this->invalidScopeReference($db, $data, $companyId);
+        if ($invalidScope !== null) return $this->fail("Referensi {$invalidScope} tidak tersedia pada tenant aktif", 422, 'INVALID_SCOPE');
+        $effectiveFrom = $data['effective_from'] ?? $existing['effective_from'];
+        $effectiveTo = $data['effective_to'] ?? $existing['effective_to'];
+        if ($effectiveFrom && $effectiveTo && $effectiveTo < $effectiveFrom) {
+            return $this->fail('effective_to harus setelah atau sama dengan effective_from', 422, 'INVALID_DATE_RANGE');
+        }
         $update = array_intersect_key($data, array_flip([
             'shift_id','department_id','branch_id','work_location_id',
             'job_grade_id','priority','is_active','effective_from',
             'effective_to','notes',
         ]));
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('shift_assignments')->where('id', $id)->update($update);
+        $db->table('shift_assignments')->where('id', $id)->where('company_id', $companyId)->update($update);
 
         Services::audit()
             ->forModule('MASTER')
@@ -139,13 +162,12 @@ class ShiftAssignmentController extends ApiController
     public function delete($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('shift_assignments')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('shift_assignments')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
-        $db->table('shift_assignments')->where('id', $id)->delete();
+        $db->table('shift_assignments')->where('id', $id)->where('company_id', $companyId)->delete();
         Services::audit()
             ->forModule('MASTER')
             ->logDelete('shift_assignment', $id, $existing,
@@ -163,9 +185,28 @@ class ShiftAssignmentController extends ApiController
         $employeeId = (int) ($this->request->getGet('employee_id') ?? 0);
         $date = (string) ($this->request->getGet('date') ?? date('Y-m-d'));
         if (! $employeeId) return $this->fail('employee_id wajib', 422);
+        if (! (new EmployeeModel())->findScoped($employeeId)) {
+            return $this->fail('Karyawan tidak tersedia pada tenant aktif', 404);
+        }
 
         $resolver = Services::shiftResolver(false); // fresh instance untuk request ini
         $result = $resolver->resolve($employeeId, $date);
         return $this->ok($result);
+    }
+
+    private function invalidScopeReference(BaseConnection $db, array $data, int $companyId): ?string
+    {
+        $scopes = [
+            'department_id' => 'departments',
+            'branch_id' => 'branches',
+            'work_location_id' => 'work_locations',
+            'job_grade_id' => 'job_grades',
+        ];
+        foreach ($scopes as $field => $table) {
+            if (empty($data[$field])) continue;
+            $exists = $db->table($table)->where('id', (int) $data[$field])->where('company_id', $companyId)->countAllResults();
+            if ($exists === 0) return $field;
+        }
+        return null;
     }
 }

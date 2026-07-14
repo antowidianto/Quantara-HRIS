@@ -4,13 +4,12 @@ import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
-import { fmtCurrency } from '@/composables/useResource'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import ExcelImporter from '@/components/ExcelImporter.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -32,10 +31,21 @@ const rateForm = ref(null)
 const filterTypeId = ref('')
 
 const loading = ref(false)
+const savingType = ref(false)
+const savingRate = ref(false)
+const deletingTypeId = ref(null)
+const deletingRateId = ref(null)
+const recomputing = ref(false)
 
 const canManage = computed(() =>
   auth.isSuperAdmin || auth.permissions.includes('payroll.manage')
 )
+
+const fmtCurrency = (value) => new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'id-ID', {
+  style: 'currency',
+  currency: 'IDR',
+  maximumFractionDigits: 0,
+}).format(Number(value || 0))
 
 function blankType() {
   return {
@@ -86,12 +96,16 @@ async function fetchRates() {
   }
 }
 async function fetchMasters() {
-  const [b, g] = await Promise.all([
-    api.get('/branches', { params: { per_page: 100 } }),
-    api.get('/job-grades', { params: { per_page: 100 } }),
-  ])
-  branches.value = b.data.data
-  grades.value = g.data.data
+  try {
+    const [b, g] = await Promise.all([
+      api.get('/branches', { params: { per_page: 100 } }),
+      api.get('/job-grades', { params: { per_page: 100 } }),
+    ])
+    branches.value = b.data.data || []
+    grades.value = g.data.data || []
+  } catch (e) {
+    toast.error(e.response?.data?.message || t('allowance_natura.masters_load_failed'))
+  }
 }
 
 onMounted(async () => {
@@ -113,6 +127,16 @@ function openEditType(it) {
   showTypeModal.value = true
 }
 async function saveType() {
+  if (savingType.value) return
+  if (! typeForm.value.code?.trim() || ! typeForm.value.name?.trim()) {
+    toast.warning(t('allowance_natura.validation_type_required'))
+    return
+  }
+  if (Number(typeForm.value.natura_tax_threshold || 0) < 0) {
+    toast.warning(t('allowance_natura.validation_threshold'))
+    return
+  }
+  savingType.value = true
   try {
     if (editingType.value) {
       await api.put(`/allowance-types/${editingType.value.id}`, typeForm.value)
@@ -122,13 +146,15 @@ async function saveType() {
       toast.success(t('master.allowances.type_added'))
     }
     showTypeModal.value = false
-    fetchTypes()
-    fetchRates()
+    await Promise.all([fetchTypes(), fetchRates()])
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.allowances.save_failed'))
+  } finally {
+    savingType.value = false
   }
 }
 async function removeType(it) {
+  if (deletingTypeId.value !== null) return
   const ok = await confirmDialog({
     title: t('master.allowances.type_delete_title'),
     message: t('master.allowances.type_delete_msg', { name: it.name }),
@@ -136,13 +162,15 @@ async function removeType(it) {
     variant: 'danger',
   })
   if (! ok) return
+  deletingTypeId.value = it.id
   try {
     await api.delete(`/allowance-types/${it.id}`)
     toast.success(t('master.allowances.type_deleted'))
-    fetchTypes()
-    fetchRates()
+    await Promise.all([fetchTypes(), fetchRates()])
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.allowances.delete_failed'))
+  } finally {
+    deletingTypeId.value = null
   }
 }
 
@@ -158,10 +186,21 @@ function openEditRate(r) {
   showRateModal.value = true
 }
 async function saveRate() {
+  if (savingRate.value) return
   if (! rateForm.value.allowance_type_id) {
     toast.warning(t('master.allowances.pick_type_first'))
     return
   }
+  const numericFields = ['threshold_km', 'rate_below', 'rate_above']
+  if (numericFields.some((field) => Number(rateForm.value[field] || 0) < 0)) {
+    toast.warning(t('allowance_natura.validation_rate'))
+    return
+  }
+  if (rateForm.value.effective_from && rateForm.value.effective_to && rateForm.value.effective_to < rateForm.value.effective_from) {
+    toast.warning(t('allowance_natura.validation_date_range'))
+    return
+  }
+  savingRate.value = true
   try {
     if (editingRate.value) {
       await api.put(`/allowance-rates/${editingRate.value.id}`, rateForm.value)
@@ -171,12 +210,15 @@ async function saveRate() {
       toast.success(t('master.allowances.rate_added'))
     }
     showRateModal.value = false
-    fetchRates()
+    await fetchRates()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.allowances.save_failed'))
+  } finally {
+    savingRate.value = false
   }
 }
 async function removeRate(r) {
+  if (deletingRateId.value !== null) return
   const ok = await confirmDialog({
     title: t('master.allowances.rate_delete_title'),
     message: t('master.allowances.rate_delete_msg'),
@@ -184,27 +226,34 @@ async function removeRate(r) {
     variant: 'danger',
   })
   if (! ok) return
+  deletingRateId.value = r.id
   try {
     await api.delete(`/allowance-rates/${r.id}`)
     toast.success(t('master.allowances.rate_deleted'))
-    fetchRates()
+    await fetchRates()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.allowances.delete_failed'))
+  } finally {
+    deletingRateId.value = null
   }
 }
 
 async function recomputeAll() {
+  if (recomputing.value) return
   const ok = await confirmDialog({
     title: t('master.allowances.recompute_title'),
     message: t('master.allowances.recompute_msg'),
     okText: t('master.allowances.recompute_ok'),
   })
   if (! ok) return
+  recomputing.value = true
   try {
     const res = await api.post('/allowances/recompute-company')
     toast.success(t('master.allowances.recompute_done', { count: res.data.data?.count || 0 }))
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.allowances.recompute_failed'))
+  } finally {
+    recomputing.value = false
   }
 }
 </script>
@@ -225,17 +274,19 @@ async function recomputeAll() {
           :button-label="t('master.allowances.import_excel')"
           @committed="fetchTypes()"
         />
-        <button v-if="canManage" class="btn-secondary" @click="recomputeAll">{{ t('master.allowances.recompute_all') }}</button>
+        <button v-if="canManage" type="button" class="btn-secondary" :disabled="recomputing" @click="recomputeAll">{{ t('master.allowances.recompute_all') }}</button>
       </div>
     </div>
 
     <div class="flex gap-2 mb-4 border-b border-gray-200">
       <button
+        type="button"
         :class="['px-4 py-2 -mb-px border-b-2',
           tab === 'types' ? 'border-primary-600 text-primary-700 font-semibold' : 'border-transparent text-gray-600']"
         @click="tab = 'types'"
       >{{ t('master.allowances.tab_types') }}</button>
       <button
+        type="button"
         :class="['px-4 py-2 -mb-px border-b-2',
           tab === 'rates' ? 'border-primary-600 text-primary-700 font-semibold' : 'border-transparent text-gray-600']"
         @click="tab = 'rates'"
@@ -246,7 +297,7 @@ async function recomputeAll() {
     <div v-if="tab === 'types'" class="card">
       <div class="card-header justify-between">
         <span class="text-sm text-gray-600">{{ t('master.allowances.types_subtitle') }}</span>
-        <button v-if="canManage" class="btn-primary" @click="openCreateType">
+        <button v-if="canManage" type="button" class="btn-primary" @click="openCreateType">
           <PlusIcon class="w-4 h-4" /> {{ t('master.allowances.add_type') }}
         </button>
       </div>
@@ -263,7 +314,8 @@ async function recomputeAll() {
             <th class="text-right">{{ t('master.allowances.col_actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="types.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('master.allowances.no_types') }}</td></tr>
+            <tr v-if="loading"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('allowance_natura.loading') }}</td></tr>
+            <tr v-else-if="types.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('master.allowances.no_types') }}</td></tr>
             <tr v-for="it in types" :key="it.id">
               <td class="font-mono">{{ it.code }}</td>
               <td>
@@ -276,8 +328,8 @@ async function recomputeAll() {
               <td>{{ it.is_taxable ? t('master.allowances.yes') : t('master.allowances.no') }}</td>
               <td><span :class="it.is_active ? 'badge-green' : 'badge-gray'">{{ it.is_active ? t('master.allowances.active') : t('master.allowances.inactive') }}</span></td>
               <td class="text-right">
-                <button v-if="canManage" class="text-gray-500 hover:text-primary-600 mr-2" @click="openEditType(it)"><PencilIcon class="w-4 h-4" /></button>
-                <button v-if="canManage" class="text-gray-500 hover:text-red-600" @click="removeType(it)"><TrashIcon class="w-4 h-4" /></button>
+                <button v-if="canManage" type="button" class="text-gray-500 hover:text-primary-600 mr-2" v-bind="{ title: t('allowance_natura.edit_type', { name: it.name }), 'aria-label': t('allowance_natura.edit_type', { name: it.name }) }" @click="openEditType(it)"><PencilIcon class="w-4 h-4" /></button>
+                <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600" :disabled="deletingTypeId !== null" v-bind="{ title: t('allowance_natura.delete_type', { name: it.name }), 'aria-label': t('allowance_natura.delete_type', { name: it.name }) }" @click="removeType(it)"><TrashIcon class="w-4 h-4" /></button>
               </td>
             </tr>
           </tbody>
@@ -299,7 +351,7 @@ async function recomputeAll() {
             @change="fetchRates"
           />
         </div>
-        <button v-if="canManage" class="btn-primary" @click="openCreateRate" :disabled="types.length === 0">
+        <button v-if="canManage" type="button" class="btn-primary" @click="openCreateRate" :disabled="types.length === 0">
           <PlusIcon class="w-4 h-4" /> {{ t('master.allowances.add_rate') }}
         </button>
       </div>
@@ -316,7 +368,8 @@ async function recomputeAll() {
             <th class="text-right">{{ t('master.allowances.col_actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-if="rates.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('master.allowances.no_rates') }}</td></tr>
+            <tr v-if="loading"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('allowance_natura.loading') }}</td></tr>
+            <tr v-else-if="rates.length === 0"><td colspan="8" class="text-center py-6 text-gray-400">{{ t('master.allowances.no_rates') }}</td></tr>
             <tr v-for="r in rates" :key="r.id">
               <td>
                 <div class="font-medium">{{ r.type_name }}</div>
@@ -337,8 +390,8 @@ async function recomputeAll() {
                 <div v-else class="text-gray-400">{{ t('master.allowances.always_active') }}</div>
               </td>
               <td class="text-right">
-                <button v-if="canManage" class="text-gray-500 hover:text-primary-600 mr-2" @click="openEditRate(r)"><PencilIcon class="w-4 h-4" /></button>
-                <button v-if="canManage" class="text-gray-500 hover:text-red-600" @click="removeRate(r)"><TrashIcon class="w-4 h-4" /></button>
+                <button v-if="canManage" type="button" class="text-gray-500 hover:text-primary-600 mr-2" v-bind="{ title: t('allowance_natura.edit_rate', { name: r.type_name }), 'aria-label': t('allowance_natura.edit_rate', { name: r.type_name }) }" @click="openEditRate(r)"><PencilIcon class="w-4 h-4" /></button>
+                <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600" :disabled="deletingRateId !== null" v-bind="{ title: t('allowance_natura.delete_rate', { name: r.type_name }), 'aria-label': t('allowance_natura.delete_rate', { name: r.type_name }) }" @click="removeRate(r)"><TrashIcon class="w-4 h-4" /></button>
               </td>
             </tr>
           </tbody>
@@ -347,11 +400,11 @@ async function recomputeAll() {
     </div>
 
     <!-- ── TYPE MODAL ────────────────────────────────────── -->
-    <div v-if="showTypeModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50">
+    <div v-if="showTypeModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editingType ? t('master.allowances.modal_type_edit') : t('master.allowances.modal_type_add') }">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
         <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 class="font-semibold">{{ editingType ? t('master.allowances.modal_type_edit') : t('master.allowances.modal_type_add') }}</h2>
-          <button class="text-gray-400 hover:text-gray-600 text-2xl leading-none" @click="showTypeModal = false">&times;</button>
+          <button type="button" class="text-gray-400 hover:text-gray-600 text-2xl leading-none" v-bind="{ title: t('allowance_natura.close'), 'aria-label': t('allowance_natura.close') }" @click="showTypeModal = false">&times;</button>
         </div>
         <form @submit.prevent="saveType" class="p-5 space-y-3 text-sm">
           <div class="grid grid-cols-2 gap-3">
@@ -384,39 +437,37 @@ async function recomputeAll() {
               <input type="checkbox" v-model="typeForm.is_taxable_natura"
                      :true-value="1" :false-value="0" class="mt-1" />
               <span>
-                <span class="font-medium">Natura / Kenikmatan (PMK 66/2023)</span>
+                <span class="font-medium">{{ t('allowance_natura.title') }}</span>
                 <span class="block text-xs text-amber-800">
-                  Komponen non-tunai (mobil dinas, perumahan, gym, dll). Akan menambah
-                  basis Penghasilan Bruto PPh21 namun tidak menambah cash Take Home Pay.
+                  {{ t('allowance_natura.description') }}
                 </span>
               </span>
             </label>
             <div v-if="typeForm.is_taxable_natura">
-              <label class="label text-xs">Ambang batas tahunan bebas pajak (Rp)</label>
+              <label class="label text-xs">{{ t('allowance_natura.threshold_label') }}</label>
               <input v-model.number="typeForm.natura_tax_threshold" type="number"
                      min="0" step="100000" class="input"
-                     placeholder="Contoh: 3000000 untuk paket sembako" />
+                     v-bind="{ placeholder: t('allowance_natura.threshold_placeholder') }" />
               <p class="text-xs text-amber-800 mt-1">
-                Kosongkan jika seluruh nilai natura langsung taxable. Threshold dipecah
-                proporsional bulanan saat perhitungan PPh21.
+                {{ t('allowance_natura.threshold_hint') }}
               </p>
             </div>
           </div>
 
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="btn-secondary" @click="showTypeModal = false">{{ t('master.allowances.f_cancel') }}</button>
-            <button type="submit" class="btn-primary">{{ t('master.allowances.f_save') }}</button>
+            <button type="submit" class="btn-primary" :disabled="savingType">{{ savingType ? t('allowance_natura.saving') : t('master.allowances.f_save') }}</button>
           </div>
         </form>
       </div>
     </div>
 
     <!-- ── RATE MODAL ────────────────────────────────────── -->
-    <div v-if="showRateModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50">
+    <div v-if="showRateModal" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editingRate ? t('master.allowances.modal_rate_edit') : t('master.allowances.modal_rate_add') }">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
         <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 class="font-semibold">{{ editingRate ? t('master.allowances.modal_rate_edit') : t('master.allowances.modal_rate_add') }}</h2>
-          <button class="text-gray-400 hover:text-gray-600 text-2xl leading-none" @click="showRateModal = false">&times;</button>
+          <button type="button" class="text-gray-400 hover:text-gray-600 text-2xl leading-none" v-bind="{ title: t('allowance_natura.close'), 'aria-label': t('allowance_natura.close') }" @click="showRateModal = false">&times;</button>
         </div>
         <form @submit.prevent="saveRate" class="p-5 space-y-3 text-sm">
           <div>
@@ -491,7 +542,7 @@ async function recomputeAll() {
           <div><label class="label">{{ t('master.allowances.f_notes') }}</label><textarea v-model="rateForm.notes" class="input" rows="2"></textarea></div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="btn-secondary" @click="showRateModal = false">{{ t('master.allowances.f_cancel') }}</button>
-            <button type="submit" class="btn-primary">{{ t('master.allowances.f_save') }}</button>
+            <button type="submit" class="btn-primary" :disabled="savingRate">{{ savingRate ? t('allowance_natura.saving') : t('master.allowances.f_save') }}</button>
           </div>
         </form>
       </div>

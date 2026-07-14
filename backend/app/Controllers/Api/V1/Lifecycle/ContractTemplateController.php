@@ -173,13 +173,19 @@ class ContractTemplateController extends ApiController
         $data = $this->getJsonInput();
         $empId = (int) ($data['employee_id'] ?? 0);
         if (! $empId) return $this->fail('employee_id wajib', 422);
+        $companyId = (int) $tpl['company_id'];
 
         $renderer = Services::contractRenderer();
-        $context  = $renderer->buildContext(
-            $empId,
-            isset($data['employee_contract_id']) ? (int) $data['employee_contract_id'] : null,
-            $data['extras'] ?? []
-        );
+        try {
+            $context = $renderer->buildContext(
+                $empId,
+                isset($data['employee_contract_id']) ? (int) $data['employee_contract_id'] : null,
+                $data['extras'] ?? [],
+                $companyId,
+            );
+        } catch (\InvalidArgumentException) {
+            return $this->fail('Employee not found', 404);
+        }
         $html = $renderer->render($tpl, $context);
         return $this->ok([
             'html'    => $html,
@@ -208,11 +214,15 @@ class ContractTemplateController extends ApiController
         $contractId = isset($data['employee_contract_id']) ? (int) $data['employee_contract_id'] : null;
         if (! $empId) return $this->fail('employee_id wajib', 422);
 
-        $emp = $db->table('employees')->where('id', $empId)->get()->getRowArray();
+        $companyId = (int) $tpl['company_id'];
+        $emp = $db->table('employees')
+            ->where('id', $empId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
 
         $renderer = Services::contractRenderer();
-        $context  = $renderer->buildContext($empId, $contractId, $data['extras'] ?? []);
+        $context  = $renderer->buildContext($empId, $contractId, $data['extras'] ?? [], $companyId);
         $html     = $renderer->render($tpl, $context);
 
         $now = date('Y-m-d H:i:s');

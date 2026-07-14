@@ -404,7 +404,7 @@ class JicService
         // employees ter-update di langkah 1.
         try {
             if (class_exists(\App\Libraries\Payroll\AllowanceService::class)) {
-                Services::allowance()->recomputeEmployee((int) $jic['employee_id']);
+                Services::allowance()->recomputeEmployee((int) $jic['employee_id'], (int) $jic['company_id']);
             }
         } catch (\Throwable $e) {
             log_message('warning', '[JIC#' . $jic['id'] . '] recompute allowances failed: ' . $e->getMessage());

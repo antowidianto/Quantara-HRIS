@@ -28,10 +28,22 @@ class ContractRenderer
      * Bangun context untuk render. Tidak menyentuh database lebih dari yang
      * dibutuhkan; caller bisa override dengan $extras (mis. untuk preview).
      */
-    public function buildContext(int $employeeId, ?int $contractId = null, array $extras = []): array
+    public function buildContext(
+        int $employeeId,
+        ?int $contractId = null,
+        array $extras = [],
+        ?int $expectedCompanyId = null,
+    ): array
     {
         $db  = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray() ?: [];
+        $employeeBuilder = $db->table('employees')->where('id', $employeeId);
+        if ($expectedCompanyId !== null) {
+            $employeeBuilder->where('company_id', $expectedCompanyId);
+        }
+        $emp = $employeeBuilder->get()->getRowArray() ?: [];
+        if ($emp === []) {
+            throw new \InvalidArgumentException('Employee is not available in the contract tenant context.');
+        }
 
         // Decrypt sensitive untuk dipakai di template (tidak ditampilkan
         // apa adanya kalau template tidak memintanya).
@@ -52,30 +64,34 @@ class ContractRenderer
             ? ($db->table('companies')->where('id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $position  = ! empty($emp['position_id'])
-            ? ($db->table('positions')->where('id', (int) $emp['position_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('positions')->where('id', (int) $emp['position_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $department = ! empty($emp['department_id'])
-            ? ($db->table('departments')->where('id', (int) $emp['department_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('departments')->where('id', (int) $emp['department_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $branch    = ! empty($emp['branch_id'])
-            ? ($db->table('branches')->where('id', (int) $emp['branch_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('branches')->where('id', (int) $emp['branch_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $workLoc   = ! empty($emp['work_location_id'])
-            ? ($db->table('work_locations')->where('id', (int) $emp['work_location_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('work_locations')->where('id', (int) $emp['work_location_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $supervisor = ! empty($emp['supervisor_id'])
-            ? ($db->table('employees')->where('id', (int) $emp['supervisor_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('employees')->where('id', (int) $emp['supervisor_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $manager = ! empty($emp['manager_id'])
-            ? ($db->table('employees')->where('id', (int) $emp['manager_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('employees')->where('id', (int) $emp['manager_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
         $jobGrade = ! empty($emp['job_grade_id'])
-            ? ($db->table('job_grades')->where('id', (int) $emp['job_grade_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('job_grades')->where('id', (int) $emp['job_grade_id'])->where('company_id', $companyId)->get()->getRowArray() ?: [])
             : [];
 
         $contract = [];
         if ($contractId) {
-            $contract = $db->table('employee_contracts')->where('id', $contractId)->get()->getRowArray() ?: [];
+            $contract = $db->table('employee_contracts')
+                ->where('id', $contractId)
+                ->where('company_id', $companyId)
+                ->where('employee_id', $employeeId)
+                ->get()->getRowArray() ?: [];
         }
 
         $today = date('Y-m-d');

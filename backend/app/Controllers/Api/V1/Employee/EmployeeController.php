@@ -720,7 +720,7 @@ class EmployeeController extends ApiController
         );
         if (! empty($needRecompute)) {
             try {
-                Services::allowance()->recomputeEmployee($id);
+                Services::allowance()->recomputeEmployee($id, $companyId);
             } catch (\Throwable $e) {
                 log_message('warning', 'Recompute allowance failed: ' . $e->getMessage());
             }

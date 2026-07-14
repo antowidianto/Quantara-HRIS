@@ -47,6 +47,9 @@ const filterModule = ref('')
 
 const showEditor = ref(false)
 const editing = ref(false)
+const saving = ref(false)
+const assignmentSaving = ref(false)
+const deletingAssignmentId = ref(null)
 const form = ref(emptyForm())
 const activeTab = ref('steps') // steps | assignments
 
@@ -54,7 +57,6 @@ const departments = ref([])
 const branches = ref([])
 const jobGrades = ref([])
 const roles = ref([])
-const users = ref([])
 
 const assignments = ref([])
 const newAssignment = reactive({
@@ -159,6 +161,15 @@ async function openEdit(item) {
 }
 
 async function save() {
+  if (saving.value) return
+  if (! form.value.code?.trim()) {
+    toast.warning(`${t('master.approval_chains.f_code')} ${t('common.required')}`)
+    return
+  }
+  if (! form.value.name?.trim()) {
+    toast.warning(`${t('master.approval_chains.f_name')} ${t('common.required')}`)
+    return
+  }
   if (! form.value.steps || form.value.steps.length === 0) {
     toast.warning(t('master.approval_chains.need_step'))
     return
@@ -170,6 +181,7 @@ async function save() {
   }))
   const payload = { ...form.value, steps: cleaned }
 
+  saving.value = true
   try {
     if (editing.value) {
       await api.put(`/approval-chains/${payload.id}`, payload)
@@ -183,6 +195,8 @@ async function save() {
     fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.approval_chains.save_failed'))
+  } finally {
+    saving.value = false
   }
 }
 
@@ -224,10 +238,12 @@ function moveStep(index, dir) {
 
 // ─── Assignment rules ─────────────────────────────────────────
 async function addAssignment() {
+  if (assignmentSaving.value) return
   if (! form.value.id) {
     toast.warning(t('master.approval_chains.assignment_save_first'))
     return
   }
+  assignmentSaving.value = true
   try {
     const payload = {
       chain_id: form.value.id,
@@ -244,6 +260,8 @@ async function addAssignment() {
     Object.assign(newAssignment, { department_id: '', branch_id: '', job_grade_id: '', priority: 100, is_active: 1 })
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.approval_chains.assignment_add_failed'))
+  } finally {
+    assignmentSaving.value = false
   }
 }
 
@@ -256,6 +274,7 @@ async function refreshAssignments() {
 }
 
 async function removeAssignment(a) {
+  if (deletingAssignmentId.value !== null) return
   const ok = await confirmDialog({
     title: t('master.approval_chains.assignment_delete_title'),
     message: t('master.approval_chains.assignment_delete_msg'),
@@ -263,12 +282,15 @@ async function removeAssignment(a) {
     variant: 'danger',
   })
   if (! ok) return
+  deletingAssignmentId.value = a.id
   try {
     await api.delete(`/approval-assignments/${a.id}`)
     toast.success(t('master.approval_chains.deleted'))
     refreshAssignments()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.approval_chains.delete_failed'))
+  } finally {
+    deletingAssignmentId.value = null
   }
 }
 
@@ -281,7 +303,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <ShieldCheckIcon class="w-6 h-6" /> {{ t('master.approval_chains.title') }}
       </h1>
-      <button class="btn-primary" @click="openCreate">
+      <button type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.approval_chains.btn_create') }}
       </button>
     </div>
@@ -294,7 +316,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
             :items="moduleOptions"
             value-key="value"
             label-key="label"
-            :placeholder="t('master.approval_chains.filter_all_modules')"
+            v-bind="{ placeholder: t('master.approval_chains.filter_all_modules') }"
           />
         </div>
       </div>
@@ -332,8 +354,8 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" :title="t('master.approval_chains.edit')"><PencilIcon class="w-4 h-4" /></button>
-                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" :title="t('master.approval_chains.delete')"><TrashIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind="{ title: t('master.approval_chains.edit'), 'aria-label': t('master.approval_chains.edit') }"><PencilIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-red-600" @click="remove(item)" v-bind="{ title: t('master.approval_chains.delete'), 'aria-label': t('master.approval_chains.delete') }"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
@@ -344,10 +366,10 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
 
     <!-- Editor Modal -->
     <div v-if="showEditor" class="fixed inset-0 z-40 flex items-stretch bg-black/40">
-      <div class="bg-white w-full m-4 rounded-lg shadow-xl flex flex-col overflow-hidden">
+      <div class="bg-white w-full m-4 rounded-lg shadow-xl flex flex-col overflow-hidden" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editing ? t('master.approval_chains.modal_edit') : t('master.approval_chains.modal_create') }">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
           <h2 class="font-semibold">{{ editing ? t('master.approval_chains.modal_edit') : t('master.approval_chains.modal_create') }}</h2>
-          <button class="text-gray-500" @click="showEditor = false"><XMarkIcon class="w-5 h-5" /></button>
+          <button type="button" class="text-gray-500" @click="showEditor = false" v-bind="{ title: t('common.close'), 'aria-label': t('common.close') }"><XMarkIcon class="w-5 h-5" /></button>
         </div>
 
         <!-- Metadata -->
@@ -367,7 +389,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               :items="moduleOptions"
               value-key="value"
               label-key="label"
-              :placeholder="t('master.approval_chains.f_module_ph')"
+              v-bind="{ placeholder: t('master.approval_chains.f_module_ph') }"
               :clearable="false"
             />
           </div>
@@ -378,7 +400,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               :items="fallbackOptions"
               value-key="value"
               label-key="label"
-              :placeholder="t('master.approval_chains.f_fallback_ph')"
+              v-bind="{ placeholder: t('master.approval_chains.f_fallback_ph') }"
               :clearable="false"
             />
           </div>
@@ -394,10 +416,10 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
 
         <!-- Tabs -->
         <div class="flex border-b border-gray-200 px-6 bg-white">
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'steps' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'steps'">
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'steps' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'steps'">
             {{ t('master.approval_chains.tab_steps') }}
           </button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'assignments' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'assignments'">
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'assignments' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'assignments'">
             <AdjustmentsHorizontalIcon class="w-4 h-4 inline -mt-0.5" /> {{ t('master.approval_chains.tab_assignments') }}
           </button>
         </div>
@@ -414,19 +436,19 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               <div class="flex items-center justify-between mb-3">
                 <div class="font-medium text-gray-700">{{ t('master.approval_chains.step_label', { n: i + 1 }) }}</div>
                 <div class="flex gap-1">
-                  <button class="text-gray-500 hover:text-primary-600 disabled:opacity-30"
-                    :disabled="i === 0" @click="moveStep(i, -1)"><ArrowUpIcon class="w-4 h-4" /></button>
-                  <button class="text-gray-500 hover:text-primary-600 disabled:opacity-30"
-                    :disabled="i === form.steps.length - 1" @click="moveStep(i, 1)"><ArrowDownIcon class="w-4 h-4" /></button>
-                  <button class="text-red-500 hover:text-red-700" @click="removeStep(i)"
-                    :disabled="form.steps.length <= 1"><TrashIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-primary-600 disabled:opacity-30"
+                    :disabled="i === 0" @click="moveStep(i, -1)" v-bind="{ title: t('common.previous'), 'aria-label': t('common.previous') }"><ArrowUpIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-primary-600 disabled:opacity-30"
+                    :disabled="i === form.steps.length - 1" @click="moveStep(i, 1)" v-bind="{ title: t('common.next'), 'aria-label': t('common.next') }"><ArrowDownIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-red-500 hover:text-red-700" @click="removeStep(i)"
+                    :disabled="form.steps.length <= 1" v-bind="{ title: t('common.delete'), 'aria-label': t('common.delete') }"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <label class="label">{{ t('master.approval_chains.f_step_name') }}</label>
-                  <input v-model="s.name" class="input" :placeholder="t('master.approval_chains.f_step_name_ph')" />
+                  <input v-model="s.name" class="input" v-bind="{ placeholder: t('master.approval_chains.f_step_name_ph') }" />
                 </div>
                 <div>
                   <label class="label">{{ t('master.approval_chains.f_approver_type') }}</label>
@@ -446,31 +468,31 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     value-key="id"
                     label-key="name"
                     :search-keys="['name','description']"
-                    :placeholder="t('master.approval_chains.f_pick_role_ph')"
+                    v-bind="{ placeholder: t('master.approval_chains.f_pick_role_ph') }"
                   />
                 </div>
                 <div v-if="s.approver_type === 'SPECIFIC_USER'">
                   <label class="label">{{ t('master.approval_chains.f_user_id') }}</label>
-                  <input v-model.number="s.approver_user_id" type="number" class="input" :placeholder="t('master.approval_chains.f_user_id_ph')" />
+                  <input v-model.number="s.approver_user_id" type="number" class="input" v-bind="{ placeholder: t('master.approval_chains.f_user_id_ph') }" />
                 </div>
                 <div v-if="s.approver_type === 'SPECIFIC_EMPLOYEE'">
                   <label class="label">{{ t('master.approval_chains.f_employee') }}</label>
                   <EmployeeSearchSelect
                     v-model="s.approver_employee_id"
-                    :placeholder="t('master.approval_chains.f_employee_ph')"
+                    v-bind="{ placeholder: t('master.approval_chains.f_employee_ph') }"
                     :only-active="false"
                   />
                 </div>
                 <div>
                   <label class="label">{{ t('master.approval_chains.f_sla_hours') }}</label>
-                  <input v-model.number="s.sla_hours" type="number" class="input" :placeholder="t('master.approval_chains.f_sla_ph')" />
+                  <input v-model.number="s.sla_hours" type="number" min="0" class="input" v-bind="{ placeholder: t('master.approval_chains.f_sla_ph') }" />
                 </div>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                 <div>
                   <label class="label">{{ t('master.approval_chains.f_condition_field') }}</label>
-                  <input v-model="s.condition_field" class="input" :placeholder="t('master.approval_chains.f_condition_field_ph')" />
+                  <input v-model="s.condition_field" class="input" v-bind="{ placeholder: t('master.approval_chains.f_condition_field_ph') }" />
                 </div>
                 <div>
                   <label class="label">{{ t('master.approval_chains.f_operator') }}</label>
@@ -485,7 +507,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                 </div>
                 <div>
                   <label class="label">{{ t('master.approval_chains.f_value') }}</label>
-                  <input v-model.number="s.condition_value" type="number" class="input" :placeholder="t('master.approval_chains.f_value_ph')" />
+                  <input v-model.number="s.condition_value" type="number" class="input" v-bind="{ placeholder: t('master.approval_chains.f_value_ph') }" />
                 </div>
               </div>
 
@@ -501,7 +523,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               </div>
             </div>
 
-            <button class="btn-secondary" @click="addStep">
+            <button type="button" class="btn-secondary" @click="addStep">
               <PlusIcon class="w-4 h-4" /> {{ t('master.approval_chains.btn_add_step') }}
             </button>
           </div>
@@ -523,7 +545,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     value-key="id"
                     label-key="name"
                     :search-keys="['name','code']"
-                    :placeholder="t('master.approval_chains.f_all')"
+                    v-bind="{ placeholder: t('master.approval_chains.f_all') }"
                   />
                 </div>
                 <div>
@@ -534,7 +556,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     value-key="id"
                     label-key="name"
                     :search-keys="['name','code','city']"
-                    :placeholder="t('master.approval_chains.f_all')"
+                    v-bind="{ placeholder: t('master.approval_chains.f_all') }"
                   />
                 </div>
                 <div>
@@ -545,7 +567,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     value-key="id"
                     label-key="name"
                     :search-keys="['name','code']"
-                    :placeholder="t('master.approval_chains.f_all')"
+                    v-bind="{ placeholder: t('master.approval_chains.f_all') }"
                   />
                 </div>
                 <div>
@@ -553,8 +575,8 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                   <input v-model.number="newAssignment.priority" type="number" class="input" />
                 </div>
                 <div class="flex items-end">
-                  <button class="btn-primary w-full" @click="addAssignment">
-                    <PlusIcon class="w-4 h-4" /> {{ t('master.approval_chains.btn_add') }}
+                  <button type="button" class="btn-primary w-full" :disabled="assignmentSaving" @click="addAssignment">
+                    <PlusIcon class="w-4 h-4" /> {{ assignmentSaving ? t('common.processing') : t('master.approval_chains.btn_add') }}
                   </button>
                 </div>
               </div>
@@ -584,7 +606,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     <td>{{ a.grade_name || t('master.approval_chains.f_all') }}</td>
                     <td>{{ a.priority }}</td>
                     <td class="text-right">
-                      <button class="text-gray-500 hover:text-red-600" @click="removeAssignment(a)">
+                      <button type="button" class="text-gray-500 hover:text-red-600" :disabled="deletingAssignmentId !== null" @click="removeAssignment(a)" v-bind="{ title: t('master.approval_chains.delete'), 'aria-label': t('master.approval_chains.delete') }">
                         <TrashIcon class="w-4 h-4" />
                       </button>
                     </td>
@@ -597,8 +619,8 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
 
         <!-- Footer -->
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end gap-2 bg-white">
-          <button class="btn-secondary" @click="showEditor = false">{{ t('master.approval_chains.btn_close') }}</button>
-          <button class="btn-primary" @click="save">{{ editing ? t('master.approval_chains.btn_save_changes') : t('master.approval_chains.btn_save') }}</button>
+          <button type="button" class="btn-secondary" :disabled="saving" @click="showEditor = false">{{ t('master.approval_chains.btn_close') }}</button>
+          <button type="button" class="btn-primary" :disabled="saving" @click="save">{{ saving ? t('common.saving') : (editing ? t('master.approval_chains.btn_save_changes') : t('master.approval_chains.btn_save')) }}</button>
         </div>
       </div>
     </div>

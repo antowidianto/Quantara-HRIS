@@ -40,4 +40,21 @@ class UserModel extends BaseModel
             ->first();
         return $row ?: null;
     }
+
+    /** @return array<int,array<string,mixed>> */
+    public function eligibleDelegates(int $companyId, int $excludeUserId): array
+    {
+        if ($companyId <= 0) return [];
+
+        return $this->builder('u')
+            ->select('u.id, u.name, u.email, e.employee_number, p.name AS position_name')
+            ->join('employees e', "e.user_id = u.id AND e.company_id = {$companyId} AND e.deleted_at IS NULL", 'left')
+            ->join('positions p', "p.id = e.position_id AND p.company_id = {$companyId}", 'left')
+            ->where('u.company_id', $companyId)
+            ->where('u.is_active', 1)
+            ->where('u.id !=', $excludeUserId)
+            ->orderBy('u.name', 'ASC')
+            ->limit(500)
+            ->get()->getResultArray();
+    }
 }

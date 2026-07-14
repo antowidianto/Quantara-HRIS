@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -42,12 +42,17 @@ const form = ref(emptyForm())
 const activeTab = ref('body') // body | header | footer | preview
 
 const variables = ref({ variables: [], filters: [] })
-const employees = ref([])
+const saving = ref(false)
+const deletingId = ref(null)
 const previewLoading = ref(false)
 const previewHtml = ref('')
 const previewEmpId = ref('')
 const generateMode = ref(false)
 const generateSubject = ref('')
+const generating = ref(false)
+const editorLabel = computed(() => editing.value
+  ? t('master.contract_templates.modal_edit')
+  : t('master.contract_templates.modal_add'))
 
 function emptyForm() {
   return {
@@ -96,13 +101,6 @@ async function loadVariables() {
   } catch (_) { /* silent */ }
 }
 
-async function loadEmployeesForPreview() {
-  try {
-    const res = await api.get('/employees', { params: { per_page: 200, status: 'ACTIVE' } })
-    employees.value = res.data.data || []
-  } catch (_) { /* silent */ }
-}
-
 onMounted(() => {
   fetchData()
   loadVariables()
@@ -114,8 +112,8 @@ function openCreate() {
   form.value = emptyForm()
   editing.value = false
   activeTab.value = 'body'
+  resetPreview()
   showEditor.value = true
-  if (employees.value.length === 0) loadEmployeesForPreview()
 }
 
 async function openEdit(item) {
@@ -125,14 +123,20 @@ async function openEdit(item) {
     form.value = { ...emptyForm(), ...res.data.data }
     editing.value = true
     activeTab.value = 'body'
+    resetPreview()
     showEditor.value = true
-    if (employees.value.length === 0) loadEmployeesForPreview()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.contract_templates.load_one_failed'))
   }
 }
 
 async function save() {
+  if (saving.value) return
+  if (! form.value.code.trim() || ! form.value.name.trim() || ! form.value.body_html.trim()) {
+    toast.warning(t('master.contract_templates.save_failed'))
+    return
+  }
+  saving.value = true
   try {
     const payload = { ...form.value }
     if (editing.value) {
@@ -144,13 +148,16 @@ async function save() {
       editing.value = true
       toast.success(t('master.contract_templates.saved_create'))
     }
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.contract_templates.save_failed'))
+  } finally {
+    saving.value = false
   }
 }
 
 async function remove(item) {
+  if (deletingId.value !== null) return
   const ok = await confirmDialog({
     title: t('master.contract_templates.delete_title'),
     message: t('master.contract_templates.delete_msg', { name: item.name }),
@@ -158,12 +165,15 @@ async function remove(item) {
     variant: 'danger',
   })
   if (! ok) return
+  deletingId.value = item.id
   try {
     await api.delete(`/contract-templates/${item.id}`)
     toast.success(t('master.contract_templates.deleted'))
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.contract_templates.delete_failed'))
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -190,6 +200,7 @@ async function doPreview() {
 }
 
 async function doGenerate() {
+  if (generating.value) return
   if (! previewEmpId.value) {
     toast.warning(t('master.contract_templates.pick_employee_first'))
     return
@@ -198,6 +209,7 @@ async function doGenerate() {
     toast.warning(t('master.contract_templates.save_first_generate'))
     return
   }
+  generating.value = true
   try {
     const res = await api.post(`/contract-templates/${form.value.id}/generate`, {
       employee_id: Number(previewEmpId.value),
@@ -207,7 +219,16 @@ async function doGenerate() {
     generateMode.value = false
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.contract_templates.generate_failed'))
+  } finally {
+    generating.value = false
   }
+}
+
+function resetPreview() {
+  previewHtml.value = ''
+  previewEmpId.value = ''
+  generateMode.value = false
+  generateSubject.value = ''
 }
 
 // Helper supaya kita tidak menulis literal `{{ ... }}` di template Vue
@@ -245,7 +266,7 @@ const placeholderHints = {
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <DocumentTextIcon class="w-6 h-6" /> {{ t('master.contract_templates.title') }}
       </h1>
-      <button class="btn-primary" @click="openCreate">
+      <button type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.contract_templates.add') }}
       </button>
     </div>
@@ -293,8 +314,8 @@ const placeholderHints = {
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" :title="t('master.contract_templates.edit')"><PencilIcon class="w-4 h-4" /></button>
-                  <button class="text-gray-500 hover:text-red-600" @click="remove(item)" :title="t('master.contract_templates.delete')"><TrashIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind:title="t('master.contract_templates.edit')" v-bind:aria-label="t('master.contract_templates.edit')"><PencilIcon class="w-4 h-4" /></button>
+                  <button type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" v-bind:title="t('master.contract_templates.delete')" v-bind:aria-label="t('master.contract_templates.delete')" :disabled="deletingId !== null"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
@@ -304,7 +325,7 @@ const placeholderHints = {
     </div>
 
     <!-- Editor Modal (full screen) -->
-    <div v-if="showEditor" class="fixed inset-0 z-40 flex items-stretch bg-black/40">
+    <div v-if="showEditor" class="fixed inset-0 z-40 flex items-stretch bg-black/40" role="dialog" aria-modal="true" v-bind="{ 'aria-label': editorLabel }">
       <div class="bg-white w-full m-4 rounded-lg shadow-xl flex flex-col overflow-hidden">
         <div class="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
           <div>
@@ -313,7 +334,7 @@ const placeholderHints = {
               {{ t('master.contract_templates.placeholder_hint', { fullName: placeholderHints.fullName, salary: placeholderHints.salary }) }}
             </div>
           </div>
-          <button class="text-gray-500" @click="showEditor = false"><XMarkIcon class="w-5 h-5" /></button>
+          <button type="button" class="text-gray-500" @click="showEditor = false" v-bind:title="t('master.contract_templates.btn_close')" v-bind:aria-label="t('master.contract_templates.btn_close')"><XMarkIcon class="w-5 h-5" /></button>
         </div>
 
         <!-- Metadata bar -->
@@ -329,7 +350,7 @@ const placeholderHints = {
           <div class="md:col-span-1">
             <label class="label">{{ t('master.contract_templates.f_type') }}</label>
             <select v-model="form.contract_type" class="input" required>
-              <option v-for="ty in types" :key="ty.value" :value="ty.value">{{ ty.value }}</option>
+              <option v-for="ty in types" :key="ty.value" :value="ty.value">{{ ty.label }}</option>
             </select>
           </div>
           <div class="md:col-span-1">
@@ -351,11 +372,11 @@ const placeholderHints = {
 
         <!-- Tabs -->
         <div class="flex border-b border-gray-200 px-6 bg-white">
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'body' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'body'">{{ t('master.contract_templates.tab_body') }}</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'header' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'header'">{{ t('master.contract_templates.tab_header') }}</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'footer' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'footer'">{{ t('master.contract_templates.tab_footer') }}</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'settings' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'settings'">{{ t('master.contract_templates.tab_settings') }}</button>
-          <button :class="['px-4 py-2 text-sm border-b-2', activeTab === 'preview' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'preview'">{{ t('master.contract_templates.tab_preview') }}</button>
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'body' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'body'">{{ t('master.contract_templates.tab_body') }}</button>
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'header' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'header'">{{ t('master.contract_templates.tab_header') }}</button>
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'footer' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'footer'">{{ t('master.contract_templates.tab_footer') }}</button>
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'settings' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'settings'">{{ t('master.contract_templates.tab_settings') }}</button>
+          <button type="button" :class="['px-4 py-2 text-sm border-b-2', activeTab === 'preview' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-gray-500']" @click="activeTab = 'preview'">{{ t('master.contract_templates.tab_preview') }}</button>
         </div>
 
         <!-- Body content area -->
@@ -371,7 +392,7 @@ const placeholderHints = {
             </div>
             <div v-else-if="activeTab === 'footer'">
               <textarea v-model="form.footer_html" class="input font-mono text-sm w-full h-[55vh]"
-                :placeholder="t('master.contract_templates.ph_footer')"></textarea>
+                v-bind="{ placeholder: t('master.contract_templates.ph_footer') }"></textarea>
             </div>
             <div v-else-if="activeTab === 'settings'" class="space-y-4 max-w-2xl">
               <div>
@@ -391,14 +412,14 @@ const placeholderHints = {
                   <label class="label">{{ t('master.contract_templates.preview_employee') }}</label>
                   <EmployeeSearchSelect
                     v-model="previewEmpId"
-                    :placeholder="t('master.contract_templates.preview_pick_ph')"
+                    v-bind="{ placeholder: t('master.contract_templates.preview_pick_ph') }"
                     :only-active="true"
                   />
                 </div>
-                <button class="btn-secondary" @click="doPreview" :disabled="previewLoading">
+                <button type="button" class="btn-secondary" @click="doPreview" :disabled="previewLoading">
                   <EyeIcon class="w-4 h-4" /> {{ previewLoading ? t('master.contract_templates.preview_loading') : t('master.contract_templates.preview_btn') }}
                 </button>
-                <button class="btn-primary" @click="generateMode = ! generateMode">
+                <button type="button" class="btn-primary" @click="generateMode = ! generateMode">
                   <BoltIcon class="w-4 h-4" /> {{ t('master.contract_templates.generate_btn') }}
                 </button>
               </div>
@@ -406,8 +427,8 @@ const placeholderHints = {
               <div v-if="generateMode" class="card-body bg-amber-50 border border-amber-200 rounded-md">
                 <div class="text-sm font-medium text-amber-900 mb-2">{{ t('master.contract_templates.generate_panel_title') }}</div>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <input v-model="generateSubject" class="input md:col-span-2" :placeholder="t('master.contract_templates.generate_subject_ph')" />
-                  <button class="btn-primary" @click="doGenerate">{{ t('master.contract_templates.generate_create') }}</button>
+                  <input v-model="generateSubject" class="input md:col-span-2" v-bind="{ placeholder: t('master.contract_templates.generate_subject_ph') }" />
+                  <button type="button" class="btn-primary" @click="doGenerate" :disabled="generating">{{ t('master.contract_templates.generate_create') }}</button>
                 </div>
                 <div class="text-xs text-amber-800 mt-2">
                   {{ t('master.contract_templates.generate_panel_note') }}
@@ -426,9 +447,9 @@ const placeholderHints = {
           <!-- Sidebar variabel -->
           <aside class="border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto" v-if="activeTab !== 'settings' && activeTab !== 'preview'">
             <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">{{ t('master.contract_templates.sidebar_variables') }}</div>
-            <input v-model="filteredVariables" :placeholder="t('master.contract_templates.sidebar_search_var')" class="input mb-3 text-sm" />
+            <input v-model="filteredVariables" v-bind="{ placeholder: t('master.contract_templates.sidebar_search_var') }" class="input mb-3 text-sm" />
             <div class="space-y-1 mb-4">
-              <button v-for="v in visibleVariables" :key="v.key"
+              <button v-for="v in visibleVariables" :key="v.key" type="button"
                 class="w-full text-left px-2 py-1 text-xs rounded hover:bg-primary-50 hover:text-primary-700 group"
                 @click="insertVariable(v.key)">
                 <code class="font-mono">{{ wrapVar(v.key) }}</code>
@@ -450,8 +471,8 @@ const placeholderHints = {
 
         <!-- Footer -->
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end gap-2 bg-white">
-          <button class="btn-secondary" @click="showEditor = false">{{ t('master.contract_templates.btn_close') }}</button>
-          <button class="btn-primary" @click="save">{{ editing ? t('master.contract_templates.btn_save_changes') : t('master.contract_templates.btn_save') }}</button>
+          <button type="button" class="btn-secondary" @click="showEditor = false">{{ t('master.contract_templates.btn_close') }}</button>
+          <button type="button" class="btn-primary" @click="save" :disabled="saving">{{ saving ? t('common.saving') : (editing ? t('master.contract_templates.btn_save_changes') : t('master.contract_templates.btn_save')) }}</button>
         </div>
       </div>
     </div>

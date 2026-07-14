@@ -144,12 +144,15 @@ final class RbacMenuCatalogService
             ];
             if ($existing) {
                 unset($row['company_id']);
-                $this->db->table('menus')->where('id', (int) $existing['id'])->update($row);
+                $this->db->table('menus')
+                    ->where('company_id IS NULL')
+                    ->where('id', (int) $existing['id'])
+                    ->update($row);
                 $updated++;
                 continue;
             }
             $row['created_at'] = $now;
-            $this->db->table('menus')->insert($row);
+            $this->db->table('menus')->set('company_id', null)->insert($row);
             $inserted++;
         }
 
@@ -162,7 +165,7 @@ final class RbacMenuCatalogService
         $updated = 0;
         $now = date('Y-m-d H:i:s');
         foreach (array_merge(self::SELF_SERVICE_REQUIREMENTS, self::LEGACY_REQUIREMENTS) as $code => $permission) {
-            $this->db->table('menus')->where('code', $code)->update([
+            $this->db->table('menus')->where('company_id IS NULL')->where('code', $code)->update([
                 'permission' => $permission,
                 'updated_at' => $now,
             ]);
@@ -176,7 +179,7 @@ final class RbacMenuCatalogService
         $updated = 0;
         $now = date('Y-m-d H:i:s');
         foreach (self::ROUTE_IDENTITIES as $code => $routePath) {
-            $this->db->table('menus')->where('code', $code)->update([
+            $this->db->table('menus')->where('company_id IS NULL')->where('code', $code)->update([
                 'route_path' => $routePath,
                 'updated_at' => $now,
             ]);
@@ -194,6 +197,7 @@ final class RbacMenuCatalogService
             'hr.compensation_review',
         ]);
         $rows = $this->db->table('menus')->select('code, super_admin_only, permission, route_path')
+            ->where('company_id IS NULL')
             ->whereIn('code', $requiredCodes)->where('deleted_at IS NULL')
             ->get()->getResultArray();
         $byCode = [];
@@ -233,6 +237,7 @@ final class RbacMenuCatalogService
         $unknown = [];
         $unmapped = [];
         $menuRows = $this->db->table('menus')->select('code, permission')
+            ->where('company_id IS NULL')
             ->where('type', 'ITEM')->where('is_active', 1)->where('deleted_at IS NULL')
             ->get()->getResultArray();
         foreach ($menuRows as $menuRow) {

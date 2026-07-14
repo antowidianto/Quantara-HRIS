@@ -38,8 +38,8 @@ class CandidateOnlineTestController extends BaseController
                 . ' ot.name AS test_name, ot.category AS test_category,'
                 . ' ot.duration_minutes, ot.passing_score_pct,'
                 . ' jp.title AS job_title, jp.reference_number AS job_ref')
-            ->join('online_tests ot', 'ot.id = ota.online_test_id')
-            ->join('job_postings jp', 'jp.id = ota.job_posting_id', 'left')
+            ->join('online_tests ot', 'ot.id = ota.online_test_id AND ot.company_id = ota.company_id')
+            ->join('job_postings jp', 'jp.id = ota.job_posting_id AND jp.company_id = ota.company_id', 'left')
             ->where('ota.candidate_account_id', (int) $account['id'])
             ->orderBy('ota.created_at', 'DESC')
             ->get()->getResultArray();
@@ -55,10 +55,17 @@ class CandidateOnlineTestController extends BaseController
         if (! $assignment) return $this->fail('Assignment tidak ditemukan', 404);
 
         $db = \Config\Database::connect();
-        $test = $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])->get()->getRowArray();
+        $test = $db->table('online_tests')
+            ->where('id', (int) $assignment['online_test_id'])
+            ->where('company_id', (int) $assignment['company_id'])
+            ->get()->getRowArray();
 
-        $attempts = $db->table('online_test_attempts')
-            ->where('assignment_id', (int) $assignment['id'])
+        $attempts = $db->table('online_test_attempts a')
+            ->select('a.*')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.assignment_id', (int) $assignment['id'])
+            ->where('x.company_id', (int) $assignment['company_id'])
+            ->where('x.candidate_account_id', (int) $account['id'])
             ->orderBy('attempt_number', 'ASC')
             ->get()->getResultArray();
 
@@ -123,24 +130,32 @@ class CandidateOnlineTestController extends BaseController
         }
 
         $db = \Config\Database::connect();
-        $inProgress = $db->table('online_test_attempts')
-            ->where('assignment_id', (int) $assignment['id'])
-            ->where('status', 'IN_PROGRESS')
+        $inProgress = $db->table('online_test_attempts a')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.assignment_id', (int) $assignment['id'])
+            ->where('x.company_id', (int) $assignment['company_id'])
+            ->where('x.candidate_account_id', (int) $account['id'])
+            ->where('a.status', 'IN_PROGRESS')
             ->countAllResults();
         if ($inProgress > 0) {
             return $this->fail('Masih ada percobaan yang sedang berjalan. Submit dulu sebelum menyelesaikan test.', 422);
         }
 
-        $submitted = $db->table('online_test_attempts')
-            ->where('assignment_id', (int) $assignment['id'])
-            ->whereIn('status', ['SUBMITTED', 'GRADED', 'EXPIRED'])
+        $submitted = $db->table('online_test_attempts a')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.assignment_id', (int) $assignment['id'])
+            ->where('x.company_id', (int) $assignment['company_id'])
+            ->where('x.candidate_account_id', (int) $account['id'])
+            ->whereIn('a.status', ['SUBMITTED', 'GRADED', 'EXPIRED'])
             ->countAllResults();
         if ($submitted <= 0) {
             return $this->fail('Belum ada percobaan yang sudah dikirim.', 422);
         }
 
         $now = date('Y-m-d H:i:s');
-        $db->table('online_test_assignments')->where('id', (int) $assignment['id'])->update([
+        $db->table('online_test_assignments')->where('id', (int) $assignment['id'])
+            ->where('company_id', (int) $assignment['company_id'])
+            ->where('candidate_account_id', (int) $account['id'])->update([
             'status'       => 'COMPLETED',
             'completed_at' => $assignment['completed_at'] ?: $now,
             'updated_at'   => $now,
@@ -291,6 +306,7 @@ class CandidateOnlineTestController extends BaseController
         $row = $db->table('online_test_assignments')
             ->where('id', $assignmentId)
             ->where('candidate_account_id', $accountId)
+            ->where('company_id >', 0)
             ->get()->getRowArray();
         return $row ?: null;
     }
@@ -304,6 +320,7 @@ class CandidateOnlineTestController extends BaseController
             ->join('online_test_assignments oa', 'oa.id = ota.assignment_id')
             ->where('ota.id', $attemptId)
             ->where('oa.candidate_account_id', $accountId)
+            ->where('oa.company_id >', 0)
             ->get()->getRowArray();
         return $row !== null;
     }
@@ -315,6 +332,7 @@ class CandidateOnlineTestController extends BaseController
             ->select('oa.*')
             ->join('online_test_attempts ota', 'ota.assignment_id = oa.id')
             ->where('ota.id', $attemptId)
+            ->where('oa.company_id >', 0)
             ->get()->getRowArray();
         return $row ?: null;
     }

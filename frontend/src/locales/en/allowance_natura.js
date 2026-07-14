@@ -1,0 +1,21 @@
+export default {
+  allowance_natura: {
+    title: 'Benefits in kind (PMK 66/2023)',
+    description: 'Non-cash benefits such as a company car, housing, or gym membership. They increase the PPh 21 gross-income basis without increasing cash take-home pay.',
+    threshold_label: 'Annual tax-free threshold (IDR)',
+    threshold_placeholder: 'Example: 3000000 for staple-food packages',
+    threshold_hint: 'Leave blank when the full benefit value is taxable. The threshold is allocated monthly during the PPh 21 calculation.',
+    validation_type_required: 'Code and name are required.',
+    validation_threshold: 'The Natura threshold cannot be negative.',
+    validation_rate: 'Distance and rate values cannot be negative.',
+    validation_date_range: 'The end date cannot be earlier than the start date.',
+    masters_load_failed: 'Failed to load branch and job-grade references.',
+    loading: 'Loading allowance data…',
+    saving: 'Saving…',
+    close: 'Close dialog',
+    edit_type: 'Edit allowance type {name}',
+    delete_type: 'Delete allowance type {name}',
+    edit_rate: 'Edit rate for {name}',
+    delete_rate: 'Delete rate for {name}',
+  },
+}

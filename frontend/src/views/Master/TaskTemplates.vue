@@ -31,6 +31,7 @@ const loading = ref(false)
 const selected = ref(null)
 const draft = ref(null)
 const saving = ref(false)
+const deleting = ref(false)
 
 const ownerRoles = computed(() => [
   { value: 'HR',         label: t('master.task_templates.role_hr') },
@@ -118,6 +119,7 @@ function moveTask(i, dir) {
 }
 
 async function saveTemplate() {
+  if (saving.value) return
   if (! draft.value) return
   if (! draft.value.code.trim() || ! draft.value.name.trim()) {
     toast.warning(t('master.task_templates.code_name_required'))
@@ -159,6 +161,7 @@ async function saveTemplate() {
       const res = await api.post('/task-templates', payload)
       toast.success(t('master.task_templates.saved_create'))
       draft.value.id = res.data?.data?.id
+      selected.value = { id: draft.value.id }
     }
     await fetchList()
   } catch (e) {
@@ -169,6 +172,7 @@ async function saveTemplate() {
 }
 
 async function deleteTemplate() {
+  if (deleting.value) return
   if (! draft.value?.id) return
   const ok = await confirm({
     title: t('master.task_templates.delete_title'),
@@ -177,14 +181,17 @@ async function deleteTemplate() {
     type: 'danger',
   })
   if (! ok) return
+  deleting.value = true
   try {
     await api.delete(`/task-templates/${draft.value.id}`)
     toast.success(t('master.task_templates.deleted'))
     selected.value = null
     draft.value = null
-    fetchList()
+    await fetchList()
   } catch (e) {
     toast.error(e.response?.data?.message || t('master.task_templates.delete_failed'))
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -194,7 +201,7 @@ function duplicateTemplate() {
     ...JSON.parse(JSON.stringify(draft.value)),
     id: null,
     code: draft.value.code + '_COPY',
-    name: draft.value.name + ' (copy)',
+    name: draft.value.name,
     is_default: 0,
   }
   selected.value = null
@@ -216,6 +223,9 @@ watch(filterType, () => fetchList())
 const typeBadge = (type) =>
   type === 'ONBOARD' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                      : 'bg-orange-50 text-orange-700 border-orange-200'
+const typeLabel = (type) => type === 'ONBOARD'
+  ? t('master.task_templates.type_onboard_label')
+  : t('master.task_templates.type_offboard_label')
 </script>
 
 <template>
@@ -238,7 +248,7 @@ const typeBadge = (type) =>
           <option value="ONBOARD">{{ t('master.task_templates.type_onboard_label') }}</option>
           <option value="OFFBOARD">{{ t('master.task_templates.type_offboard_label') }}</option>
         </select>
-        <button class="btn-primary" @click="newTemplate('ONBOARD')">
+        <button type="button" class="btn-primary" @click="newTemplate('ONBOARD')">
           <PlusIcon class="w-4 h-4" /> {{ t('master.task_templates.btn_add') }}
         </button>
       </div>
@@ -253,20 +263,21 @@ const typeBadge = (type) =>
           <div v-else-if="!templates.length" class="px-4 py-12 text-center text-sm text-gray-400">
             {{ t('master.task_templates.no_templates') }}
           </div>
-          <button v-for="t in templates" :key="t.id"
+          <button v-for="tpl in templates" :key="tpl.id"
+            type="button"
             class="w-full text-left px-4 py-3 hover:bg-gray-50 transition"
-            :class="{ 'bg-primary-50/40 border-l-4 border-primary-500': draft && draft.id === t.id }"
-            @click="selectTemplate(t)">
+            :class="{ 'bg-primary-50/40 border-l-4 border-primary-500': draft && draft.id === tpl.id }"
+            @click="selectTemplate(tpl)">
             <div class="flex items-center justify-between mb-1">
-              <span class="font-medium text-sm">{{ t.name }}</span>
-              <span class="text-xs px-1.5 py-0.5 rounded border" :class="typeBadge(t.type)">{{ t.type }}</span>
+              <span class="font-medium text-sm">{{ tpl.name }}</span>
+              <span class="text-xs px-1.5 py-0.5 rounded border" :class="typeBadge(tpl.type)">{{ typeLabel(tpl.type) }}</span>
             </div>
             <div class="text-xs text-gray-500 flex items-center gap-1.5">
-              <code class="text-[11px]">{{ t.code }}</code>
+              <code class="text-[11px]">{{ tpl.code }}</code>
               <span class="text-gray-400">·</span>
-              <span>{{ $t('master.task_templates.tasks_count', { n: (t.tasks || []).length }) }}</span>
-              <CheckBadgeIcon v-if="t.is_default" class="w-3.5 h-3.5 text-emerald-600 ml-auto" :title="$t('master.task_templates.default_badge')" />
-              <span v-if="!t.is_active" class="ml-auto text-amber-600">{{ $t('master.task_templates.inactive_badge') }}</span>
+              <span>{{ t('master.task_templates.tasks_count', { n: (tpl.tasks || []).length }) }}</span>
+              <CheckBadgeIcon v-if="tpl.is_default" class="w-3.5 h-3.5 text-emerald-600 ml-auto" v-bind="{ title: t('master.task_templates.default_badge'), 'aria-label': t('master.task_templates.default_badge') }" />
+              <span v-if="!tpl.is_active" class="ml-auto text-amber-600">{{ t('master.task_templates.inactive_badge') }}</span>
             </div>
           </button>
         </div>
@@ -284,16 +295,16 @@ const typeBadge = (type) =>
               <div>
                 <div class="text-xs text-gray-500">{{ draft.id ? t('master.task_templates.template_id', { id: draft.id }) : t('master.task_templates.template_new') }}</div>
                 <input v-model="draft.name" class="text-lg font-semibold bg-transparent focus:bg-white focus:ring-1 focus:ring-primary-500 rounded px-1 -ml-1"
-                  :placeholder="t('master.task_templates.name_ph')" />
+                  v-bind="{ placeholder: t('master.task_templates.name_ph') }" />
               </div>
               <div class="flex gap-2">
-                <button v-if="draft.id" class="btn-secondary" @click="duplicateTemplate" :title="t('master.task_templates.tip_duplicate')">
+                <button v-if="draft.id" type="button" class="btn-secondary" @click="duplicateTemplate" v-bind="{ title: t('master.task_templates.tip_duplicate'), 'aria-label': t('master.task_templates.tip_duplicate') }">
                   <DocumentDuplicateIcon class="w-4 h-4" />
                 </button>
-                <button v-if="draft.id" class="btn-secondary text-red-600" @click="deleteTemplate" :title="t('master.task_templates.tip_delete')">
+                <button v-if="draft.id" type="button" class="btn-secondary text-red-600" :disabled="deleting" @click="deleteTemplate" v-bind="{ title: t('master.task_templates.tip_delete'), 'aria-label': t('master.task_templates.tip_delete') }">
                   <TrashIcon class="w-4 h-4" />
                 </button>
-                <button class="btn-primary" :disabled="saving" @click="saveTemplate">
+                <button type="button" class="btn-primary" :disabled="saving || deleting" @click="saveTemplate">
                   <BookmarkSquareIcon class="w-4 h-4" />
                   {{ saving ? t('master.task_templates.btn_saving') : t('master.task_templates.btn_save') }}
                 </button>
@@ -305,7 +316,7 @@ const typeBadge = (type) =>
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="label">{{ t('master.task_templates.f_code') }}</label>
-                <input v-model="draft.code" class="input font-mono uppercase" :placeholder="t('master.task_templates.f_code_ph')" />
+                <input v-model="draft.code" class="input font-mono uppercase" v-bind="{ placeholder: t('master.task_templates.f_code_ph') }" />
               </div>
               <div>
                 <label class="label">{{ t('master.task_templates.f_type') }}</label>
@@ -317,7 +328,7 @@ const typeBadge = (type) =>
               <div class="col-span-2">
                 <label class="label">{{ t('master.task_templates.f_description') }}</label>
                 <textarea v-model="draft.description" rows="2" class="input"
-                  :placeholder="t('master.task_templates.f_description_ph')"></textarea>
+                  v-bind="{ placeholder: t('master.task_templates.f_description_ph') }"></textarea>
               </div>
               <div class="col-span-2 flex items-center gap-4">
                 <label class="flex items-center gap-2 text-sm">
@@ -335,7 +346,7 @@ const typeBadge = (type) =>
             <div class="border-t border-gray-200 pt-4">
               <div class="flex items-center justify-between mb-2">
                 <h3 class="text-sm font-semibold text-gray-700">{{ t('master.task_templates.tasks_section') }}</h3>
-                <button class="btn-secondary text-xs" @click="addTask">
+                <button type="button" class="btn-secondary text-xs" @click="addTask">
                   <PlusIcon class="w-3.5 h-3.5" /> {{ t('master.task_templates.btn_add_task') }}
                 </button>
               </div>
@@ -349,22 +360,22 @@ const typeBadge = (type) =>
                   class="border border-gray-200 rounded-md p-3 bg-white hover:border-primary-300 transition">
                   <div class="flex items-start gap-2">
                     <div class="flex flex-col gap-0.5 mt-1">
-                      <button class="text-gray-400 hover:text-gray-700 disabled:opacity-30"
-                        :disabled="i === 0" @click="moveTask(i, -1)" :title="t('master.task_templates.tip_move_up')">
+                      <button type="button" class="text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                        :disabled="i === 0" @click="moveTask(i, -1)" v-bind="{ title: t('master.task_templates.tip_move_up'), 'aria-label': t('master.task_templates.tip_move_up') }">
                         <ArrowUpIcon class="w-4 h-4" />
                       </button>
-                      <button class="text-gray-400 hover:text-gray-700 disabled:opacity-30"
-                        :disabled="i === draft.tasks.length - 1" @click="moveTask(i, 1)" :title="t('master.task_templates.tip_move_down')">
+                      <button type="button" class="text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                        :disabled="i === draft.tasks.length - 1" @click="moveTask(i, 1)" v-bind="{ title: t('master.task_templates.tip_move_down'), 'aria-label': t('master.task_templates.tip_move_down') }">
                         <ArrowDownIcon class="w-4 h-4" />
                       </button>
                     </div>
                     <div class="flex-1 grid grid-cols-12 gap-2">
-                      <input v-model="task.name" class="input col-span-7" :placeholder="t('master.task_templates.task_name_ph', { n: i + 1 })" />
-                      <input v-model="task.key" class="input col-span-3 font-mono text-xs uppercase" :placeholder="t('master.task_templates.task_key_ph')" />
+                      <input v-model="task.name" class="input col-span-7" v-bind="{ placeholder: t('master.task_templates.task_name_ph', { n: i + 1 }) }" />
+                      <input v-model="task.key" class="input col-span-3 font-mono text-xs uppercase" v-bind="{ placeholder: t('master.task_templates.task_key_ph') }" />
                       <select v-model="task.owner_role" class="input col-span-2 text-xs">
                         <option v-for="r in ownerRoles" :key="r.value" :value="r.value">{{ r.label }}</option>
                       </select>
-                      <input v-model="task.description" class="input col-span-12 text-xs" :placeholder="t('master.task_templates.task_desc_ph')" />
+                      <input v-model="task.description" class="input col-span-12 text-xs" v-bind="{ placeholder: t('master.task_templates.task_desc_ph') }" />
                       <div class="col-span-12 flex items-center gap-3 text-xs text-gray-600">
                         <label class="flex items-center gap-1.5">
                           {{ t('master.task_templates.due_label') }}
@@ -375,7 +386,7 @@ const typeBadge = (type) =>
                           <input type="checkbox" v-model="task.mandatory" />
                           {{ t('master.task_templates.task_mandatory') }}
                         </label>
-                        <button class="ml-auto text-red-500 hover:text-red-700" @click="removeTask(i)" :title="t('master.task_templates.tip_remove_task')">
+                        <button type="button" class="ml-auto text-red-500 hover:text-red-700" @click="removeTask(i)" v-bind="{ title: t('master.task_templates.tip_remove_task'), 'aria-label': t('master.task_templates.tip_remove_task') }">
                           <TrashIcon class="w-4 h-4" />
                         </button>
                       </div>

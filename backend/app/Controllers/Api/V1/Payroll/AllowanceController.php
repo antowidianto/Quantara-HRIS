@@ -3,6 +3,8 @@
 namespace App\Controllers\Api\V1\Payroll;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Models\Employee\EmployeeModel;
+use CodeIgniter\Database\BaseConnection;
 use Config\Services;
 
 /**
@@ -37,7 +39,7 @@ class AllowanceController extends ApiController
         $db = \Config\Database::connect();
         $b = $db->table('allowance_types t')
             ->select('t.*, c.code AS payroll_component_code')
-            ->join('payroll_components c', 'c.id = t.payroll_component_id', 'left')
+            ->join('payroll_components c', 'c.id = t.payroll_component_id AND c.company_id = t.company_id', 'left')
             ->where('t.deleted_at IS NULL');
         $this->tenant()->applyScope($b, 't.company_id');
         $rows = $b->orderBy('t.name', 'ASC')->get()->getResultArray();
@@ -60,10 +62,15 @@ class AllowanceController extends ApiController
             'default_threshold_km' => 'permit_empty|numeric|greater_than_equal_to[0]',
             'is_distance_based' => 'permit_empty|in_list[0,1]',
             'is_taxable' => 'permit_empty|in_list[0,1]',
+            'is_taxable_natura' => 'permit_empty|in_list[0,1]',
+            'natura_tax_threshold' => 'permit_empty|numeric|greater_than_equal_to[0]',
         ]);
         if (! $valid) return null;
 
         $db = \Config\Database::connect();
+        if (! empty($data['payroll_component_id']) && ! $this->tenantReferenceExists($db, 'payroll_components', (int) $data['payroll_component_id'], $companyId)) {
+            return $this->fail('Komponen payroll tidak valid', 422, 'INVALID_PAYROLL_COMPONENT');
+        }
         $exists = $db->table('allowance_types')
             ->where('company_id', $companyId)
             ->where('code', $data['code'])
@@ -73,13 +80,17 @@ class AllowanceController extends ApiController
             return $this->fail('Kode allowance sudah dipakai', 422, 'DUPLICATE_CODE');
         }
 
+        $isNatura = (int) ($data['is_taxable_natura'] ?? 0);
         $insert = [
             'company_id' => $companyId,
             'code'       => $data['code'],
             'name'       => $data['name'],
             'description'=> $data['description'] ?? null,
             'category'   => $data['category'] ?? 'TRANSPORT',
-            'is_taxable' => isset($data['is_taxable']) ? (int) $data['is_taxable'] : 1,
+            'is_taxable' => $isNatura === 1 ? 1 : (isset($data['is_taxable']) ? (int) $data['is_taxable'] : 1),
+            'is_taxable_natura' => $isNatura,
+            'natura_tax_threshold' => isset($data['natura_tax_threshold']) && $data['natura_tax_threshold'] !== ''
+                ? (float) $data['natura_tax_threshold'] : null,
             'is_distance_based' => isset($data['is_distance_based']) ? (int) $data['is_distance_based'] : 1,
             'default_threshold_km' => (float) ($data['default_threshold_km'] ?? 30),
             'payroll_component_id' => $data['payroll_component_id'] ?? null,
@@ -103,19 +114,35 @@ class AllowanceController extends ApiController
             return $this->fail('Tidak ada izin', 403);
         }
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('allowance_types')->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        $existing = $db->table('allowance_types')->where('id', $id)->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $existing) return $this->fail('Tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
         $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'name' => 'permit_empty|max_length[100]',
+            'category' => 'permit_empty|in_list[ALLOWANCE,TRANSPORT,MEAL,HOUSING,OTHER]',
+            'default_threshold_km' => 'permit_empty|numeric|greater_than_equal_to[0]',
+            'is_distance_based' => 'permit_empty|in_list[0,1]',
+            'is_taxable' => 'permit_empty|in_list[0,1]',
+            'is_taxable_natura' => 'permit_empty|in_list[0,1]',
+            'natura_tax_threshold' => 'permit_empty|numeric|greater_than_equal_to[0]',
+        ]);
+        if (! $valid) return null;
+        if (array_key_exists('name', $data) && trim((string) $data['name']) === '') return $this->fail('Nama wajib', 422);
+        if (! empty($data['payroll_component_id']) && ! $this->tenantReferenceExists($db, 'payroll_components', (int) $data['payroll_component_id'], $companyId)) {
+            return $this->fail('Komponen payroll tidak valid', 422, 'INVALID_PAYROLL_COMPONENT');
+        }
         $upd = array_intersect_key($data, array_flip([
             'name','description','category','is_taxable','is_distance_based',
             'default_threshold_km','payroll_component_id','is_active',
+            'is_taxable_natura','natura_tax_threshold',
         ]));
+        if (($upd['is_taxable_natura'] ?? $existing['is_taxable_natura'] ?? 0) == 1) $upd['is_taxable'] = 1;
+        if (array_key_exists('natura_tax_threshold', $upd) && $upd['natura_tax_threshold'] === '') $upd['natura_tax_threshold'] = null;
         $upd['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('allowance_types')->where('id', $id)->update($upd);
+        $db->table('allowance_types')->where('id', $id)->where('company_id', $companyId)->update($upd);
 
         Services::audit()
             ->forModule('PAYROLL')
@@ -123,7 +150,7 @@ class AllowanceController extends ApiController
                 "Memperbarui tipe tunjangan: {$existing['name']}");
 
         // Setelah update tipe, recompute semua karyawan dalam company.
-        Services::allowance()->recomputeCompany((int) $existing['company_id']);
+        Services::allowance()->recomputeCompany($companyId);
 
         return $this->ok(null, 'Tipe allowance diperbarui');
     }
@@ -134,13 +161,12 @@ class AllowanceController extends ApiController
             return $this->fail('Tidak ada izin', 403);
         }
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('allowance_types')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('allowance_types')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
-        $db->table('allowance_types')->where('id', $id)->update([
+        $db->table('allowance_types')->where('id', $id)->where('company_id', $companyId)->update([
             'deleted_at' => date('Y-m-d H:i:s'),
             'is_active'  => 0,
         ]);
@@ -158,9 +184,9 @@ class AllowanceController extends ApiController
         $typeId = (int) ($this->request->getGet('allowance_type_id') ?? 0);
         $b = $db->table('allowance_rates r')
             ->select('r.*, t.name AS type_name, t.code AS type_code, t.category AS type_category, t.is_distance_based, jg.name AS grade_name, jg.code AS grade_code, br.name AS branch_name')
-            ->join('allowance_types t', 't.id = r.allowance_type_id')
-            ->join('job_grades jg', 'jg.id = r.job_grade_id', 'left')
-            ->join('branches br', 'br.id = r.branch_id', 'left')
+            ->join('allowance_types t', 't.id = r.allowance_type_id AND t.company_id = r.company_id')
+            ->join('job_grades jg', 'jg.id = r.job_grade_id AND jg.company_id = r.company_id', 'left')
+            ->join('branches br', 'br.id = r.branch_id AND br.company_id = r.company_id', 'left')
             ->where('t.deleted_at IS NULL');
         $this->tenant()->applyScope($b, 'r.company_id');
         if ($typeId) $b->where('r.allowance_type_id', $typeId);
@@ -191,9 +217,14 @@ class AllowanceController extends ApiController
 
         $db = \Config\Database::connect();
         // Pastikan type milik company yang sama
-        $type = $db->table('allowance_types')->where('id', $data['allowance_type_id'])->get()->getRowArray();
-        if (! $type || (int) $type['company_id'] !== $companyId) {
+        $type = $db->table('allowance_types')->where('id', $data['allowance_type_id'])->where('company_id', $companyId)->get()->getRowArray();
+        if (! $type) {
             return $this->fail('Tipe allowance tidak valid', 422);
+        }
+        $invalidScope = $this->invalidRateScope($db, $data, $companyId);
+        if ($invalidScope !== null) return $this->fail("Referensi {$invalidScope} tidak valid", 422, 'INVALID_SCOPE');
+        if (! empty($data['effective_from']) && ! empty($data['effective_to']) && $data['effective_to'] < $data['effective_from']) {
+            return $this->fail('effective_to harus setelah atau sama dengan effective_from', 422, 'INVALID_DATE_RANGE');
         }
 
         $insert = [
@@ -235,13 +266,27 @@ class AllowanceController extends ApiController
             return $this->fail('Tidak ada izin', 403);
         }
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('allowance_rates')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('allowance_rates')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
         $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'threshold_km' => 'permit_empty|numeric|greater_than_equal_to[0]',
+            'rate_below' => 'permit_empty|numeric|greater_than_equal_to[0]',
+            'rate_above' => 'permit_empty|numeric|greater_than_equal_to[0]',
+            'effective_from' => 'permit_empty|valid_date',
+            'effective_to' => 'permit_empty|valid_date',
+        ]);
+        if (! $valid) return null;
+        $invalidScope = $this->invalidRateScope($db, $data, $companyId);
+        if ($invalidScope !== null) return $this->fail("Referensi {$invalidScope} tidak valid", 422, 'INVALID_SCOPE');
+        $effectiveFrom = $data['effective_from'] ?? $existing['effective_from'];
+        $effectiveTo = $data['effective_to'] ?? $existing['effective_to'];
+        if ($effectiveFrom && $effectiveTo && $effectiveTo < $effectiveFrom) {
+            return $this->fail('effective_to harus setelah atau sama dengan effective_from', 422, 'INVALID_DATE_RANGE');
+        }
         $upd = array_intersect_key($data, array_flip([
             'job_grade_id','branch_id','threshold_km','rate_below','rate_above',
             'effective_from','effective_to','notes',
@@ -251,14 +296,14 @@ class AllowanceController extends ApiController
             if (isset($upd[$k]) && $upd[$k] === '') $upd[$k] = null;
         }
         $upd['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('allowance_rates')->where('id', $id)->update($upd);
+        $db->table('allowance_rates')->where('id', $id)->where('company_id', $companyId)->update($upd);
 
         Services::audit()
             ->forModule('PAYROLL')
             ->logUpdate('allowance_rate', $id, array_intersect_key($existing, $upd), $upd,
                 'Memperbarui tarif tunjangan');
 
-        Services::allowance()->recomputeCompany((int) $existing['company_id']);
+        Services::allowance()->recomputeCompany($companyId);
         return $this->ok(null, 'Tarif diperbarui');
     }
 
@@ -268,18 +313,17 @@ class AllowanceController extends ApiController
             return $this->fail('Tidak ada izin', 403);
         }
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('allowance_rates')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('allowance_rates')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
-        $db->table('allowance_rates')->where('id', $id)->delete();
+        $db->table('allowance_rates')->where('id', $id)->where('company_id', $companyId)->delete();
         Services::audit()
             ->forModule('PAYROLL')
             ->logDelete('allowance_rate', $id, $existing, 'Menghapus tarif tunjangan');
 
-        Services::allowance()->recomputeCompany((int) $existing['company_id']);
+        Services::allowance()->recomputeCompany($companyId);
         return $this->ok(null, 'Tarif dihapus');
     }
 
@@ -288,13 +332,12 @@ class AllowanceController extends ApiController
     public function listForEmployee($employeeId = null)
     {
         $employeeId = (int) $employeeId;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
 
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $emp = (new EmployeeModel())->findScoped($employeeId);
         if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $emp['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
         // Karyawan biasa cuma boleh lihat punyanya sendiri
         $isSelf = $this->tenant()->getEmployeeId() === $employeeId;
         if (! $isSelf && ! $this->tenant()->hasPermission('employee.view')) {
@@ -303,10 +346,11 @@ class AllowanceController extends ApiController
 
         $rows = $db->table('employee_allowance_assignments a')
             ->select('a.*, t.code AS type_code, t.name AS type_name, t.category, t.is_distance_based, br.name AS branch_name, jg.name AS grade_name')
-            ->join('allowance_types t', 't.id = a.allowance_type_id')
-            ->join('branches br', 'br.id = a.branch_id', 'left')
-            ->join('job_grades jg', 'jg.id = a.job_grade_id', 'left')
+            ->join('allowance_types t', 't.id = a.allowance_type_id AND t.company_id = a.company_id')
+            ->join('branches br', 'br.id = a.branch_id AND br.company_id = a.company_id', 'left')
+            ->join('job_grades jg', 'jg.id = a.job_grade_id AND jg.company_id = a.company_id', 'left')
             ->where('a.employee_id', $employeeId)
+            ->where('a.company_id', $companyId)
             ->orderBy('t.name', 'ASC')
             ->get()->getResultArray();
         return $this->ok($rows);
@@ -319,13 +363,11 @@ class AllowanceController extends ApiController
             return $this->fail('Tidak ada izin', 403);
         }
         $employeeId = (int) $employeeId;
-        $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $emp = (new EmployeeModel())->findScoped($employeeId);
         if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $emp['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
-        $count = Services::allowance()->recomputeEmployee($employeeId);
+        $count = Services::allowance()->recomputeEmployee($employeeId, $companyId);
         Services::audit()
             ->forModule('PAYROLL')
             ->log(
@@ -365,23 +407,42 @@ class AllowanceController extends ApiController
             return $this->fail('Tidak ada izin', 403);
         }
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $db = \Config\Database::connect();
-        $existing = $db->table('employee_allowance_assignments')->where('id', $id)->get()->getRowArray();
+        $existing = $db->table('employee_allowance_assignments')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $existing) return $this->fail('Tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
-        }
         $data = $this->getJsonInput();
+        $valid = $this->validateOrFail($data, [
+            'amount' => 'permit_empty|numeric|greater_than_equal_to[0]',
+            'eligible' => 'permit_empty|in_list[0,1]',
+            'manual_override' => 'permit_empty|in_list[0,1]',
+        ]);
+        if (! $valid) return null;
         $upd = array_intersect_key($data, array_flip(['amount','eligible','note','manual_override']));
         if (isset($upd['amount'])) $upd['amount'] = (float) $upd['amount'];
         if (isset($upd['eligible'])) $upd['eligible'] = (int) (bool) $upd['eligible'];
         $upd['manual_override'] = isset($data['manual_override']) ? (int) (bool) $data['manual_override'] : 1;
         $upd['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('employee_allowance_assignments')->where('id', $id)->update($upd);
+        $db->table('employee_allowance_assignments')->where('id', $id)->where('company_id', $companyId)->update($upd);
         Services::audit()
             ->forModule('PAYROLL')
             ->logUpdate('employee_allowance', $id, $existing, $upd,
                 'Override manual tunjangan karyawan');
         return $this->ok(null, 'Override tersimpan');
+    }
+
+    private function tenantReferenceExists(BaseConnection $db, string $table, int $id, int $companyId): bool
+    {
+        return $db->table($table)->where('id', $id)->where('company_id', $companyId)->countAllResults() > 0;
+    }
+
+    private function invalidRateScope(BaseConnection $db, array $data, int $companyId): ?string
+    {
+        foreach (['job_grade_id' => 'job_grades', 'branch_id' => 'branches'] as $field => $table) {
+            if (empty($data[$field])) continue;
+            if (! $this->tenantReferenceExists($db, $table, (int) $data[$field], $companyId)) return $field;
+        }
+        return null;
     }
 }
