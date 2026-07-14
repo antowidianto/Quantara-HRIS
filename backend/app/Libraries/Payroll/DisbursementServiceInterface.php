@@ -10,7 +10,7 @@ interface DisbursementServiceInterface
      * @param array $payslipIds
      * @return array Returns an array containing ['success' => bool, 'batch_id' => string|null, 'error' => string|null]
      */
-    public function disbursePayroll(array $payslipIds): array;
+    public function disbursePayroll(array $payslipIds, int $companyId): array;
 
     /**
      * Checks the status of a specific disbursement transaction.

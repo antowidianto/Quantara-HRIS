@@ -127,9 +127,11 @@ class InboundWebhookController extends ApiController
             ?: ($payload['event_id'] ?? $payload['id'] ?? '')
         );
         if ($sourceEventId === '') {
-            // Generate fallback (UUID v4) — sender boleh tidak include id,
-            // tapi maka tidak idempotent secara default
-            $sourceEventId = $this->generateUuid();
+            return $this->fail(
+                'X-HRIS-Source-Event header or payload event_id/id is required',
+                422,
+                'SOURCE_EVENT_ID_REQUIRED'
+            );
         }
 
         // 7. INSERT event row (UNIQUE will prevent duplicate)

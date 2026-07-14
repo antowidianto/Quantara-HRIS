@@ -41,4 +41,10 @@ class QueueService
             'created_at'   => $now,
         ]);
     }
+
+    /** Semantic alias used by application services/controllers. */
+    public function dispatch(string $jobClass, array $data = [], string $queue = 'default', int $delay = 0)
+    {
+        return $this->push($jobClass, $data, $queue, $delay);
+    }
 }

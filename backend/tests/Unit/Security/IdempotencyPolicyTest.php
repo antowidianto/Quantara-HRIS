@@ -8,13 +8,13 @@ use App\Filters\IdempotencyFilter;
 use CodeIgniter\HTTP\RequestInterface;
 use CodeIgniter\HTTP\ResponseInterface;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RouteSource;
 
 final class IdempotencyPolicyTest extends TestCase
 {
     public function testCriticalMutationPolicyIsConfiguredAsRequired(): void
     {
-        $routes = file_get_contents(APPPATH . 'Config/Routes.php');
-        self::assertNotFalse($routes);
+        $routes = RouteSource::all();
 
         foreach ([
             'attendance/clock-in',
@@ -45,6 +45,31 @@ final class IdempotencyPolicyTest extends TestCase
         $filters = file_get_contents(APPPATH . 'Config/Filters.php');
         self::assertNotFalse($filters);
         self::assertStringNotContainsString("'idempotency:required' =>", $filters);
+    }
+
+    public function testEveryRequiredRouteIsAStateChangingRoute(): void
+    {
+        $routes = RouteSource::all();
+        preg_match_all('/\$routes->(get|post|put|patch|delete)\([^\n]+idempotency:required/s', $routes, $matches);
+
+        self::assertNotEmpty($matches[0]);
+        self::assertSame([], array_values(array_filter(
+            $matches[1],
+            static fn (string $method): bool => $method === 'get'
+        )));
+    }
+
+    public function testWebAndMobileClientsKeyEveryStateChangingRequest(): void
+    {
+        $projectRoot = dirname(ROOTPATH);
+        $webPolicy = file_get_contents($projectRoot . '/frontend/src/api/idempotency.js');
+        $mobilePolicy = file_get_contents($projectRoot . '/mobile/src/api/idempotencyPolicy.ts');
+
+        self::assertNotFalse($webPolicy);
+        self::assertNotFalse($mobilePolicy);
+        self::assertStringContainsString("['POST', 'PUT', 'PATCH', 'DELETE']", $webPolicy);
+        self::assertStringContainsString("['POST', 'PUT', 'PATCH', 'DELETE']", $mobilePolicy);
+        self::assertStringContainsString('return true', $webPolicy);
     }
 
     public function testRequiredModeReturnsStableMissingKeyError(): void

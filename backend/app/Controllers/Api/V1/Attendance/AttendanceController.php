@@ -95,8 +95,14 @@ class AttendanceController extends ApiController
      */
     public function my()
     {
-        $employeeId = $this->tenant()->getEmployeeId();
+        $tenant = $this->tenant();
+        $employeeId = $tenant->getEmployeeId();
         if (! $employeeId) return $this->fail('User tidak terhubung dengan karyawan', 400, 'NO_EMPLOYEE_LINK');
+        $employee = \Config\Database::connect()->table('employees')
+            ->select('id')->where('id', (int) $employeeId)
+            ->where('company_id', $tenant->getCompanyId())
+            ->get()->getRowArray();
+        if (! $employee) return $this->fail('Karyawan tidak tersedia pada tenant aktif', 403, 'EMPLOYEE_TENANT_MISMATCH');
 
         $today = date('Y-m-d');
         $start = (string) ($this->request->getGet('start_date') ?? date('Y-m-01'));
@@ -183,6 +189,7 @@ class AttendanceController extends ApiController
             ->select('a.*, e.full_name AS employee_name, e.employee_number, e.branch_id, e.department_id')
             ->join('employees e', 'e.id = a.employee_id')
             ->where('a.id', (int) $id)
+            ->where('a.company_id', $this->requireCompanyId())
             ->get()
             ->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
@@ -214,7 +221,11 @@ class AttendanceController extends ApiController
         }
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $activeCompanyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $activeCompanyId)
+            ->get()->getRowArray();
         if (! $emp || (int) $emp['is_active'] !== 1) return $this->fail('Inactive employee', 400);
 
         $companyId = (int) $emp['company_id'];
@@ -255,6 +266,7 @@ class AttendanceController extends ApiController
 
         // Cek duplicate clock-in dengan workDate yang sudah resolved
         $existing = $db->table('attendances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->where('work_date', $workDate)
             ->get()->getRowArray();
@@ -302,7 +314,10 @@ class AttendanceController extends ApiController
         $geofenceRadius = null;
         $branchId = $emp['branch_id'] ?? null;
         if ($branchId && isset($data['lat'], $data['lng'])) {
-            $branch = $db->table('branches')->where('id', $branchId)->get()->getRowArray();
+            $branch = $db->table('branches')
+                ->where('id', $branchId)
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
             if ($branch && $branch['lat'] && $branch['lng'] && $branch['geofence_radius_m']) {
                 $distanceToBranch = $this->haversine((float) $branch['lat'], (float) $branch['lng'], (float) $data['lat'], (float) $data['lng']);
                 $geofenceRadius = (float) $branch['geofence_radius_m'];
@@ -380,7 +395,10 @@ class AttendanceController extends ApiController
             'updated_at'   => date('Y-m-d H:i:s'),
         ];
         if ($existing) {
-            $db->table('attendances')->where('id', $existing['id'])->update($row);
+            $db->table('attendances')
+                ->where('id', $existing['id'])
+                ->where('company_id', $companyId)
+                ->update($row);
             $id = (int) $existing['id'];
         } else {
             $db->table('attendances')->insert($row);
@@ -413,6 +431,7 @@ class AttendanceController extends ApiController
             if ($saved) $data['photo_path'] = $saved;
         }
         $db = \Config\Database::connect();
+        $companyId = $this->requireCompanyId();
         $today = date('Y-m-d');
         $now = time();
 
@@ -420,6 +439,7 @@ class AttendanceController extends ApiController
         // clock-in tanpa clock-out), lalu kemarin (untuk overnight shift
         // yang clock-out keesokan paginya).
         $row = $db->table('attendances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->where('work_date', $today)
             ->where('clock_in_at IS NOT NULL')
@@ -428,6 +448,7 @@ class AttendanceController extends ApiController
             // Kemungkinan shift overnight → cari row kemarin yang masih open
             $yesterday = date('Y-m-d', $now - 86400);
             $candidate = $db->table('attendances')
+                ->where('company_id', $companyId)
                 ->where('employee_id', $employeeId)
                 ->where('work_date', $yesterday)
                 ->where('clock_in_at IS NOT NULL')
@@ -444,7 +465,10 @@ class AttendanceController extends ApiController
         // shift end keesokan paginya, bukan today's date.
         $earlyLeave = 0;
         if ($row['shift_id']) {
-            $shift = $db->table('shifts')->where('id', $row['shift_id'])->get()->getRowArray();
+            $shift = $db->table('shifts')
+                ->where('id', $row['shift_id'])
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
             if ($shift) {
                 $shiftHelper = Services::shiftTime();
                 $shiftStart = strtotime($row['clock_in_at']);
@@ -455,7 +479,10 @@ class AttendanceController extends ApiController
             }
         }
 
-        $db->table('attendances')->where('id', $row['id'])->update([
+        $db->table('attendances')
+            ->where('id', $row['id'])
+            ->where('company_id', $companyId)
+            ->update([
             'clock_out_at'  => date('Y-m-d H:i:s'),
             'clock_out_lat' => $data['lat'] ?? null,
             'clock_out_lng' => $data['lng'] ?? null,

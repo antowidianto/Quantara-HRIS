@@ -94,6 +94,13 @@ class RecruitmentController extends ApiController
 
         $q = trim((string) ($this->request->getGet('q') ?? ''));
         $status = strtoupper((string) ($this->request->getGet('status') ?? ''));
+        $isRecruitmentViewer = $this->tenant()->isSuperAdmin()
+            || $this->tenant()->hasPermission('recruitment.view');
+        // Employee referral users may only browse published/open vacancies.
+        // The query parameter must not be able to widen this scope.
+        if (! $isRecruitmentViewer) {
+            $status = 'OPEN';
+        }
 
         $builder = $db->table('job_postings jp')
             ->select('jp.*, d.name AS department_name, p.name AS position_name, b.name AS branch_name,'

@@ -189,7 +189,11 @@ class LeaveController extends ApiController
         if (! $employeeId) return $this->fail('User tidak terhubung dengan karyawan', 400, 'NO_EMPLOYEE_LINK');
 
         $db  = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $activeCompanyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $activeCompanyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
 
         $companyId = (int) $emp['company_id'];
@@ -205,6 +209,7 @@ class LeaveController extends ApiController
 
         $year = (int) date('Y');
         $balances = $db->table('leave_balances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->where('period_year', $year)
             ->get()->getResultArray();
@@ -275,7 +280,10 @@ class LeaveController extends ApiController
     private function getGender(){
         $db = \Config\Database::connect();
         $employeeId = $this->tenant()->getEmployeeId();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $this->requireCompanyId())
+            ->get()->getRowArray();
         return strtoupper((string) ($emp['gender'] ?? ''));
     }
     
@@ -347,13 +355,20 @@ class LeaveController extends ApiController
         if (! $employeeId) return $this->fail('Employee not specified', 400);
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
         if (! $this->tenant()->isSuperAdmin() && (int) $emp['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
 
-        $leaveType = $db->table('leave_types')->where('id', $data['leave_type_id'])->get()->getRowArray();
+        $leaveType = $db->table('leave_types')
+            ->where('id', $data['leave_type_id'])
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $leaveType) return $this->fail('Tipe cuti tidak ditemukan', 404);
 
         // ─── Validasi tanggal & rentang ────────────────────────────────
@@ -443,6 +458,7 @@ class LeaveController extends ApiController
 
         // ─── Cek tumpang tindih dengan pengajuan PENDING/APPROVED ──────
         $overlap = $db->table('leaves')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->whereIn('status', ['PENDING', 'APPROVED'])
             ->where('start_date <=', $data['end_date'])
@@ -479,6 +495,7 @@ class LeaveController extends ApiController
         if ((int) $leaveType['is_paid'] === 1 && (int) $leaveType['reset_yearly'] === 1 && $leaveType['default_days'] > 0) {
             $year = (int) date('Y', strtotime($data['start_date']));
             $bal = $db->table('leave_balances')
+                ->where('company_id', $companyId)
                 ->where('employee_id', $employeeId)
                 ->where('leave_type_id', $leaveType['id'])
                 ->where('period_year', $year)
@@ -611,7 +628,11 @@ class LeaveController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $leave = $db->table('leaves')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $leave = $db->table('leaves')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $leave) return $this->fail('Not found', 404);
         if ($leave['status'] !== 'PENDING') return $this->fail('Leave not pending', 422);
         if (! $this->tenant()->isSuperAdmin() && (int) $leave['company_id'] !== $this->companyId()) {
@@ -619,7 +640,7 @@ class LeaveController extends ApiController
         }
 
         $db->transStart();
-        $db->table('leaves')->where('id', $id)->update([
+        $db->table('leaves')->where('id', $id)->where('company_id', $companyId)->update([
             'status' => 'APPROVED',
             'approved_by' => $this->userId(),
             'approved_at' => date('Y-m-d H:i:s'),
@@ -627,10 +648,14 @@ class LeaveController extends ApiController
         ]);
 
         // Decrement balance
-        $leaveType = $db->table('leave_types')->where('id', $leave['leave_type_id'])->get()->getRowArray();
+        $leaveType = $db->table('leave_types')
+            ->where('id', $leave['leave_type_id'])
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if ($leaveType && (int) $leaveType['reset_yearly'] === 1 && $leaveType['default_days'] > 0) {
             $year = (int) date('Y', strtotime($leave['start_date']));
             $bal = $db->table('leave_balances')
+                ->where('company_id', $companyId)
                 ->where('employee_id', $leave['employee_id'])
                 ->where('leave_type_id', $leave['leave_type_id'])
                 ->where('period_year', $year)
@@ -648,7 +673,7 @@ class LeaveController extends ApiController
                     'updated_at'    => date('Y-m-d H:i:s'),
                 ]);
             } else {
-                $db->table('leave_balances')->where('id', $bal['id'])->update([
+                $db->table('leave_balances')->where('id', $bal['id'])->where('company_id', $companyId)->update([
                     'used'      => (float) $bal['used'] + (float) $leave['days'],
                     'remaining' => (float) $bal['remaining'] - (float) $leave['days'],
                     'updated_at'=> date('Y-m-d H:i:s'),
@@ -660,9 +685,9 @@ class LeaveController extends ApiController
         $period = new \DatePeriod(new \DateTime($leave['start_date']), new \DateInterval('P1D'), (new \DateTime($leave['end_date']))->modify('+1 day'));
         foreach ($period as $d) {
             $date = $d->format('Y-m-d');
-            $existing = $db->table('attendances')->where('employee_id', $leave['employee_id'])->where('work_date', $date)->get()->getRowArray();
+            $existing = $db->table('attendances')->where('company_id', $companyId)->where('employee_id', $leave['employee_id'])->where('work_date', $date)->get()->getRowArray();
             if ($existing) {
-                $db->table('attendances')->where('id', $existing['id'])->update(['status' => 'LEAVE']);
+                $db->table('attendances')->where('id', $existing['id'])->where('company_id', $companyId)->update(['status' => 'LEAVE']);
             } else {
                 $db->table('attendances')->insert([
                     'company_id'   => $leave['company_id'],
@@ -678,7 +703,7 @@ class LeaveController extends ApiController
         $db->transComplete();
 
         // Notify employee
-        $emp = $db->table('employees')->where('id', $leave['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $leave['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
         if ($emp && $emp['user_id']) {
             Services::notification()->send((int) $emp['user_id'], (int) $leave['company_id'], 'leave.approved',
                 'Pengajuan cuti disetujui', 'Pengajuan cuti Anda telah disetujui',
@@ -688,7 +713,7 @@ class LeaveController extends ApiController
         // Sprint 13+ — dispatch webhook outbound via trait helper.
         // Defensive: trait sudah handle exception + log warning.
         $leaveType = $leaveType ?? $db->table('leave_types')
-            ->where('id', $leave['leave_type_id'])->get()->getRowArray();
+            ->where('id', $leave['leave_type_id'])->where('company_id', $companyId)->get()->getRowArray();
         $this->dispatchWebhook(
             \App\Constants\WebhookEvent::LEAVE_APPROVED,
             (int) $leave['company_id'],
@@ -725,11 +750,12 @@ class LeaveController extends ApiController
         $reason = $data['reason'] ?? '';
 
         $db = \Config\Database::connect();
-        $leave = $db->table('leaves')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $leave = $db->table('leaves')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $leave) return $this->fail('Not found', 404);
         if ($leave['status'] !== 'PENDING') return $this->fail('Leave not pending', 422);
 
-        $db->table('leaves')->where('id', $id)->update([
+        $db->table('leaves')->where('id', $id)->where('company_id', $companyId)->update([
             'status' => 'REJECTED',
             'approved_by' => $this->userId(),
             'approved_at' => date('Y-m-d H:i:s'),
@@ -737,7 +763,7 @@ class LeaveController extends ApiController
             'updated_at'  => date('Y-m-d H:i:s'),
         ]);
 
-        $emp = $db->table('employees')->where('id', $leave['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $leave['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
         if ($emp && $emp['user_id']) {
             Services::notification()->send((int) $emp['user_id'], (int) $leave['company_id'], 'leave.rejected',
                 'Pengajuan cuti ditolak', "Alasan: {$reason}", ['leave_id' => $id], '/leaves/' . $id, true);
@@ -789,7 +815,8 @@ class LeaveController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $leave = $db->table('leaves')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $leave = $db->table('leaves')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
         if (! $leave) return $this->fail('Not found', 404);
 
         $tenant = $this->tenant();
@@ -828,7 +855,7 @@ class LeaveController extends ApiController
 
         $db->transStart();
 
-        $db->table('leaves')->where('id', $id)->update([
+        $db->table('leaves')->where('id', $id)->where('company_id', $companyId)->update([
             'status'              => 'CANCELLED',
             'cancellation_reason' => $reason,
             'cancelled_by'        => $this->userId(),
@@ -840,18 +867,19 @@ class LeaveController extends ApiController
         // di hari yang BELUM terjadi.
         if ($previousStatus === 'APPROVED') {
             $leaveType = $db->table('leave_types')
-                ->where('id', $leave['leave_type_id'])->get()->getRowArray();
+                ->where('id', $leave['leave_type_id'])->where('company_id', $companyId)->get()->getRowArray();
             if ($leaveType && (int) $leaveType['reset_yearly'] === 1
                 && (float) $leaveType['default_days'] > 0
             ) {
                 $year = (int) date('Y', strtotime($leave['start_date']));
                 $bal = $db->table('leave_balances')
+                    ->where('company_id', $companyId)
                     ->where('employee_id', $leave['employee_id'])
                     ->where('leave_type_id', $leave['leave_type_id'])
                     ->where('period_year', $year)
                     ->get()->getRowArray();
                 if ($bal) {
-                    $db->table('leave_balances')->where('id', $bal['id'])->update([
+                    $db->table('leave_balances')->where('id', $bal['id'])->where('company_id', $companyId)->update([
                         'used'      => max(0, (float) $bal['used'] - (float) $leave['days']),
                         'remaining' => (float) $bal['remaining'] + (float) $leave['days'],
                         'updated_at'=> $now,
@@ -861,6 +889,7 @@ class LeaveController extends ApiController
 
             // Hapus mark attendance LEAVE untuk hari yang belum terjadi
             $db->table('attendances')
+                ->where('company_id', $companyId)
                 ->where('employee_id', $leave['employee_id'])
                 ->where('status', 'LEAVE')
                 ->where('work_date >=', $today)
@@ -875,7 +904,7 @@ class LeaveController extends ApiController
         }
 
         // Notifikasi: kalau HR cancel atas nama karyawan, kasih tahu karyawan
-        $emp = $db->table('employees')->where('id', $leave['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $leave['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
         if (! $isOwner && $emp && ! empty($emp['user_id'])) {
             Services::notification()->send(
                 (int) $emp['user_id'], (int) $leave['company_id'], 'leave.canceled',

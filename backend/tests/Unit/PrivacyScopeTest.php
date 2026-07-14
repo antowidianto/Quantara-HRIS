@@ -110,6 +110,16 @@ class PrivacyScopeTest extends TestCase
     }
 
     #[Test]
+    public function attendance_self_permissions_never_grant_view_all(): void
+    {
+        foreach (['attendance.view_self', 'attendance.view', 'attendance.clock'] as $permission) {
+            $scope = new PrivacyScope($this->makeTenant(false, 100, 1, [$permission]));
+            $this->assertTrue($scope->canViewOwn('attendance'), $permission);
+            $this->assertFalse($scope->canViewAll('attendance'), $permission);
+        }
+    }
+
+    #[Test]
     public function sanitize_employee_filter_view_own_forces_self(): void
     {
         $tenant = $this->makeTenant(false, 100, 1, ['leave.view']);

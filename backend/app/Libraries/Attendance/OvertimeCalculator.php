@@ -59,6 +59,26 @@ class OvertimeCalculator
         return $this->calculateRestDay($hourly, $hours, $workDaysPerWeek);
     }
 
+    /**
+     * Domain rule for planned-versus-realized overtime. A variance above
+     * 50% is allowed only when the employee supplies a justification.
+     *
+     * @return array{variance_percent:float,requires_note:bool,valid:bool}
+     */
+    public function realizationVariance(float $plannedHours, float $actualHours, string $note = ''): array
+    {
+        $variance = $plannedHours > 0
+            ? abs($actualHours - $plannedHours) / $plannedHours
+            : 0.0;
+        $requiresNote = $plannedHours > 0 && $variance > 0.5;
+
+        return [
+            'variance_percent' => round($variance * 100, 2),
+            'requires_note' => $requiresNote,
+            'valid' => ! $requiresNote || trim($note) !== '',
+        ];
+    }
+
     private function calculateWeekday(float $hourly, float $hours): float
     {
         $first = min(1.0, $hours);

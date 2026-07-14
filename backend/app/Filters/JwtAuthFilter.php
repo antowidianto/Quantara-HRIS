@@ -82,7 +82,8 @@ class JwtAuthFilter implements FilterInterface
                             ],
                         );
                     } catch (\Throwable $e) {
-                        // Audit log gagal tidak boleh block request
+                        log_message('critical', 'Tenant switch audit failed: ' . $e->getMessage());
+                        return $this->auditUnavailable();
                     }
                 }
             }
@@ -101,6 +102,7 @@ class JwtAuthFilter implements FilterInterface
             $emp = $db->table('employees')
                 ->select('branch_id')
                 ->where('id', (int) $user['employee_id'])
+                ->where('company_id', $companyId)
                 ->get()
                 ->getRowArray();
             if ($emp) {
@@ -123,6 +125,17 @@ class JwtAuthFilter implements FilterInterface
                 'status'  => 'error',
                 'code'    => 'UNAUTHENTICATED',
                 'message' => $message,
+            ]);
+    }
+
+    private function auditUnavailable(): ResponseInterface
+    {
+        return Services::response()
+            ->setStatusCode(503)
+            ->setJSON([
+                'status' => 'error',
+                'code' => 'PRIVILEGED_AUDIT_UNAVAILABLE',
+                'message' => 'Privileged tenant switch cannot continue without an audit record.',
             ]);
     }
 }

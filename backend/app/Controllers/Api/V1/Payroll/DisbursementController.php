@@ -4,6 +4,8 @@ namespace App\Controllers\Api\V1\Payroll;
 
 use App\Controllers\Api\V1\ApiController;
 use App\Libraries\Payroll\MidtransIrisDisbursementService;
+use App\Libraries\Payroll\PayrollPaymentSettlementService;
+use App\Libraries\Payroll\PayrollSnapshotService;
 
 class DisbursementController extends ApiController
 {
@@ -30,6 +32,11 @@ class DisbursementController extends ApiController
         if ($period['status'] !== 'FINALIZED') {
             return $this->fail('Payroll period must be FINALIZED before disbursement', 422);
         }
+        try {
+            (new PayrollSnapshotService($db))->assertValid($period);
+        } catch (\RuntimeException $e) {
+            return $this->fail($e->getMessage(), 409, 'PAYROLL_SNAPSHOT_INVALID');
+        }
 
         if (in_array($period['disbursement_status'], ['IN_PROGRESS', 'COMPLETED'])) {
             return $this->fail("Disbursement is already {$period['disbursement_status']}", 422);
@@ -52,7 +59,7 @@ class DisbursementController extends ApiController
 
         // 3. Call Iris Service
         $irisService = new MidtransIrisDisbursementService();
-        $result = $irisService->disbursePayroll($payslipIds);
+        $result = $irisService->disbursePayroll($payslipIds, $companyId);
 
         if ($result['success']) {
             // Update period status
@@ -109,7 +116,6 @@ class DisbursementController extends ApiController
         if ($result['status'] !== 'UNKNOWN' && $result['status'] !== $period['disbursement_status']) {
             $db->table('payroll_periods')->where('id', $period['id'])->where('company_id', $companyId)->update([
                 'disbursement_status' => $result['status'],
-                'status' => $result['status'] === 'COMPLETED' ? 'PAID' : $period['status'],
             ]);
             
             // Assume if batch is completed, all payslips are completed for now. 
@@ -119,6 +125,7 @@ class DisbursementController extends ApiController
                     ->where('disbursement_reference', $period['disbursement_reference'])
                     ->where('company_id', $companyId)
                     ->update(['disbursement_status' => 'COMPLETED']);
+                (new PayrollPaymentSettlementService($db))->complete($companyId, (int) $period['id']);
             }
         }
 

@@ -46,7 +46,11 @@ class OvertimeController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('overtimes')->where('id', (int) $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('overtimes')
+            ->where('id', (int) $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
         // Sebelumnya endpoint ini tanpa authorization — bisa diakses ID lain
         // di tenant berbeda. PrivacyScope::canAccessRow cek tenant + own/all.
@@ -71,7 +75,11 @@ class OvertimeController extends ApiController
         if (! $employeeId) return $this->fail('Employee not specified', 400);
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $emp = $db->table('employees')
+            ->where('id', $employeeId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $emp) return $this->fail('Employee not found', 404);
 
         $startTs = strtotime($data['start_time']);
@@ -254,7 +262,10 @@ class OvertimeController extends ApiController
         $db = \Config\Database::connect();
         $newId = (int) $db->insertID();
         if ($newId > 0) {
-            $db->table('overtimes')->where('id', $newId)->update([
+            $db->table('overtimes')
+                ->where('id', $newId)
+                ->where('company_id', $this->requireCompanyId())
+                ->update([
                 'planned_hours' => $hours,
                 'planned_at'    => date('Y-m-d H:i:s'),
             ]);
@@ -285,7 +296,11 @@ class OvertimeController extends ApiController
         if (! $valid) return null;
 
         $db = \Config\Database::connect();
-        $row = $db->table('overtimes')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $row = $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
         if (! $this->privacy()->canAccessRow($row, 'overtime')) {
             return $this->fail('Forbidden', 403);
@@ -300,9 +315,9 @@ class OvertimeController extends ApiController
 
         // Kalau ada planned_hours dan variance > 50%, wajib justifikasi.
         if ($plannedHours > 0) {
-            $delta = abs($actualHours - $plannedHours);
-            $variancePct = $plannedHours > 0 ? ($delta / $plannedHours) : 0;
-            if ($variancePct > 0.5 && $varianceNote === '') {
+            $variance = (new \App\Libraries\Attendance\OvertimeCalculator())
+                ->realizationVariance($plannedHours, $actualHours, $varianceNote);
+            if (! $variance['valid']) {
                 return $this->fail(
                     sprintf(
                         'Selisih actual (%.2f jam) vs planned (%.2f jam) > 50%%. Variance note wajib diisi.',
@@ -321,7 +336,10 @@ class OvertimeController extends ApiController
             'variance_note' => $varianceNote !== '' ? $varianceNote : null,
             'updated_at'    => $now,
         ];
-        $db->table('overtimes')->where('id', $id)->update($update);
+        $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->update($update);
 
         Services::audit()->forModule('OVERTIME')->log(
             action: 'overtime.realize',
@@ -347,10 +365,18 @@ class OvertimeController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $existing = $db->table('overtimes')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $existing = $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
+        if (! $this->privacy()->canAccessRow($existing, 'overtime')) return $this->fail('Forbidden', 403);
         if ($existing['status'] !== 'PENDING') return $this->fail('Can only cancel pending overtime', 422);
-        $db->table('overtimes')->where('id', $id)->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
+        $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
         return $this->ok(null, 'Cancelled');
     }
 
@@ -358,11 +384,19 @@ class OvertimeController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        $ot = $db->table('overtimes')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $ot = $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $ot) return $this->fail('Not found', 404);
         if ($ot['status'] !== 'PENDING') return $this->fail('Not pending', 422);
 
-        $emp = $db->table('employees')->where('id', $ot['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')
+            ->where('id', $ot['employee_id'])
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
+        if (! $emp) return $this->fail('Employee not found in active tenant', 422);
         $compType = strtoupper((string) ($ot['compensation_type'] ?? 'CASH'));
 
         $update = [
@@ -411,6 +445,7 @@ class OvertimeController extends ApiController
 
             // Ensure balance row ada
             $balance = $db->table('leave_balances')
+                ->where('company_id', $companyId)
                 ->where('employee_id', (int) $ot['employee_id'])
                 ->where('leave_type_id', (int) $leaveType['id'])
                 ->where('period_year', $year)
@@ -430,7 +465,10 @@ class OvertimeController extends ApiController
                     'updated_at'    => date('Y-m-d H:i:s'),
                 ]);
                 $balanceId = (int) $db->insertID();
-                $balance = $db->table('leave_balances')->where('id', $balanceId)->get()->getRowArray();
+                $balance = $db->table('leave_balances')
+                    ->where('id', $balanceId)
+                    ->where('company_id', $companyId)
+                    ->get()->getRowArray();
             }
 
             // Cek total accumulated tahun ini (allocated source OT) — pakai
@@ -449,7 +487,10 @@ class OvertimeController extends ApiController
             $addDays = round($leaveHours / $hoursPerDay, 2);
             $newAllocated = (float) $balance['allocated'] + $addDays;
             $newRemaining = $newAllocated + (float) $balance['carried_over'] - (float) $balance['used'];
-            $db->table('leave_balances')->where('id', (int) $balance['id'])->update([
+            $db->table('leave_balances')
+                ->where('id', (int) $balance['id'])
+                ->where('company_id', $companyId)
+                ->update([
                 'allocated' => $newAllocated,
                 'remaining' => $newRemaining,
                 'updated_at'=> date('Y-m-d H:i:s'),
@@ -469,7 +510,10 @@ class OvertimeController extends ApiController
             $description = "Menyetujui lembur #{$ot['request_number']} ({$ot['hours']} jam = Rp " . number_format($amount, 0, ',', '.') . ")";
         }
 
-        $db->table('overtimes')->where('id', $id)->update($update);
+        $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->update($update);
 
         if ($emp['user_id']) {
             $msg = $compType === 'LEAVE'
@@ -517,11 +561,18 @@ class OvertimeController extends ApiController
         $id = (int) $id;
         $data = $this->getJsonInput();
         $db = \Config\Database::connect();
-        $ot = $db->table('overtimes')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        $ot = $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if (! $ot) return $this->fail('Not found', 404);
         if ($ot['status'] !== 'PENDING') return $this->fail('Not pending', 422);
 
-        $db->table('overtimes')->where('id', $id)->update([
+        $db->table('overtimes')
+            ->where('id', $id)
+            ->where('company_id', $companyId)
+            ->update([
             'status' => 'REJECTED',
             'approved_by' => $this->userId(),
             'approved_at' => date('Y-m-d H:i:s'),
@@ -530,7 +581,10 @@ class OvertimeController extends ApiController
         ]);
 
         // Notify employee + dispatch webhook
-        $emp = $db->table('employees')->where('id', $ot['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')
+            ->where('id', $ot['employee_id'])
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
         if ($emp && ! empty($emp['user_id'])) {
             Services::notification()->send((int) $emp['user_id'], (int) $ot['company_id'], 'overtime.rejected',
                 'Lembur ditolak', 'Pengajuan lembur Anda ditolak: ' . ($data['reason'] ?? '(tanpa alasan)'),

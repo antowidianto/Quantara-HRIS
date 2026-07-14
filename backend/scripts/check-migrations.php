@@ -41,6 +41,23 @@ foreach ($files as $file) {
     }
 
     $classes[$classMatch[1]][] = $basename;
+
+    $upBody = migrationMethodBody($contents, 'up');
+    if ($upBody === null) {
+        $errors[] = "Migration up() method was not found: {$basename}";
+        continue;
+    }
+    $destructivePatterns = [
+        '/->\s*(dropTable|dropColumn|renameColumn)\s*\(/i',
+        '/\b(DROP\s+TABLE|DROP\s+COLUMN|TRUNCATE\s+TABLE|DELETE\s+FROM)\b/i',
+        '/\bALTER\s+TABLE\b[^;]+\bDROP\b/is',
+    ];
+    foreach ($destructivePatterns as $pattern) {
+        if (preg_match($pattern, $upBody) && ! str_contains($contents, '@roll-forward-reviewed')) {
+            $errors[] = "Destructive operation in up() requires @roll-forward-reviewed and a release runbook: {$basename}";
+            break;
+        }
+    }
 }
 
 foreach ($versions as $version => $versionFiles) {
@@ -66,3 +83,45 @@ printf(
     count($versions),
     count($classes),
 );
+
+/** Extract one method body without confusing the down() rollback body. */
+function migrationMethodBody(string $php, string $method): ?string
+{
+    $tokens = token_get_all($php);
+    $count = count($tokens);
+    for ($i = 0; $i < $count; $i++) {
+        if (! is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) {
+            continue;
+        }
+        for ($j = $i + 1; $j < $count; $j++) {
+            if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+                if (strcasecmp($tokens[$j][1], $method) !== 0) {
+                    break;
+                }
+                while ($j < $count && $tokens[$j] !== '{') {
+                    $j++;
+                }
+                if ($j >= $count) {
+                    return null;
+                }
+                $depth = 1;
+                $body = '';
+                for ($j++; $j < $count && $depth > 0; $j++) {
+                    $token = $tokens[$j];
+                    $text = is_array($token) ? $token[1] : $token;
+                    if ($text === '{') {
+                        $depth++;
+                    } elseif ($text === '}') {
+                        $depth--;
+                        if ($depth === 0) {
+                            break;
+                        }
+                    }
+                    $body .= $text;
+                }
+                return $body;
+            }
+        }
+    }
+    return null;
+}

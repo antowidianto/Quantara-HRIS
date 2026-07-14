@@ -47,6 +47,14 @@ class NotificationService
     ): int {
         $db = \Config\Database::connect();
 
+        $user = $db->table('users')
+            ->where('id', $userId)
+            ->where('company_id', $companyId)
+            ->get()->getRowArray();
+        if (! $user) {
+            throw new \RuntimeException('Notification recipient does not belong to the requested tenant.');
+        }
+
         $now = date('Y-m-d H:i:s');
         $db->table('notifications')->insert([
             'company_id' => $companyId,
@@ -61,11 +69,6 @@ class NotificationService
             'created_at' => $now,
         ]);
         $notifId = (int) $db->insertID();
-
-        $user = $db->table('users')->where('id', $userId)->get()->getRowArray();
-        if (! $user) {
-            return $notifId;
-        }
 
         $payload = [
             'notification_id' => $notifId,

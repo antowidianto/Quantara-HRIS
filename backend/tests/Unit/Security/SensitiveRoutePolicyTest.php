@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Security;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RouteSource;
 
 /** Prevent high-impact mutation routes from silently falling back to JWT-only access. */
 final class SensitiveRoutePolicyTest extends TestCase
@@ -14,9 +15,7 @@ final class SensitiveRoutePolicyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $contents = file_get_contents(APPPATH . 'Config/Routes.php');
-        self::assertNotFalse($contents);
-        $this->routes = $contents;
+        $this->routes = RouteSource::all();
     }
 
     /** @dataProvider sensitivePayrollRoutes */
@@ -25,16 +24,17 @@ final class SensitiveRoutePolicyTest extends TestCase
         string $controller,
         string $permission,
     ): void {
-        $pattern = sprintf(
-            '/\$routes->post\(\s*[\'\"]%s[\'\"]\s*,\s*[\'\"]%s[\'\"]\s*,\s*\[\s*[\'\"]filter[\'\"]\s*=>\s*[\'\"]permission:%s[\'\"]\s*\]\s*\)/s',
+        $routePattern = sprintf(
+            '/\$routes->post\(\s*[\'\"]%s[\'\"]\s*,\s*[\'\"]%s[\'\"]\s*,(?<options>.{0,300}?)\);/s',
             preg_quote($path, '/'),
             preg_quote($controller, '/'),
-            preg_quote($permission, '/'),
         );
 
-        self::assertMatchesRegularExpression(
-            $pattern,
-            $this->routes,
+        self::assertSame(1, preg_match($routePattern, $this->routes, $matches));
+
+        self::assertStringContainsString(
+            "permission:{$permission}",
+            $matches['options'],
             "Sensitive route {$path} must require permission {$permission}.",
         );
     }

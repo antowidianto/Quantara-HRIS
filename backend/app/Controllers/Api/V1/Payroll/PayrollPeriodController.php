@@ -40,7 +40,7 @@ class PayrollPeriodController extends ApiController
             'start_date'  => 'required|valid_date',
             'end_date'    => 'required|valid_date',
             'pay_date'    => 'required|valid_date',
-            'type'        => 'permit_empty|in_list[MONTHLY,BI_WEEKLY,WEEKLY,THR,BONUS]',
+            'type'        => 'permit_empty|in_list[MONTHLY,BI_WEEKLY,WEEKLY,THR,BONUS,OFF_CYCLE]',
         ]);
         if (! $valid) return null;
 
@@ -147,6 +147,7 @@ class PayrollPeriodController extends ApiController
             'WEEKLY'    => 'WK',
             'THR'       => 'THR',
             'BONUS'     => 'BNS',
+            'OFF_CYCLE' => 'OC',
             default     => 'P',
         };
         $monthStr = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
@@ -208,12 +209,18 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        if (! $this->findPeriodForTenant($db, $id)) {
+        $initialPeriod = $this->findPeriodForTenant($db, $id);
+        if (! $initialPeriod) {
             return $this->fail('Period not found', 404);
         }
+        $monitor = new \App\Libraries\System\BusinessJobMonitor($db);
+        $runId = $monitor->start('payroll.calculate', (int) $initialPeriod['company_id'], (string) $id);
         $audit = Services::audit()->forModule('PAYROLL')->start();
         try {
             $summary = Services::payroll()->calculatePeriod($id);
+            $period = $this->findPeriodForTenant($db, $id);
+            $summary['variance'] = (new \App\Libraries\Payroll\PayrollVarianceService())
+                ->analyzeAndStore((int) $period['company_id'], $id);
 
             // Audit description berbeda kalau ada pending approvals,
             // supaya audit trail jelas: hitung dilakukan tetap, tapi ada
@@ -243,8 +250,12 @@ class PayrollPeriodController extends ApiController
             $message = $hasWarnings
                 ? 'Period calculated dengan warning — ada pengajuan yang masih PENDING approval'
                 : 'Period calculated';
+            $monitor->succeed($runId, (int) ($summary['employee_count'] ?? $summary['count'] ?? 0), [
+                'period_id' => $id, 'warning_count' => count($summary['warnings'] ?? []),
+            ]);
             return $this->ok($summary, $message);
         } catch (\Throwable $e) {
+            $monitor->fail($runId, 'PAYROLL_CALCULATE_FAILED', 1, ['period_id' => $id]);
             log_message('error', $e->getMessage());
             $audit->logFailure(
                 'payroll_period.calculate',
@@ -324,11 +335,17 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $db = \Config\Database::connect();
-        if (! $this->findPeriodForTenant($db, $id)) {
+        $period = $this->findPeriodForTenant($db, $id);
+        if (! $period) {
             return $this->fail('Period not found', 404);
         }
         $audit = Services::audit()->forModule('PAYROLL')->start();
         try {
+            (new \App\Libraries\Payroll\PayrollControlService())->assertCanFinalize(
+                (int) $period['company_id'],
+                $id,
+                $this->userId(),
+            );
             Services::payroll()->finalize($id);
             $audit->log(
                 action: 'payroll_period.finalize',
@@ -383,6 +400,151 @@ class PayrollPeriodController extends ApiController
                 'Gagal finalisasi payroll periode #' . $id . ': ' . $e->getMessage()
             );
             return $this->fail($e->getMessage(), 500);
+        }
+    }
+
+    public function submit($id = null)
+    {
+        $period = $this->findPeriodForTenant(\Config\Database::connect(), (int) $id);
+        if (! $period) return $this->fail('Period not found', 404);
+        try {
+            $updated = (new \App\Libraries\Payroll\PayrollControlService())->submit(
+                (int) $period['company_id'], (int) $period['id'], $this->userId()
+            );
+            Services::audit()->forModule('PAYROLL')->log(
+                'payroll_period.submit', 'payroll_period', (int) $period['id'],
+                description: 'Payroll submitted for independent approval', severity: 'NOTICE'
+            );
+            return $this->ok($updated, 'Payroll submitted for approval');
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422, 'PAYROLL_SUBMIT_BLOCKED');
+        }
+    }
+
+    public function reviewVariance($id = null)
+    {
+        $period = $this->findPeriodForTenant(\Config\Database::connect(), (int) $id);
+        if (! $period) return $this->fail('Period not found', 404);
+        $data = $this->getJsonInput();
+        try {
+            $updated = (new \App\Libraries\Payroll\PayrollVarianceService())->review(
+                (int) $period['company_id'],
+                (int) $period['id'],
+                $this->userId(),
+                (string) ($data['note'] ?? ''),
+            );
+            Services::audit()->forModule('PAYROLL')->log(
+                'payroll_period.variance_review',
+                'payroll_period',
+                (int) $period['id'],
+                description: 'Payroll variance reviewed before submission',
+                severity: 'NOTICE',
+                metadata: ['note' => $data['note'] ?? null],
+            );
+            return $this->ok($updated, 'Payroll variance reviewed');
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422, 'PAYROLL_VARIANCE_REVIEW_BLOCKED');
+        }
+    }
+
+    public function approve($id = null)
+    {
+        $period = $this->findPeriodForTenant(\Config\Database::connect(), (int) $id);
+        if (! $period) return $this->fail('Period not found', 404);
+        try {
+            $updated = (new \App\Libraries\Payroll\PayrollControlService())->approve(
+                (int) $period['company_id'], (int) $period['id'], $this->userId()
+            );
+            Services::audit()->forModule('PAYROLL')->log(
+                'payroll_period.approve', 'payroll_period', (int) $period['id'],
+                description: 'Payroll independently approved with immutable snapshot', severity: 'CRITICAL'
+            );
+            $message = $updated['status'] === 'APPROVED'
+                ? 'Payroll approved'
+                : sprintf(
+                    'Approval recorded (%d/%d)',
+                    $updated['approval_progress']['approved'] ?? 1,
+                    $updated['approval_progress']['required'] ?? 1,
+                );
+            return $this->ok($updated, $message);
+        } catch (\DomainException $e) {
+            return $this->fail($e->getMessage(), 403, 'SEGREGATION_OF_DUTIES');
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422, 'PAYROLL_APPROVAL_BLOCKED');
+        }
+    }
+
+    public function breakGlassFinalize($id = null)
+    {
+        $db = \Config\Database::connect();
+        $period = $this->findPeriodForTenant($db, (int) $id);
+        if (! $period) return $this->fail('Period not found', 404);
+        $reason = trim((string) ($this->getJsonInput()['reason'] ?? ''));
+
+        try {
+            if ($period['status'] === 'CALCULATED') {
+                (new \App\Libraries\Payroll\PayrollControlService())->breakGlassApprove(
+                    (int) $period['company_id'],
+                    (int) $period['id'],
+                    $this->userId(),
+                    $reason,
+                    $this->request->getIPAddress(),
+                    $this->request->getUserAgent()->getAgentString(),
+                );
+            } elseif ($period['status'] === 'APPROVED') {
+                $evidence = $db->table('payroll_period_approvals')
+                    ->where('company_id', (int) $period['company_id'])
+                    ->where('payroll_period_id', (int) $period['id'])
+                    ->where('approval_type', 'BREAK_GLASS')
+                    ->countAllResults();
+                if ($evidence === 0) {
+                    throw new \RuntimeException('Approved payroll has no break-glass evidence');
+                }
+            } else {
+                throw new \RuntimeException('Payroll is not eligible for break-glass finalization');
+            }
+
+            Services::audit()->forModule('PAYROLL')->log(
+                action: 'payroll_period.break_glass_finalize',
+                entity: 'payroll_period',
+                entityId: (int) $period['id'],
+                after: ['reason' => $reason, 'actor_user_id' => $this->userId()],
+                description: 'EMERGENCY payroll finalization: ' . $reason,
+                severity: 'CRITICAL',
+            );
+            $this->notifyPayrollBreakGlass((int) $period['company_id'], (int) $period['id'], $reason);
+            Services::payroll()->finalize((int) $period['id']);
+            return $this->ok(null, 'Payroll finalized through break-glass workflow');
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail($e->getMessage(), 422, 'BREAK_GLASS_REASON_REQUIRED');
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422, 'BREAK_GLASS_BLOCKED');
+        }
+    }
+
+    private function notifyPayrollBreakGlass(int $companyId, int $periodId, string $reason): void
+    {
+        try {
+            $db = \Config\Database::connect();
+            $users = $db->table('users u')
+                ->select('DISTINCT u.id')
+                ->join('role_permissions rp', 'rp.role_id = u.role_id')
+                ->join('permissions p', 'p.id = rp.permission_id')
+                ->where('u.company_id', $companyId)
+                ->where('u.is_active', 1)
+                ->whereIn('p.slug', ['payroll.finalize', 'payroll.break_glass'])
+                ->get()->getResultArray();
+            foreach ($users as $user) {
+                Services::notification()->send(
+                    (int) $user['id'], $companyId, 'payroll.break_glass',
+                    'Payroll break-glass digunakan',
+                    "Periode #{$periodId} difinalisasi darurat. Alasan: {$reason}",
+                    ['payroll_period_id' => $periodId, 'severity' => 'CRITICAL'],
+                    "/payroll/periods/{$periodId}", true
+                );
+            }
+        } catch (\Throwable $e) {
+            log_message('error', 'Break-glass notification failed: ' . $e->getMessage());
         }
     }
 
@@ -540,7 +702,7 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $period = $this->findPeriodForTenant($db, $id);
-        if (! $period) return $this->failNotFound('Period not found');
+        if (! $period) return $this->fail('Period not found', 404);
         if ($period['status'] !== 'PAID') {
             return $this->fail('Periode harus dalam status PAID sebelum melapor e-Bupot', 422);
         }

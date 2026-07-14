@@ -259,7 +259,12 @@ class AdminTenantController extends ApiController
                     ],
                 );
         } catch (\Throwable $e) {
-            log_message('warning', 'Impersonate audit failed: ' . $e->getMessage());
+            log_message('critical', 'Impersonate audit failed: ' . $e->getMessage());
+            return $this->fail(
+                'Impersonation cannot continue without an audit record',
+                503,
+                'PRIVILEGED_AUDIT_UNAVAILABLE',
+            );
         }
 
         return $this->ok([

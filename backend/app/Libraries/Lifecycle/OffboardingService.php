@@ -63,17 +63,20 @@ class OffboardingService
     public function status(int $resignationId): array
     {
         $db = Database::connect();
+        $companyId = $this->activeCompanyId();
         $resign = $db->table('resignation_requests')
             ->where('id', $resignationId)
+            ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
         if (! $resign) {
             throw new \InvalidArgumentException("Resignation request #{$resignationId} tidak ditemukan");
         }
-        $emp = $db->table('employees')->where('id', (int) $resign['employee_id'])->get()->getRowArray() ?: [];
+        $emp = $db->table('employees')->where('id', (int) $resign['employee_id'])
+            ->where('company_id', $companyId)->get()->getRowArray() ?: [];
 
-        $assets  = $this->assetClearanceStatus($db, (int) $resign['employee_id'], $resign);
-        $finance = $this->financeClearanceStatus($db, (int) $resign['employee_id']);
+        $assets  = $this->assetClearanceStatus($db, $companyId, (int) $resign['employee_id'], $resign);
+        $finance = $this->financeClearanceStatus($db, $companyId, (int) $resign['employee_id']);
         $bpjs    = $this->bpjsDeactivationStatus($resign);
 
         $resignDate = $emp['resign_date'] ?? $resign['effective_date'] ?? $resign['last_working_date'] ?? null;
@@ -117,8 +120,10 @@ class OffboardingService
     public function setAssetClearance(int $resignationId, int $userId, bool $cleared, ?string $note = null): array
     {
         $db = Database::connect();
+        $companyId = $this->activeCompanyId();
         $resign = $db->table('resignation_requests')
-            ->where('id', $resignationId)->where('deleted_at IS NULL')->get()->getRowArray();
+            ->where('id', $resignationId)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $resign) {
             throw new \InvalidArgumentException("Resignation #{$resignationId} tidak ditemukan");
         }
@@ -127,6 +132,7 @@ class OffboardingService
         if ($cleared) {
             // Verifikasi tidak ada aset yang masih ASSIGNED — kecuali exception note diisi
             $stillAssigned = $db->table('assets')
+                ->where('company_id', $companyId)
                 ->where('current_employee_id', (int) $resign['employee_id'])
                 ->where('status', 'ASSIGNED')
                 ->where('deleted_at IS NULL')
@@ -143,7 +149,8 @@ class OffboardingService
                     "Catatan exception minimum 10 karakter untuk override aset yang belum dikembalikan."
                 );
             }
-            $db->table('resignation_requests')->where('id', $resignationId)->update([
+            $db->table('resignation_requests')->where('id', $resignationId)
+                ->where('company_id', $companyId)->update([
                 'assets_returned_at'   => $now,
                 'assets_clearance_note'=> $note,
                 'updated_at'           => $now,
@@ -154,7 +161,8 @@ class OffboardingService
             $severity = $stillAssigned > 0 ? 'WARNING' : 'NOTICE';
         } else {
             // Reset (HR salah klik / butuh re-verify)
-            $db->table('resignation_requests')->where('id', $resignationId)->update([
+            $db->table('resignation_requests')->where('id', $resignationId)
+                ->where('company_id', $companyId)->update([
                 'assets_returned_at'   => null,
                 'assets_clearance_note'=> $note,
                 'updated_at'           => $now,
@@ -187,14 +195,17 @@ class OffboardingService
     public function setBpjsDeactivated(int $resignationId, int $userId, ?string $note = null): array
     {
         $db = Database::connect();
+        $companyId = $this->activeCompanyId();
         $resign = $db->table('resignation_requests')
-            ->where('id', $resignationId)->where('deleted_at IS NULL')->get()->getRowArray();
+            ->where('id', $resignationId)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $resign) {
             throw new \InvalidArgumentException("Resignation #{$resignationId} tidak ditemukan");
         }
 
         $now = date('Y-m-d H:i:s');
-        $db->table('resignation_requests')->where('id', $resignationId)->update([
+        $db->table('resignation_requests')->where('id', $resignationId)
+            ->where('company_id', $companyId)->update([
             'bpjs_deactivated_at' => $now,
             'updated_at'          => $now,
         ]);
@@ -234,6 +245,7 @@ class OffboardingService
      */
     private function assetClearanceStatus(
         \CodeIgniter\Database\BaseConnection $db,
+        int $companyId,
         int $employeeId,
         array $resign,
     ): array {
@@ -242,6 +254,7 @@ class OffboardingService
 
         $pending = $db->table('assets')
             ->select('id, asset_number, name, category')
+            ->where('company_id', $companyId)
             ->where('current_employee_id', $employeeId)
             ->where('status', 'ASSIGNED')
             ->where('deleted_at IS NULL')
@@ -275,6 +288,7 @@ class OffboardingService
      */
     private function financeClearanceStatus(
         \CodeIgniter\Database\BaseConnection $db,
+        int $companyId,
         int $employeeId,
     ): array {
         $openLoans = 0;
@@ -282,6 +296,7 @@ class OffboardingService
         try {
             if ($db->tableExists('loans')) {
                 $openLoans = $db->table('loans')
+                    ->where('company_id', $companyId)
                     ->where('employee_id', $employeeId)
                     ->whereIn('status', ['APPROVED', 'DISBURSED', 'PARTIAL_REPAID'])
                     ->where('deleted_at IS NULL')
@@ -291,6 +306,7 @@ class OffboardingService
         try {
             if ($db->tableExists('cash_advances')) {
                 $openAdvances = $db->table('cash_advances')
+                    ->where('company_id', $companyId)
                     ->where('employee_id', $employeeId)
                     ->whereIn('status', ['APPROVED', 'DISBURSED'])
                     ->where('deleted_at IS NULL')
@@ -348,6 +364,7 @@ class OffboardingService
             $row = $db->table('generated_contracts')
                 ->select('contract_number')
                 ->where('id', (int) $resign['paklaring_id'])
+                ->where('company_id', (int) $resign['company_id'])
                 ->get()->getRowArray();
             return $row ? (string) $row['contract_number'] : null;
         } catch (\Throwable $e) {
@@ -387,8 +404,10 @@ class OffboardingService
     public function linkFinalSettlement(int $resignationId, int $userId): array
     {
         $db = Database::connect();
+        $companyId = $this->activeCompanyId();
         $resign = $db->table('resignation_requests')
-            ->where('id', $resignationId)->where('deleted_at IS NULL')->get()->getRowArray();
+            ->where('id', $resignationId)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $resign) {
             throw new \InvalidArgumentException("Resignation #{$resignationId} tidak ditemukan");
         }
@@ -397,19 +416,28 @@ class OffboardingService
         }
 
         // Gate asset clearance
-        $emp = $db->table('employees')->where('id', (int) $resign['employee_id'])->get()->getRowArray();
-        $assetStatus = $this->assetClearanceStatus($db, (int) $resign['employee_id'], $resign);
+        $emp = $db->table('employees')->where('id', (int) $resign['employee_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $emp) {
+            throw new \RuntimeException('Employee does not belong to the active company');
+        }
+        $assetStatus = $this->assetClearanceStatus($db, $companyId, (int) $resign['employee_id'], $resign);
         if (! $assetStatus['ok']) {
             throw new \RuntimeException(
                 "Asset clearance belum OK ({$assetStatus['pending_count']} aset belum dikembalikan). "
                 . "Selesaikan terlebih dahulu sebelum proses final settlement."
             );
         }
+        $financeStatus = $this->financeClearanceStatus($db, $companyId, (int) $resign['employee_id']);
+        if (! $financeStatus['ok']) {
+            throw new \RuntimeException((string) $financeStatus['blocker']);
+        }
 
         // Severance — ambil yang FINALIZED untuk employee + termination_date dekat resign_date
         $severance = null;
         if ($db->tableExists('severance_calculations')) {
             $severance = $db->table('severance_calculations')
+                ->where('company_id', $companyId)
                 ->where('employee_id', (int) $resign['employee_id'])
                 ->where('status', 'FINALIZED')
                 ->where('deleted_at IS NULL')
@@ -423,10 +451,14 @@ class OffboardingService
         // Tambah komponen lain (sisa cuti, gaji prorata) dari estimasi.
         $resignDate = $resign['effective_date'] ?? $resign['last_working_date'];
         $proratedSalary = $this->estimateProratedSalary($db, $emp, (string) $resignDate);
-        $unusedLeaveCash = $this->estimateUnusedLeaveCash($db, $emp, (string) $resignDate);
+        $unusedLeaveCash = $severance
+            ? 0.0
+            : $this->estimateUnusedLeaveCash($db, $emp, (string) $resignDate);
         $severanceAmount = $severance ? (float) ($severance['total_amount'] ?? 0) : 0.0;
+        $thr = (new ResignationThrEligibility())->resolve($db, $companyId, $emp, (string) $resignDate);
+        $thrAmount = $thr['eligible'] ? (float) $thr['amount'] : 0.0;
 
-        $totalAmount = $proratedSalary + $unusedLeaveCash + $severanceAmount;
+        $totalAmount = $proratedSalary + $unusedLeaveCash + $severanceAmount + $thrAmount;
 
         // Cari payroll period aktif di bulan resign
         $period = null;
@@ -434,10 +466,10 @@ class OffboardingService
             $year = (int) date('Y', strtotime($resignDate));
             $month = (int) date('n', strtotime($resignDate));
             $period = $db->table('payroll_periods')
-                ->where('company_id', (int) $emp['company_id'])
-                ->where('year', $year)
-                ->where('month', $month)
-                ->whereIn('status', ['DRAFT', 'CALCULATED', 'REVIEW'])
+                ->where('company_id', $companyId)
+                ->where('period_year', $year)
+                ->where('period_month', $month)
+                ->whereIn('status', ['DRAFT', 'CALCULATED'])
                 ->where('deleted_at IS NULL')
                 ->orderBy('id', 'DESC')
                 ->limit(1)
@@ -452,6 +484,7 @@ class OffboardingService
         if ($period && $db->tableExists('payslips')) {
             // Cari payslip employee di period ini
             $payslip = $db->table('payslips')
+                ->where('company_id', $companyId)
                 ->where('payroll_period_id', (int) $period['id'])
                 ->where('employee_id', (int) $emp['id'])
                 ->where('deleted_at IS NULL')
@@ -475,8 +508,46 @@ class OffboardingService
             $manualActionRequired = true;
         }
 
+        if ($period && $db->tableExists('payroll_one_time_components')) {
+            if ($unusedLeaveCash > 0) {
+                $this->upsertOneTimeComponent(
+                    $db, $companyId, (int) $period['id'], (int) $emp['id'], $resignationId, $userId,
+                    'FINAL_LEAVE', 'Pembayaran Sisa Cuti', 'EARNING', 'FINAL_SETTLEMENT', $unusedLeaveCash, true,
+                );
+            }
+            if ($thrAmount > 0) {
+                $this->upsertOneTimeComponent(
+                    $db, $companyId, (int) $period['id'], (int) $emp['id'], $resignationId, $userId,
+                    'THR_RESIGNATION', 'THR Hak Saat Resign - ' . ($thr['holiday_name'] ?? 'Hari Raya'),
+                    'EARNING', 'THR', $thrAmount, true,
+                );
+            }
+            if ($severanceAmount > 0) {
+                $this->upsertOneTimeComponent(
+                    $db, $companyId, (int) $period['id'], (int) $emp['id'], $resignationId, $userId,
+                    'SEVERANCE', 'Pesangon dan Penggantian Hak', 'EARNING', 'SEVERANCE', $severanceAmount, false,
+                );
+                $priorSeverance = $this->priorSeveranceInTwoCalendarYears(
+                    $db, $companyId, (int) $emp['id'], $resignationId, (int) $period['period_year'],
+                );
+                $severanceTax = self::severanceFinalTax($priorSeverance + $severanceAmount)
+                    - self::severanceFinalTax($priorSeverance);
+                if ($severanceTax > 0) {
+                    $this->upsertOneTimeComponent(
+                        $db, $companyId, (int) $period['id'], (int) $emp['id'], $resignationId, $userId,
+                        'SEVERANCE_TAX', 'PPh 21 Final Pesangon', 'DEDUCTION', 'PPH21_FINAL', $severanceTax, false,
+                    );
+                }
+            }
+            $payslipId = null;
+            $manualActionRequired = false;
+            $notes = "Komponen final settlement ditautkan ke periode {$period['code']}. "
+                . 'Jalankan calculate/re-calculate agar payslip final dan tautan resignation diperbarui.';
+        }
+
         // Update resignation request dengan link & amount cache
-        $db->table('resignation_requests')->where('id', $resignationId)->update([
+        $db->table('resignation_requests')->where('id', $resignationId)
+            ->where('company_id', $companyId)->update([
             'final_settlement_payslip_id' => $payslipId,
             'final_settlement_amount'     => $totalAmount,
             'updated_at'                  => $now,
@@ -491,7 +562,8 @@ class OffboardingService
                 description: "Link final settlement: total " . number_format($totalAmount, 0, ',', '.')
                     . " (gaji prorata: " . number_format($proratedSalary, 0, ',', '.')
                     . ", sisa cuti: " . number_format($unusedLeaveCash, 0, ',', '.')
-                    . ", pesangon: " . number_format($severanceAmount, 0, ',', '.') . ")"
+                    . ", pesangon: " . number_format($severanceAmount, 0, ',', '.')
+                    . ", THR resign: " . number_format($thrAmount, 0, ',', '.') . ")"
                     . ($payslipId ? " ke payslip #{$payslipId}" : ' (belum ke payslip — manual)'),
                 severity: 'CRITICAL',
                 metadata: [
@@ -499,6 +571,7 @@ class OffboardingService
                     'prorated_salary'   => $proratedSalary,
                     'unused_leave_cash' => $unusedLeaveCash,
                     'severance_amount'  => $severanceAmount,
+                    'thr_resignation'   => $thr,
                     'payslip_id'        => $payslipId,
                     'period_id'         => $period ? (int) $period['id'] : null,
                 ],
@@ -529,8 +602,10 @@ class OffboardingService
         ?string $note = null,
     ): array {
         $db = Database::connect();
+        $companyId = $this->activeCompanyId();
         $resign = $db->table('resignation_requests')
-            ->where('id', $resignationId)->where('deleted_at IS NULL')->get()->getRowArray();
+            ->where('id', $resignationId)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $resign) throw new \InvalidArgumentException("Resignation #{$resignationId} tidak ditemukan");
         if ($resign['status'] !== 'APPROVED') {
             throw new \RuntimeException("Resignation harus APPROVED dulu (current: {$resign['status']})");
@@ -540,7 +615,8 @@ class OffboardingService
         }
 
         $now = date('Y-m-d H:i:s');
-        $db->table('resignation_requests')->where('id', $resignationId)->update([
+        $db->table('resignation_requests')->where('id', $resignationId)
+            ->where('company_id', $companyId)->update([
             'final_settlement_amount'  => $amount,
             'final_settlement_paid_at' => $now,
             'updated_at'               => $now,
@@ -595,6 +671,85 @@ class OffboardingService
         return round($basic * ($resignDay / $totalDaysInMonth), 2);
     }
 
+    /** PPh 21 final pesangon: 0%/5%/15%/25% progressive brackets. */
+    public static function severanceFinalTax(float $gross): float
+    {
+        $remaining = max(0.0, $gross - 50_000_000);
+        $tax = min($remaining, 50_000_000) * 0.05;
+        $remaining = max(0.0, $remaining - 50_000_000);
+        $tax += min($remaining, 400_000_000) * 0.15;
+        $remaining = max(0.0, $remaining - 400_000_000);
+        $tax += $remaining * 0.25;
+
+        return round($tax, 2);
+    }
+
+    private function priorSeveranceInTwoCalendarYears(
+        \CodeIgniter\Database\BaseConnection $db,
+        int $companyId,
+        int $employeeId,
+        int $currentResignationId,
+        int $currentYear,
+    ): float {
+        $row = $db->table('payroll_one_time_components c')
+            ->selectSum('c.amount', 'total')
+            ->join('payroll_periods p', 'p.id = c.payroll_period_id')
+            ->where('c.company_id', $companyId)
+            ->where('p.company_id', $companyId)
+            ->where('c.employee_id', $employeeId)
+            ->where('c.source_type', 'RESIGNATION')
+            ->where('c.source_id !=', $currentResignationId)
+            ->where('c.code', 'SEVERANCE')
+            ->where('p.period_year >=', $currentYear - 1)
+            ->where('p.period_year <=', $currentYear)
+            ->get()->getRowArray();
+
+        return (float) ($row['total'] ?? 0);
+    }
+
+    private function upsertOneTimeComponent(
+        \CodeIgniter\Database\BaseConnection $db,
+        int $companyId,
+        int $periodId,
+        int $employeeId,
+        int $resignationId,
+        int $userId,
+        string $code,
+        string $name,
+        string $type,
+        string $category,
+        float $amount,
+        bool $isTaxable,
+    ): void {
+        $builder = $db->table('payroll_one_time_components');
+        $existing = $builder->where('company_id', $companyId)
+            ->where('source_type', 'RESIGNATION')->where('source_id', $resignationId)
+            ->where('code', $code)->get()->getRowArray();
+        $values = [
+            'payroll_period_id' => $periodId,
+            'employee_id' => $employeeId,
+            'name' => $name,
+            'component_type' => $type,
+            'category' => $category,
+            'amount' => round($amount, 2),
+            'is_taxable' => $isTaxable ? 1 : 0,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+        if ($existing) {
+            $db->table('payroll_one_time_components')->where('id', (int) $existing['id'])
+                ->where('company_id', $companyId)->update($values);
+            return;
+        }
+        $db->table('payroll_one_time_components')->insert($values + [
+            'company_id' => $companyId,
+            'source_type' => 'RESIGNATION',
+            'source_id' => $resignationId,
+            'code' => $code,
+            'created_by' => $userId,
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
     private function estimateUnusedLeaveCash(
         \CodeIgniter\Database\BaseConnection $db,
         array $emp,
@@ -607,6 +762,8 @@ class OffboardingService
             $row = $db->table('leave_balances lb')
                 ->select('lb.remaining')
                 ->join('leave_types lt', 'lt.id = lb.leave_type_id')
+                ->where('lb.company_id', (int) $emp['company_id'])
+                ->where('lt.company_id', (int) $emp['company_id'])
                 ->where('lb.employee_id', (int) $emp['id'])
                 ->where('lb.period_year', $year)
                 ->where('lt.category', 'ANNUAL')
@@ -706,5 +863,15 @@ class OffboardingService
             ];
         }
         return $out;
+    }
+
+    private function activeCompanyId(): int
+    {
+        $companyId = Services::tenant()->getCompanyId();
+        if ($companyId <= 0) {
+            throw new \RuntimeException('Active company context is required for offboarding operations');
+        }
+
+        return $companyId;
     }
 }

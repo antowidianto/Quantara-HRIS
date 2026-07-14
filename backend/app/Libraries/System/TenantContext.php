@@ -2,6 +2,8 @@
 
 namespace App\Libraries\System;
 
+use App\Libraries\Identity\EffectivePermissionResolver;
+
 /**
  * TenantContext
  *
@@ -53,6 +55,9 @@ class TenantContext
 
     public function setCompanyId(int $id): void
     {
+        if ($this->companyId !== $id) {
+            $this->permissions = null;
+        }
         $this->companyId = $id;
     }
 
@@ -75,6 +80,9 @@ class TenantContext
 
     public function setRoleId(int $id): void
     {
+        if ($this->roleId !== $id) {
+            $this->permissions = null;
+        }
         $this->roleId = $id;
         // Role 1 is reserved for super admin in our seeder
         $this->isSuperAdmin = ($id === 1);
@@ -87,6 +95,9 @@ class TenantContext
 
     public function setEmployeeId(int $id): void
     {
+        if ($this->employeeId !== $id) {
+            $this->permissions = null;
+        }
         $this->employeeId = $id;
     }
 
@@ -138,19 +149,11 @@ class TenantContext
         if ($this->permissions !== null) {
             return $this->permissions;
         }
-        $this->permissions = [];
-        if ($this->roleId > 0) {
-            $db = \Config\Database::connect();
-            $rows = $db->table('role_permissions rp')
-                ->select('p.slug')
-                ->join('permissions p', 'p.id = rp.permission_id')
-                ->where('rp.role_id', $this->roleId)
-                ->get()
-                ->getResultArray();
-            foreach ($rows as $r) {
-                $this->permissions[] = $r['slug'];
-            }
-        }
+        $this->permissions = (new EffectivePermissionResolver())->resolve(
+            $this->roleId,
+            $this->employeeId,
+            $this->companyId,
+        );
         return $this->permissions;
     }
 

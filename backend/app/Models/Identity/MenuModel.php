@@ -25,4 +25,22 @@ class MenuModel extends BaseModel
         'icon', 'route_path', 'permission', 'super_admin_only', 'sort_order',
         'is_active',
     ];
+
+    /**
+     * Resolve a menu only when it is global or belongs to the active tenant.
+     * Super admins retain the explicit cross-tenant administration path.
+     */
+    public function findForTenantOrGlobal(int $id, int $companyId, bool $isSuperAdmin): ?array
+    {
+        $query = $this->where($this->primaryKey, $id)->where('deleted_at IS NULL');
+        if (! $isSuperAdmin) {
+            $query->groupStart()
+                ->where('company_id', $companyId)
+                ->orWhere('company_id IS NULL')
+                ->groupEnd();
+        }
+
+        $row = $query->first();
+        return is_array($row) ? $row : null;
+    }
 }

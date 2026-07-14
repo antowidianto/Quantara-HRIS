@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Identity;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Identity\RbacMenuCatalogService;
 use App\Models\Identity\MenuModel;
 use Config\Services;
 
@@ -58,7 +59,7 @@ class MenuController extends ApiController
         }
 
         // Ambil daftar permission user (kalau super admin, anggap semua granted).
-        $permissions = $this->loadUserPermissions($tenant->getUserId());
+        $permissions = $tenant->getPermissions();
 
         $rows = $this->loadEffectiveMenus($companyId);
 
@@ -69,7 +70,7 @@ class MenuController extends ApiController
             if ((int) $r['super_admin_only'] === 1 && ! $isSuperAdmin) continue;
 
             $perm = $r['permission'] ? trim((string) $r['permission']) : '';
-            if ($perm !== '' && ! $isSuperAdmin && ! in_array($perm, $permissions, true)) {
+            if ($perm !== '' && ! $isSuperAdmin && ! RbacMenuCatalogService::allows($perm, $permissions)) {
                 continue;
             }
             $allowed[(int) $r['id']] = $r;
@@ -114,7 +115,7 @@ class MenuController extends ApiController
     public function show($id = null)
     {
         $id = (int) $id;
-        $row = (new MenuModel())->find($id);
+        $row = $this->findMenuForActiveTenant(new MenuModel(), $id);
         if (! $row) return $this->fail('Menu tidak ditemukan', 404);
         if (! $this->canAccessRow($row)) return $this->fail('Forbidden', 403);
         return $this->ok($row);
@@ -172,7 +173,7 @@ class MenuController extends ApiController
         ];
         $id = (new MenuModel())->insert($row, true);
         Services::audit()->forModule('MENU')->logCreate('menu', (int) $id, $row, 'Menu dibuat: ' . $row['code']);
-        return $this->ok((new MenuModel())->find($id), 'Menu dibuat', 201);
+        return $this->ok($this->findMenuForActiveTenant(new MenuModel(), (int) $id), 'Menu dibuat', 201);
     }
 
     /**
@@ -184,7 +185,7 @@ class MenuController extends ApiController
     {
         $id = (int) $id;
         $model = new MenuModel();
-        $row = $model->find($id);
+        $row = $this->findMenuForActiveTenant($model, $id);
         if (! $row) return $this->fail('Menu tidak ditemukan', 404);
         if (! $this->canAccessRow($row)) return $this->fail('Forbidden', 403);
 
@@ -204,7 +205,7 @@ class MenuController extends ApiController
 
         // Fork global → company kalau perlu
         $targetId = $this->maybeForkGlobal($row);
-        $row = $model->find($targetId);
+        $row = $this->findMenuForActiveTenant($model, $targetId);
 
         $update = [];
         $allowedKeys = ['type', 'code', 'label', 'translation_key', 'icon',
@@ -226,7 +227,7 @@ class MenuController extends ApiController
 
         $model->update($targetId, $update);
         Services::audit()->forModule('MENU')->logUpdate('menu', $targetId, $row, $update, 'Menu diperbarui: ' . ($row['code'] ?? ''));
-        return $this->ok($model->find($targetId), 'Menu diperbarui');
+        return $this->ok($this->findMenuForActiveTenant($model, $targetId), 'Menu diperbarui');
     }
 
     /**
@@ -237,7 +238,7 @@ class MenuController extends ApiController
     {
         $id = (int) $id;
         $model = new MenuModel();
-        $row = $model->find($id);
+        $row = $this->findMenuForActiveTenant($model, $id);
         if (! $row) return $this->fail('Menu tidak ditemukan', 404);
         if (! $this->canAccessRow($row)) return $this->fail('Forbidden', 403);
 
@@ -270,7 +271,7 @@ class MenuController extends ApiController
         foreach ($items as $it) {
             $id = (int) ($it['id'] ?? 0);
             if ($id <= 0) continue;
-            $row = $model->find($id);
+            $row = $this->findMenuForActiveTenant($model, $id);
             if (! $row || ! $this->canAccessRow($row)) continue;
 
             $targetId = $this->maybeForkGlobal($row);
@@ -335,6 +336,16 @@ class MenuController extends ApiController
         if ($tenant->isSuperAdmin()) return true;
         if ($row['company_id'] === null) return true;
         return (int) $row['company_id'] === (int) $tenant->getCompanyId();
+    }
+
+    private function findMenuForActiveTenant(MenuModel $model, int $id): ?array
+    {
+        $tenant = $this->tenant();
+        return $model->findForTenantOrGlobal(
+            $id,
+            $tenant->getCompanyId(),
+            $tenant->isSuperAdmin(),
+        );
     }
 
     /**
@@ -473,28 +484,6 @@ class MenuController extends ApiController
             $merged[] = $g;
         }
         return $merged;
-    }
-
-    /**
-     * Daftar permission slug yang dimiliki user.
-     * Return empty array kalau super admin (caller bedakan via flag terpisah).
-     */
-    private function loadUserPermissions(int $userId): array
-    {
-        if ($userId <= 0) return [];
-        $rows = $this->db()->table('users u')
-            ->select('p.slug')
-            ->join('roles r',                 'r.id = u.role_id', 'left')
-            ->join('role_permissions rp',     'rp.role_id = r.id', 'left')
-            ->join('permissions p',           'p.id = rp.permission_id', 'left')
-            ->where('u.id', $userId)
-            ->where('p.slug IS NOT NULL')
-            ->get()->getResultArray();
-        $out = [];
-        foreach ($rows as $r) {
-            if (! empty($r['slug'])) $out[] = $r['slug'];
-        }
-        return array_values(array_unique($out));
     }
 
     /**

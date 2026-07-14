@@ -116,6 +116,62 @@ class MetricsController extends ApiController
             $lines[] = sprintf('hris_jobs_count{status="failed"} %d', $failed);
         }
 
+        // Business outcomes: duration/failure and last-success evidence.
+        if ($db->tableExists('business_job_runs')) {
+            $outcomes = $db->table('business_job_runs')
+                ->select('job_name, status, COUNT(*) AS cnt, AVG(duration_ms) AS avg_duration_ms, MAX(finished_at) AS last_finished_at, SUM(processed_count) AS processed')
+                ->where('started_at >=', date('Y-m-d H:i:s', strtotime('-24 hours')))
+                ->groupBy(['job_name', 'status'])->get()->getResultArray();
+            $lines[] = '# HELP hris_business_job_runs_24h Business job outcomes in the last 24 hours';
+            $lines[] = '# TYPE hris_business_job_runs_24h gauge';
+            $lines[] = '# HELP hris_business_job_duration_ms Average business job duration in milliseconds';
+            $lines[] = '# TYPE hris_business_job_duration_ms gauge';
+            foreach ($outcomes as $row) {
+                $job = addslashes((string) $row['job_name']);
+                $status = strtolower((string) $row['status']);
+                $lines[] = sprintf('hris_business_job_runs_24h{job="%s",status="%s"} %d', $job, $status, (int) $row['cnt']);
+                $lines[] = sprintf('hris_business_job_duration_ms{job="%s",status="%s"} %.0f', $job, $status, (float) $row['avg_duration_ms']);
+            }
+        }
+
+        if ($db->tableExists('approval_requests')) {
+            $stuck = (int) $db->table('approval_requests')->where('company_id >', 0)
+                ->where('status', 'PENDING')->where('updated_at <', date('Y-m-d H:i:s', strtotime('-48 hours')))
+                ->countAllResults();
+            $lines[] = '# HELP hris_approvals_stuck_sla Pending approvals older than 48 hours';
+            $lines[] = '# TYPE hris_approvals_stuck_sla gauge';
+            $lines[] = "hris_approvals_stuck_sla {$stuck}";
+        }
+
+        if ($db->tableExists('email_queue')) {
+            $emailFailed = (int) $db->table('email_queue')->where('company_id >', 0)->where('status', 'FAILED')->countAllResults();
+            $lines[] = '# HELP hris_email_delivery_failed Failed email deliveries';
+            $lines[] = '# TYPE hris_email_delivery_failed gauge';
+            $lines[] = "hris_email_delivery_failed {$emailFailed}";
+        }
+        if ($db->tableExists('webhook_deliveries')) {
+            $webhookFailed = (int) $db->table('webhook_deliveries')->where('company_id >', 0)->where('status', 'FAILED')->countAllResults();
+            $lines[] = '# HELP hris_webhook_dead_letter_count Exhausted webhook deliveries';
+            $lines[] = '# TYPE hris_webhook_dead_letter_count gauge';
+            $lines[] = "hris_webhook_dead_letter_count {$webhookFailed}";
+        }
+        if ($db->tableExists('backup_runs')) {
+            $backup = $db->table('backup_runs')->select('finished_at')->where('status', 'SUCCESS')
+                ->orderBy('finished_at', 'DESC')->get()->getRowArray();
+            $age = $backup ? max(0, time() - strtotime((string) $backup['finished_at'])) : -1;
+            $lines[] = '# HELP hris_backup_age_seconds Age of last successful encrypted backup; -1 means never';
+            $lines[] = '# TYPE hris_backup_age_seconds gauge';
+            $lines[] = "hris_backup_age_seconds {$age}";
+        }
+        if ($db->tableExists('restore_drills')) {
+            $drill = $db->table('restore_drills')->select('finished_at')->where('status', 'PASSED')
+                ->orderBy('finished_at', 'DESC')->get()->getRowArray();
+            $age = $drill ? max(0, time() - strtotime((string) $drill['finished_at'])) : -1;
+            $lines[] = '# HELP hris_restore_drill_age_seconds Age of last successful isolated restore drill; -1 means never';
+            $lines[] = '# TYPE hris_restore_drill_age_seconds gauge';
+            $lines[] = "hris_restore_drill_age_seconds {$age}";
+        }
+
         // ─── Audit log critical events (24h window) ─────────────────
         if ($db->tableExists('audit_logs')) {
             $criticalCount = (int) $db->table('audit_logs')

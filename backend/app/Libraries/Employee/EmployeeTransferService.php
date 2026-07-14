@@ -359,9 +359,14 @@ class EmployeeTransferService
         if ($row['status'] !== 'APPROVED') {
             throw new \InvalidArgumentException("Hanya mutasi APPROVED yang bisa di-implement. Status: {$row['status']}");
         }
+        if ((string) $row['effective_date'] > date('Y-m-d')) {
+            throw new \RuntimeException('Mutasi belum mencapai tanggal efektif');
+        }
 
         $empId = (int) $row['employee_id'];
-        $emp = $db->table('employees')->where('id', $empId)->where('deleted_at IS NULL')->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $empId)
+            ->where('company_id', (int) $row['company_id'])
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $emp) {
             throw new \InvalidArgumentException('Karyawan target sudah tidak ada (mungkin dihapus). Apply diabaikan.');
         }
@@ -381,15 +386,22 @@ class EmployeeTransferService
 
         $db->transBegin();
         try {
-            $db->table('employees')->where('id', $empId)->update($update);
+            $db->table('employees')->where('id', $empId)
+                ->where('company_id', (int) $row['company_id'])->update($update);
 
-            $db->table('employee_transfers')->where('id', $id)->update([
+            $db->table('employee_transfers')->where('id', $id)
+                ->where('company_id', (int) $row['company_id'])->update([
                 'status'              => 'IMPLEMENTED',
                 'implemented_at'      => $now,
                 'implemented_by'      => $userId,
                 'implementation_note' => $note,
                 'updated_at'          => $now,
             ]);
+
+            (new EmployeeEffectiveHistoryService($db))->recordAppliedSnapshot(
+                (int) $row['company_id'], $empId, (string) $row['effective_date'],
+                'EMPLOYEE_TRANSFER', $id, $userId,
+            );
 
             if ($db->transStatus() === false) {
                 $db->transRollback();
@@ -417,7 +429,8 @@ class EmployeeTransferService
             } catch (\Throwable $e) { /* non-fatal */ }
         }
         if ($allowanceRecomputed) {
-            $db->table('employee_transfers')->where('id', $id)->update([
+            $db->table('employee_transfers')->where('id', $id)
+                ->where('company_id', (int) $row['company_id'])->update([
                 'allowance_recomputed' => 1, 'updated_at' => $now,
             ]);
         }

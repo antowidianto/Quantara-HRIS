@@ -16,9 +16,10 @@ use Config\Services;
  *   - Token type harus `candidate_access` (bukan `access`).
  *   - aud claim harus `candidate`.
  *   - Lookup ke tabel `candidate_accounts` (bukan `users`).
- *   - Tidak set TenantContext employee/role/permission internal — kandidat
- *     bukan internal user. Hanya stash payload + record ke request supaya
- *     controller bisa baca pakai `$request->candidate`.
+ *   - Hanya set company scope di TenantContext; employee/role/permission
+ *     internal tetap kosong karena kandidat bukan internal user.
+ *   - Stash payload + record ke request supaya controller bisa baca lewat
+ *     `$request->candidate`.
  *
  * Catatan: filter ini TIDAK mendelegasikan ke ThrottleFilter — endpoint
  * candidate sudah masuk grup `throttle:api` di Filters.php global.

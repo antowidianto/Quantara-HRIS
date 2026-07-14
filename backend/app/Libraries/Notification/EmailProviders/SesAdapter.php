@@ -82,10 +82,16 @@ class SesAdapter implements EmailProviderInterface
         if (! empty($payload['bcc']) && is_array($payload['bcc'])) {
             $reqBody['Destination']['BccAddresses'] = $payload['bcc'];
         }
+        $emailTags = [];
         if (! empty($payload['tag'])) {
-            $reqBody['EmailTags'] = [
-                ['Name' => 'tag', 'Value' => preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $payload['tag'])],
-            ];
+            $emailTags[] = ['Name' => 'tag', 'Value' => preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $payload['tag'])];
+        }
+        $companyId = (int) ($payload['metadata']['company_id'] ?? 0);
+        if ($companyId > 0) {
+            $emailTags[] = ['Name' => 'company_id', 'Value' => (string) $companyId];
+        }
+        if ($emailTags !== []) {
+            $reqBody['EmailTags'] = $emailTags;
         }
         $configSet = (string) env('SES_CONFIGURATION_SET', '');
         if ($configSet !== '') {
@@ -216,8 +222,14 @@ class SesAdapter implements EmailProviderInterface
             'email'     => '',
             'occurred_at' => date('Y-m-d H:i:s'),
             'provider_message_id' => (string) ($msg['mail']['messageId'] ?? ''),
+            // SNS MessageId stays stable when AWS retries a notification.
+            'provider_event_id' => (string) ($payload['MessageId'] ?? ''),
             'raw'       => $msg,
         ];
+        $taggedCompanyId = (int) ($msg['mail']['tags']['company_id'][0] ?? 0);
+        if ($taggedCompanyId > 0) {
+            $event['company_id'] = $taggedCompanyId;
+        }
 
         if ($eventType === 'BOUNCE') {
             $bounce = $msg['bounce'] ?? [];
