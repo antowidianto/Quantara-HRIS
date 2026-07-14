@@ -1,0 +1,6 @@
+export default { contract_sign: {
+  load_failed: 'Failed to load contract', image_only: 'Only image files are accepted', max_size: 'Maximum file size is 2 MB', signature_required: 'Please provide your signature first', signed_toast: 'Contract signed successfully', save_failed: 'Failed to save signature',
+  loading: 'Loading contract…', default_subject: 'Employment Contract', preview_title: 'Contract preview', digital_signature: 'Digital Signature', draw_manual: 'Draw Manually', upload_photo: 'Upload Signature Image', draw_area: 'Area for drawing your signature', clear_redraw: 'Clear and draw again', draw_help: 'Draw your signature above using a mouse or touch.',
+  upload_area: 'Select a signature image', signature_preview: 'Signature preview', upload_prompt: 'Click to upload a signature image', file_hint: 'PNG, JPG, or WebP. Maximum 2 MB.', clear_reselect: 'Clear and select again', will_be_saved: 'Signature to be saved:', saving: 'Saving…', sign_accept: 'Sign & Accept Contract', later: 'Maybe Later',
+  success_title: 'Contract Signed Successfully', success_message: 'Employment contract {number} has been signed digitally. The document will be processed further by the HR team.', dashboard: 'Go to Dashboard', not_found: 'Contract not found',
+} }

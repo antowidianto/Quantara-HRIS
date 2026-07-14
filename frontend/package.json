@@ -10,10 +10,12 @@
     "build:analyze": "vite build --mode analyze",
     "preview": "vite preview --host",
     "lint": "eslint \"src/**/*.{js,vue}\"",
+    "i18n:check": "node scripts/check-hardcoded-visible-strings.mjs",
     "lint:fix": "eslint \"src/**/*.{js,vue}\" --fix",
     "format": "prettier --write \"src/**/*.{js,vue,css,scss,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,vue,css,scss,json}\"",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "prepare": "husky || true"
   },
@@ -30,6 +32,8 @@
     "vue-toastification": "^2.0.0-rc.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@vitejs/plugin-vue": "^5.1.4",
     "@vue/test-utils": "^2.4.6",
     "autoprefixer": "^10.4.20",

@@ -92,18 +92,39 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        def releaseStoreFile = System.getenv('HRIS_RELEASE_STORE_FILE')
+        def releaseStorePassword = System.getenv('HRIS_RELEASE_STORE_PASSWORD')
+        def releaseKeyAlias = System.getenv('HRIS_RELEASE_KEY_ALIAS')
+        def releaseKeyPassword = System.getenv('HRIS_RELEASE_KEY_PASSWORD')
+        if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (signingConfigs.findByName('release') != null) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def requestsRelease = graph.allTasks.any { task ->
+        task.name == 'assembleRelease' || task.name == 'bundleRelease'
+    }
+    if (requestsRelease && android.signingConfigs.findByName('release') == null) {
+        throw new GradleException('Release signing requires HRIS_RELEASE_STORE_FILE, HRIS_RELEASE_STORE_PASSWORD, HRIS_RELEASE_KEY_ALIAS, and HRIS_RELEASE_KEY_PASSWORD.')
     }
 }
 

@@ -19,13 +19,14 @@
  * Lihat docs/ORG_STRUCTURE.md.
  */
 import { ref, computed, onMounted, reactive } from 'vue'
+import { useI18n } from '@/locales'
 import api from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
   BuildingOffice2Icon, PlusIcon, PencilIcon, TrashIcon,
-  UserCircleIcon, ArrowPathIcon, XMarkIcon, MagnifyingGlassIcon,
+  UserCircleIcon, ArrowPathIcon, XMarkIcon,
   CheckBadgeIcon, ExclamationCircleIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
@@ -33,6 +34,7 @@ import ExcelImporter from '@/components/ExcelImporter.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
+const { t } = useI18n()
 
 // ─── State ──────────────────────────────────────────────────────────
 const roles = ref([])
@@ -55,18 +57,16 @@ const assignForm = reactive({
   backup_employee_ids: [],
 })
 
-const LEVELS = [
-  { value: 'BOD',             label: 'BOD (Direksi)',            badge: 'bg-rose-100 text-rose-700 border-rose-300' },
-  { value: 'EXECUTIVE',       label: 'Executive',                badge: 'bg-purple-100 text-purple-700 border-purple-300' },
-  { value: 'GENERAL_MANAGER', label: 'General Manager',          badge: 'bg-orange-100 text-orange-700 border-orange-300' },
-  { value: 'MANAGER',         label: 'Manager',                  badge: 'bg-blue-100 text-blue-700 border-blue-300' },
-  { value: 'ASST_MANAGER',    label: 'Asst Manager',             badge: 'bg-indigo-100 text-indigo-700 border-indigo-300' },
-  { value: 'SUPERVISOR',      label: 'Supervisor',               badge: 'bg-cyan-100 text-cyan-700 border-cyan-300' },
-  { value: 'OFFICER',         label: 'Officer',                  badge: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
-  { value: 'STAFF',           label: 'Staff',                    badge: 'bg-gray-100 text-gray-600 border-gray-300' },
-]
-function levelBadge(lvl) { return LEVELS.find(l => l.value === lvl)?.badge || 'bg-gray-100 text-gray-600' }
-function levelLabel(lvl) { return LEVELS.find(l => l.value === lvl)?.label || lvl }
+const LEVELS = computed(() => [
+  { value: 'BOD',             label: t('organization_roles.level_bod'),             badge: 'bg-rose-100 text-rose-700 border-rose-300' },
+  { value: 'EXECUTIVE',       label: t('organization_roles.level_executive'),       badge: 'bg-purple-100 text-purple-700 border-purple-300' },
+  { value: 'GENERAL_MANAGER', label: t('organization_roles.level_general_manager'), badge: 'bg-orange-100 text-orange-700 border-orange-300' },
+  { value: 'MANAGER',         label: t('organization_roles.level_manager'),         badge: 'bg-blue-100 text-blue-700 border-blue-300' },
+  { value: 'ASST_MANAGER',    label: t('organization_roles.level_asst_manager'),    badge: 'bg-indigo-100 text-indigo-700 border-indigo-300' },
+  { value: 'SUPERVISOR',      label: t('organization_roles.level_supervisor'),      badge: 'bg-cyan-100 text-cyan-700 border-cyan-300' },
+  { value: 'OFFICER',         label: t('organization_roles.level_officer'),         badge: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
+  { value: 'STAFF',           label: t('organization_roles.level_staff'),           badge: 'bg-gray-100 text-gray-600 border-gray-300' },
+])
 
 // Standard scopes — hint untuk dropdown saat edit
 const STANDARD_SCOPES = [
@@ -95,7 +95,7 @@ async function load() {
     const res = await api.get('/organization-roles', { params })
     roles.value = res.data.data || []
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat role')
+    toast.error(e.response?.data?.message || t('organization_roles.load_failed'))
   } finally {
     loading.value = false
   }
@@ -130,7 +130,7 @@ const groupedRoles = computed(() => {
     map[r.level].push(r)
   }
   // Urutkan groups sesuai LEVELS order
-  return LEVELS
+  return LEVELS.value
     .filter(l => map[l.value]?.length)
     .map(l => ({ ...l, items: map[l.value] }))
 })
@@ -149,11 +149,11 @@ async function saveAssign() {
       employee_id: assignForm.employee_id,
       backup_employee_ids: assignForm.backup_employee_ids,
     })
-    toast.success(assignForm.employee_id ? 'Penjabat di-assign' : 'Penjabat di-clear')
+    toast.success(assignForm.employee_id ? t('organization_roles.assigned') : t('organization_roles.cleared'))
     showAssign.value = null
     await load()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('organization_roles.save_failed'))
   }
 }
 
@@ -184,13 +184,13 @@ function openEdit(role) {
 }
 
 async function saveRole() {
-  if (! editing.value.title?.trim()) { toast.warning('Title wajib diisi'); return }
+  if (! editing.value.title?.trim()) { toast.warning(t('organization_roles.title_required')); return }
   if (! editing.value.id && ! editing.value.role_key?.trim()) {
-    toast.warning('role_key wajib diisi (huruf besar + underscore, mis. SECTION_HEAD_PROD)')
+    toast.warning(t('organization_roles.role_key_required'))
     return
   }
   if (editing.value.role_key && ! /^[A-Z][A-Z0-9_]*$/.test(editing.value.role_key)) {
-    toast.warning('role_key harus uppercase + underscore, mis. HRD_MANAGER')
+    toast.warning(t('organization_roles.role_key_format'))
     return
   }
   const payload = { ...editing.value }
@@ -199,31 +199,31 @@ async function saveRole() {
   try {
     if (editing.value.id) {
       await api.put(`/organization-roles/${editing.value.id}`, payload)
-      toast.success('Role diperbarui')
+      toast.success(t('organization_roles.updated'))
     } else {
       await api.post('/organization-roles', payload)
-      toast.success('Role dibuat')
+      toast.success(t('organization_roles.created'))
     }
     showForm.value = false
     await load()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menyimpan')
+    toast.error(e.response?.data?.message || t('organization_roles.save_failed'))
   }
 }
 
 async function deleteRole(role) {
   const ok = await confirmDialog({
-    title: 'Hapus role?',
-    message: `Yakin hapus role "${role.title}" (${role.role_key})? Modul yang merujuk role_key ini akan kehilangan referensi.`,
-    okText: 'Hapus', variant: 'danger',
+    title: t('organization_roles.delete_title'),
+    message: t('organization_roles.delete_message', { title: role.title, key: role.role_key }),
+    okText: t('organization_roles.delete_action'), variant: 'danger',
   })
   if (! ok) return
   try {
     await api.delete(`/organization-roles/${role.id}`)
-    toast.success('Role dihapus')
+    toast.success(t('organization_roles.deleted'))
     await load()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal menghapus')
+    toast.error(e.response?.data?.message || t('organization_roles.delete_failed'))
   }
 }
 
@@ -237,10 +237,6 @@ const filteredEmployees = computed(() => {
     || (e.employee_number || '').toLowerCase().includes(q)
   ).slice(0, 100)
 })
-
-function empById(id) {
-  return employees.value.find(e => e.id === id)
-}
 
 function toggleScope(scope) {
   if (! editing.value) return

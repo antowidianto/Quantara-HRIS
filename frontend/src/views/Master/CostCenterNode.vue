@@ -10,6 +10,9 @@ import {
   ChevronRightIcon, ChevronDownIcon,
   PencilIcon, ChartBarIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from '@/locales'
+
+const { t } = useI18n()
 
 const props = defineProps({
   node:     { type: Object, required: true },
@@ -42,22 +45,22 @@ const indentStyle = computed(() => ({ paddingLeft: `${props.depth * 1.5 + 0.5}re
         {{ node.code }}
       </span>
       <span class="font-medium">{{ node.name }}</span>
-      <span v-if="! node.is_active" class="text-xs text-gray-400">(Non-aktif)</span>
+      <span v-if="! node.is_active" class="text-xs text-gray-400">{{ t('cost_center_node.inactive') }}</span>
 
       <div class="ml-auto flex gap-2">
         <button
           class="text-gray-400 hover:text-primary-600"
-          title="Lihat budget"
           @click="emit('view-budget', node.id)"
         >
           <ChartBarIcon class="w-4 h-4" />
+          <span class="sr-only">{{ t('cost_center_node.view_budget') }}</span>
         </button>
         <button
           class="text-gray-400 hover:text-primary-600"
-          title="Edit"
           @click="emit('edit', node)"
         >
           <PencilIcon class="w-4 h-4" />
+          <span class="sr-only">{{ t('cost_center_node.edit') }}</span>
         </button>
       </div>
     </div>

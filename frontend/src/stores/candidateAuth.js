@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import axios from 'axios'
+import { createIdempotencyKey, requiresIdempotencyKey } from '@/api/idempotency'
 
 const ACCESS_KEY = 'candidate_access'
 const REFRESH_KEY = 'candidate_refresh'
@@ -8,6 +9,10 @@ const ACCOUNT_KEY = 'candidate_account'
 const baseURL = (import.meta.env.VITE_USE_PROXY === 'true')
   ? '/api/v1'
   : `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}/api/v1`
+
+const mutationConfig = (headers = {}) => ({
+  headers: { ...headers, 'Idempotency-Key': createIdempotencyKey() },
+})
 
 /**
  * Pinia store untuk auth pelamar (kandidat) di Career Portal.
@@ -31,24 +36,24 @@ export const useCandidateAuthStore = defineStore('candidateAuth', {
 
   actions: {
     async register(slug, payload) {
-      const res = await axios.post(`${baseURL}/careers/${slug}/account/register`, payload)
+      const res = await axios.post(`${baseURL}/careers/${slug}/account/register`, payload, mutationConfig())
       this._persist(res.data.data)
       return res.data.data
     },
 
     async login(slug, email, password) {
-      const res = await axios.post(`${baseURL}/careers/${slug}/account/login`, { email, password })
+      const res = await axios.post(`${baseURL}/careers/${slug}/account/login`, { email, password }, mutationConfig())
       this._persist(res.data.data)
       return res.data.data
     },
 
     async forgotPassword(slug, email) {
-      const res = await axios.post(`${baseURL}/careers/${slug}/account/forgot-password`, { email })
+      const res = await axios.post(`${baseURL}/careers/${slug}/account/forgot-password`, { email }, mutationConfig())
       return res.data
     },
 
     async resetPassword(token, password) {
-      const res = await axios.post(`${baseURL}/careers/account/reset-password`, { token, password })
+      const res = await axios.post(`${baseURL}/careers/account/reset-password`, { token, password }, mutationConfig())
       return res.data
     },
 
@@ -56,7 +61,7 @@ export const useCandidateAuthStore = defineStore('candidateAuth', {
       if (! this.refreshToken) throw new Error('No refresh token')
       const res = await axios.post(`${baseURL}/careers/account/refresh`, {
         refresh_token: this.refreshToken,
-      })
+      }, mutationConfig())
       this._persist(res.data.data)
     },
 
@@ -64,7 +69,7 @@ export const useCandidateAuthStore = defineStore('candidateAuth', {
       try {
         await axios.post(`${baseURL}/careers/account/logout`,
           { refresh_token: this.refreshToken },
-          { headers: { Authorization: `Bearer ${this.accessToken}` } })
+          mutationConfig({ Authorization: `Bearer ${this.accessToken}` }))
       } catch (_) { /* ignore */ }
       this._clear()
     },
@@ -111,6 +116,15 @@ export function candidateApi() {
   client.interceptors.request.use((config) => {
     if (store.accessToken) {
       config.headers.Authorization = `Bearer ${store.accessToken}`
+    }
+    if (requiresIdempotencyKey(config.method, config.url)) {
+      const existing = typeof config.headers?.get === 'function'
+        ? config.headers.get('Idempotency-Key')
+        : config.headers?.['Idempotency-Key']
+      if (!existing) {
+        if (typeof config.headers?.set === 'function') config.headers.set('Idempotency-Key', createIdempotencyKey())
+        else config.headers['Idempotency-Key'] = createIdempotencyKey()
+      }
     }
     return config
   })

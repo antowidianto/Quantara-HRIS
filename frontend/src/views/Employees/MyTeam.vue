@@ -7,8 +7,10 @@ import {
   BriefcaseIcon, ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
 import EmployeeModal from './EmployeeModal.vue'
+import { useI18n } from '@/locales'
 
 const toast = useToast()
+const { t } = useI18n()
 const items = ref([])
 const loading = ref(false)
 const scope = ref('n1')
@@ -18,9 +20,9 @@ const meta = ref({ total: 0, pages: 1, counts: { n1: 0, n2: 0, all: 0 } })
 const selectedEmployeeId = ref(null)
 
 const scopes = computed(() => [
-  { value: 'n1', label: 'N1 Langsung', count: meta.value.counts?.n1 || 0 },
-  { value: 'n2', label: 'N2', count: meta.value.counts?.n2 || 0 },
-  { value: 'all', label: 'Semua Level', count: meta.value.counts?.all || 0 },
+  { value: 'n1', label: t('my_team.scope_n1'), count: meta.value.counts?.n1 || 0 },
+  { value: 'n2', label: t('my_team.scope_n2'), count: meta.value.counts?.n2 || 0 },
+  { value: 'all', label: t('my_team.scope_all'), count: meta.value.counts?.all || 0 },
 ])
 
 async function fetchTeam() {
@@ -32,7 +34,7 @@ async function fetchTeam() {
     items.value = res.data.data || []
     meta.value = res.data.meta || meta.value
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal memuat data tim')
+    toast.error(e.response?.data?.message || t('my_team.load_failed'))
     items.value = []
   } finally {
     loading.value = false
@@ -57,11 +59,11 @@ onMounted(fetchTeam)
   <div>
     <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Tim Saya</h1>
-        <p class="text-sm text-gray-500 mt-1">Karyawan berdasarkan garis atasan langsung pada struktur organisasi.</p>
+        <h1 class="text-2xl font-bold text-gray-900">{{ t('my_team.title') }}</h1>
+        <p class="text-sm text-gray-500 mt-1">{{ t('my_team.subtitle') }}</p>
       </div>
       <button class="btn-secondary self-start md:self-auto" :disabled="loading" @click="fetchTeam">
-        <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> Muat Ulang
+        <ArrowPathIcon class="w-4 h-4" :class="loading ? 'animate-spin' : ''" /> {{ t('my_team.refresh') }}
       </button>
     </div>
 
@@ -79,7 +81,7 @@ onMounted(fetchTeam)
       </div>
       <div class="relative w-full md:w-80 pb-3 md:pb-2">
         <MagnifyingGlassIcon class="w-4 h-4 absolute left-3 top-1/2 -translate-y-[70%] text-gray-400" />
-        <input v-model="search" class="input pl-9 w-full" placeholder="Cari nama, NIK, posisi, department" />
+        <label><span class="sr-only">{{ t('my_team.search') }}</span><input v-model="search" class="input pl-9 w-full" /></label>
       </div>
     </div>
 
@@ -107,22 +109,22 @@ onMounted(fetchTeam)
         <div class="mt-3 pt-3 border-t border-gray-100 space-y-1.5 text-sm text-gray-600">
           <div class="flex items-center gap-2 min-w-0"><BriefcaseIcon class="w-4 h-4 text-gray-400 flex-shrink-0" /><span class="truncate">{{ employee.position_name || '-' }}</span></div>
           <div class="flex items-center gap-2 min-w-0"><BuildingOffice2Icon class="w-4 h-4 text-gray-400 flex-shrink-0" /><span class="truncate">{{ employee.department_name || '-' }}</span></div>
-          <div v-if="employee.manager_name" class="text-xs text-gray-500 truncate">Atasan: {{ employee.manager_name }}</div>
+          <div v-if="employee.manager_name" class="text-xs text-gray-500 truncate">{{ t('my_team.manager', { name: employee.manager_name }) }}</div>
         </div>
       </button>
     </div>
 
     <div v-else class="border border-dashed border-gray-300 py-16 text-center bg-white">
       <UserGroupIcon class="w-10 h-10 mx-auto text-gray-300" />
-      <div class="font-medium text-gray-700 mt-3">Tidak ada anggota tim pada level ini</div>
-      <div class="text-sm text-gray-500 mt-1">Data mengikuti relasi atasan pada struktur organisasi.</div>
+      <div class="font-medium text-gray-700 mt-3">{{ t('my_team.empty') }}</div>
+      <div class="text-sm text-gray-500 mt-1">{{ t('my_team.empty_note') }}</div>
     </div>
 
     <div v-if="meta.pages > 1" class="flex items-center justify-between mt-4 text-sm">
-      <span class="text-gray-500">{{ meta.total }} karyawan</span>
+      <span class="text-gray-500">{{ t('my_team.employees', { count: meta.total }) }}</span>
       <div class="flex gap-2">
-        <button class="btn-secondary" :disabled="page <= 1" @click="page--; fetchTeam()">Sebelumnya</button>
-        <button class="btn-secondary" :disabled="page >= meta.pages" @click="page++; fetchTeam()">Berikutnya</button>
+        <button class="btn-secondary" :disabled="page <= 1" @click="page--; fetchTeam()">{{ t('my_team.previous') }}</button>
+        <button class="btn-secondary" :disabled="page >= meta.pages" @click="page++; fetchTeam()">{{ t('my_team.next') }}</button>
       </div>
     </div>
 

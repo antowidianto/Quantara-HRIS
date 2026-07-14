@@ -1,4 +1,4 @@
-import { MMKV } from 'react-native-mmkv';
+import { createMMKV } from 'react-native-mmkv';
 
 /**
  * MMKV — fast key-value untuk preferensi non-rahasia.
@@ -10,7 +10,7 @@ import { MMKV } from 'react-native-mmkv';
  *   - theme_override       ('light' | 'dark' | 'system')
  *   - notification_prefs   (JSON per kategori)
  */
-export const mmkv = new MMKV({ id: 'hris.prefs' });
+export const mmkv = createMMKV({ id: 'hris.prefs' });
 
 /** Outbox storage terpisah supaya sweep cepat tanpa load preferensi. */
-export const mmkvOutbox = new MMKV({ id: 'hris.outbox' });
+export const mmkvOutbox = createMMKV({ id: 'hris.outbox' });

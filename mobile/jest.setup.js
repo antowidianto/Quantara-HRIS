@@ -34,9 +34,10 @@ jest.mock('react-native-mmkv', () => {
     set(k, v) { this._map.set(k, v); }
     getString(k) { return this._map.get(k); }
     getAllKeys() { return Array.from(this._map.keys()); }
-    delete(k) { this._map.delete(k); }
+    delete(k) { return this._map.delete(k); }
+    remove(k) { return this._map.delete(k); }
   }
-  return { MMKV };
+  return { MMKV, createMMKV: () => new MMKV() };
 });
 
 jest.mock('react-native-config', () => ({

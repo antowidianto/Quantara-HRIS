@@ -1,0 +1,6 @@
+export default { contract_sign: {
+  load_failed: 'Gagal memuat kontrak', image_only: 'Hanya file gambar yang diterima', max_size: 'Ukuran file maksimal 2 MB', signature_required: 'Silakan isi tanda tangan terlebih dahulu', signed_toast: 'Kontrak berhasil ditandatangani', save_failed: 'Gagal menyimpan tanda tangan',
+  loading: 'Memuat kontrak…', default_subject: 'Kontrak Kerja', preview_title: 'Pratinjau kontrak', digital_signature: 'Tanda Tangan Digital', draw_manual: 'Gambar Manual', upload_photo: 'Unggah Gambar Tanda Tangan', draw_area: 'Area untuk menggambar tanda tangan', clear_redraw: 'Hapus dan gambar ulang', draw_help: 'Gambar tanda tangan Anda di atas menggunakan mouse atau sentuhan.',
+  upload_area: 'Pilih gambar tanda tangan', signature_preview: 'Pratinjau tanda tangan', upload_prompt: 'Klik untuk mengunggah gambar tanda tangan', file_hint: 'PNG, JPG, atau WebP. Maksimal 2 MB.', clear_reselect: 'Hapus dan pilih ulang', will_be_saved: 'Tanda tangan akan disimpan:', saving: 'Menyimpan…', sign_accept: 'Tanda Tangan dan Setujui Kontrak', later: 'Nanti Saja',
+  success_title: 'Kontrak Berhasil Ditandatangani', success_message: 'Kontrak kerja {number} telah ditandatangani secara digital. Dokumen akan diproses lebih lanjut oleh tim HR.', dashboard: 'Ke Dashboard', not_found: 'Kontrak tidak ditemukan',
+} }

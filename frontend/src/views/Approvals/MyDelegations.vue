@@ -84,7 +84,7 @@ async function fetchData() {
 
 async function loadUsers() {
   try {
-    const res = await api.get('/users', { params: { per_page: 500, is_active: 1 } })
+    const res = await api.get('/approval-delegations/eligible-users')
     users.value = (res.data.data || []).filter(u => Number(u.id) !== myUserId.value)
   } catch (_) { /* silent */ }
 }

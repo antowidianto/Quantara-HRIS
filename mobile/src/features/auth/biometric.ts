@@ -48,7 +48,7 @@ export const Biometric = {
 
   setEnabled(on: boolean): void {
     if (on) mmkv.set(PREF_KEY, '1');
-    else mmkv.delete(PREF_KEY);
+    else mmkv.remove(PREF_KEY);
   },
 
   /**

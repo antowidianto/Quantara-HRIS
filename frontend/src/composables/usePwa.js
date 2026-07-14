@@ -13,6 +13,7 @@
  *   onMounted(() => pwa.register())
  */
 import { ref, onMounted, onUnmounted } from 'vue'
+import { createIdempotencyKey } from '@/api/idempotency'
 
 const isOnline = ref(typeof navigator !== 'undefined' ? navigator.onLine : true)
 const installEvent = ref(null)
@@ -153,7 +154,7 @@ export async function subscribePush(vapidPublicKey, postEndpoint) {
     await fetch(postEndpoint, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'Idempotency-Key': createIdempotencyKey() },
       body: JSON.stringify(sub.toJSON()),
     })
   }

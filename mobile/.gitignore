@@ -27,6 +27,8 @@ android/app/build/
 android/.gradle/
 android/captures/
 android/local.properties
+android/app/release.keystore
+android/app/my-release-key.keystore
 *.iml
 
 # Bundle

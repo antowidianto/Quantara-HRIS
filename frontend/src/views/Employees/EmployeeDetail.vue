@@ -211,22 +211,20 @@ const pkwtExceeded = computed(() => pkwtTotalDays.value >= PKWT_MAX_DAYS)
         <span class="font-semibold">{{ t('employees.detail.contract_history') }}</span>
         <span v-if="pkwtTotalDays > 0" class="text-xs"
               :class="pkwtExceeded ? 'text-red-600 font-semibold' : (pkwtNearLimit ? 'text-amber-600' : 'text-gray-500')">
-          PKWT akumulatif: {{ pkwtTotalDays }} / {{ PKWT_MAX_DAYS }} hari
-          (sisa {{ pkwtRemainingDays }} hari)
+          {{ t('employee_contract_alert.accumulated', { total: pkwtTotalDays, maximum: PKWT_MAX_DAYS, remaining: pkwtRemainingDays }) }}
         </span>
       </div>
 
       <!-- H1.12 — Banner alert kalau total durasi PKWT mendekati / melewati 5 tahun -->
       <div v-if="pkwtExceeded"
            class="mx-4 mt-3 mb-1 rounded border border-red-200 bg-red-50 text-red-700 text-sm px-3 py-2">
-        <strong>Total kontrak PKWT karyawan sudah mencapai/melewati batas 5 tahun (1.825 hari)
-        sesuai PP 35/2021 Pasal 8.</strong>
-        Perpanjangan PKWT berikutnya akan ditolak sistem. Disarankan susun draft PKWTT.
+        <strong>{{ t('employee_contract_alert.exceeded_title') }}</strong>
+        {{ t('employee_contract_alert.exceeded_note') }}
       </div>
       <div v-else-if="pkwtNearLimit"
            class="mx-4 mt-3 mb-1 rounded border border-amber-200 bg-amber-50 text-amber-700 text-sm px-3 py-2">
-        Akumulasi durasi PKWT karyawan ini mendekati batas 5 tahun (PP 35/2021).
-        Sisa hari yang masih bisa diperpanjang: <strong>{{ pkwtRemainingDays }} hari</strong>.
+        {{ t('employee_contract_alert.near_title') }}
+        <strong>{{ t('employee_contract_alert.near_remaining', { days: pkwtRemainingDays }) }}</strong>
       </div>
 
       <div class="overflow-x-auto">
@@ -244,10 +242,10 @@ const pkwtExceeded = computed(() => pkwtTotalDays.value >= PKWT_MAX_DAYS)
               <td>{{ c.contract_number }}</td>
               <td>
                 <span class="badge-blue">{{ c.contract_type }}</span>
-                <span v-if="isContractNearingEnd(c.end_date)" class="ml-1 badge-yellow">jatuh tempo (≤ 30 hari)</span>
+                <span v-if="isContractNearingEnd(c.end_date)" class="ml-1 badge-yellow">{{ t('employee_contract_alert.due_soon') }}</span>
                 <span v-if="(c.contract_type || '').toUpperCase() === 'PKWT' && c.pkwt_compensation_paid"
-                      class="ml-1 badge-green" title="Kompensasi PKWT sudah dibayarkan">
-                  Kompensasi: {{ fmtCurrency(c.pkwt_compensation_amount) }}
+                      class="ml-1 badge-green">
+                  {{ t('employee_contract_alert.compensation', { amount: fmtCurrency(c.pkwt_compensation_amount) }) }}
                 </span>
               </td>
               <td>{{ fmtDate(c.start_date) }}</td>

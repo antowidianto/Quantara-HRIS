@@ -1,7 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fmtDate } from '@/composables/useResource'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
@@ -19,7 +18,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // ──────────────────────────────────────────────────────────────────────────
 // State — list + filters
@@ -237,6 +236,19 @@ function statusBadgeClass(s) {
   }
 }
 
+function employmentStatusLabel(status) {
+  const supported = ['PKWTT', 'PKWT', 'PROBATION', 'HARIAN', 'MAGANG', 'OUTSOURCING']
+  return supported.includes(status) ? t(`employee_list.status_${status.toLowerCase()}`) : status
+}
+
+function fmtDate(value) {
+  if (!value) return '-'
+  const date = new Date(value.length <= 10 ? `${value}T00:00:00` : value)
+  return date.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+
 /**
  * Bikin inisial dari nama lengkap untuk avatar fallback.
  * "Agus Saputra" → "AS", "Eko" → "E".
@@ -279,6 +291,8 @@ function getInitials(name) {
             :placeholder="t('employees.list.search_placeholder')"
             class="input pl-9 pr-9 w-full" />
           <button v-if="filters.search" @click="filters.search = ''"
+            :aria-label="t('employee_list.clear_search')"
+            :title="t('employee_list.clear_search')"
             class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100 text-gray-400">
             <XMarkIcon class="w-4 h-4" />
           </button>
@@ -318,7 +332,7 @@ function getInitials(name) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              :placeholder="t('employees.list.all_departments')"
+              v-bind="{ placeholder: t('employees.list.all_departments') }"
               class="mt-1"
             />
           </div>
@@ -330,7 +344,7 @@ function getInitials(name) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code','city']"
-              :placeholder="t('employees.list.all_branches')"
+              v-bind="{ placeholder: t('employees.list.all_branches') }"
               class="mt-1"
             />
           </div>
@@ -343,7 +357,7 @@ function getInitials(name) {
               label-key="name"
               sub-label-key="department_name"
               :search-keys="['name','code','tier','department_name']"
-              :placeholder="t('employees.list.all_positions')"
+              v-bind="{ placeholder: t('employees.list.all_positions') }"
               class="mt-1"
             />
           </div>
@@ -355,7 +369,7 @@ function getInitials(name) {
               value-key="id"
               label-key="name"
               :search-keys="['name','code']"
-              :placeholder="t('employees.list.all_grades')"
+              v-bind="{ placeholder: t('employees.list.all_grades') }"
               class="mt-1"
             >
               <template #item="{ item }">
@@ -374,22 +388,22 @@ function getInitials(name) {
             <label class="text-xs font-medium text-gray-600">{{ t('employees.list.employee_type') }}</label>
             <select v-model="filters.employment_type" class="input mt-1">
               <option value="">{{ t('employees.list.all_types') }}</option>
-              <option value="FULL_TIME">Full Time</option>
-              <option value="PART_TIME">Part Time</option>
-              <option value="CONTRACT">Contract</option>
-              <option value="INTERN">Intern / Magang</option>
+              <option value="FULL_TIME">{{ t('employee_list.type_full_time') }}</option>
+              <option value="PART_TIME">{{ t('employee_list.type_part_time') }}</option>
+              <option value="CONTRACT">{{ t('employee_list.type_contract') }}</option>
+              <option value="INTERN">{{ t('employee_list.type_intern') }}</option>
             </select>
           </div>
           <div>
             <label class="text-xs font-medium text-gray-600">{{ t('employees.list.employment_status') }}</label>
             <select v-model="filters.employment_status" class="input mt-1">
               <option value="">{{ t('employees.list.all_status') }}</option>
-              <option value="PKWTT">PKWTT (Tetap)</option>
-              <option value="PKWT">PKWT (Kontrak)</option>
-              <option value="PROBATION">Probation</option>
-              <option value="HARIAN">Harian</option>
-              <option value="MAGANG">Magang</option>
-              <option value="OUTSOURCING">Outsourcing</option>
+              <option value="PKWTT">{{ t('employee_list.status_pkwtt') }}</option>
+              <option value="PKWT">{{ t('employee_list.status_pkwt') }}</option>
+              <option value="PROBATION">{{ t('employee_list.status_probation') }}</option>
+              <option value="HARIAN">{{ t('employee_list.status_harian') }}</option>
+              <option value="MAGANG">{{ t('employee_list.status_magang') }}</option>
+              <option value="OUTSOURCING">{{ t('employee_list.status_outsourcing') }}</option>
             </select>
           </div>
           <div>
@@ -476,7 +490,7 @@ function getInitials(name) {
                   </span>
                   <span :class="['text-xs px-2 py-0.5 rounded-full border font-medium w-fit',
                                  statusBadgeClass(e.employment_status)]">
-                    {{ e.employment_status }}
+                    {{ employmentStatusLabel(e.employment_status) }}
                   </span>
                 </div>
               </td>
@@ -484,22 +498,30 @@ function getInitials(name) {
               <td class="text-right" @click.stop>
                 <div class="inline-flex gap-1">
                   <button class="p-1.5 rounded hover:bg-primary-100 text-gray-500 hover:text-primary-600 transition"
-                          @click="openView(e.id)" title="Detail">
+                          @click="openView(e.id)"
+                          :title="t('employee_list.action_detail')"
+                          :aria-label="t('employee_list.action_detail')">
                     <EyeIcon class="w-4 h-4" />
                   </button>
                   <button v-if="auth.can('bonus.view')"
                           class="p-1.5 rounded hover:bg-amber-100 text-gray-500 hover:text-amber-600 transition"
-                          @click="$router.push(`/employees/${e.id}/bonus-history`)" title="Bonus history">
+                          @click="router.push(`/employees/${e.id}/bonus-history`)"
+                          :title="t('employee_list.action_bonus_history')"
+                          :aria-label="t('employee_list.action_bonus_history')">
                     <GiftIcon class="w-4 h-4" />
                   </button>
                   <button v-if="auth.can('employee.update')"
                           class="p-1.5 rounded hover:bg-primary-100 text-gray-500 hover:text-primary-600 transition"
-                          @click="openEdit(e.id)" title="Edit">
+                          @click="openEdit(e.id)"
+                          :title="t('employee_list.action_edit')"
+                          :aria-label="t('employee_list.action_edit')">
                     <PencilIcon class="w-4 h-4" />
                   </button>
                   <button v-if="auth.can('employee.delete')"
                           class="p-1.5 rounded hover:bg-red-100 text-gray-500 hover:text-red-600 transition"
-                          @click="removeEmployee(e)" title="Nonaktifkan">
+                          @click="removeEmployee(e)"
+                          :title="t('employee_list.action_deactivate')"
+                          :aria-label="t('employee_list.action_deactivate')">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>

@@ -14,6 +14,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import { createIdempotencyKey } from '@/api/idempotency'
 import { useToast } from 'vue-toastification'
 import { CheckCircleIcon, EnvelopeIcon } from '@heroicons/vue/24/outline'
 
@@ -111,7 +112,7 @@ async function handleSubmit() {
       utm_medium: form.utm_medium || null,
       utm_source: form.utm_source || null,
       agreed_terms: true,
-    })
+    }, { headers: { 'Idempotency-Key': createIdempotencyKey() } })
     submittedEmail.value = form.email
     submitted.value = true
   } catch (e) {
