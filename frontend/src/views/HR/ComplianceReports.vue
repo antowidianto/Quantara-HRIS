@@ -87,6 +87,10 @@ async function generate() {
     }
 
     const res = await api.post('/compliance-reports/generate', payload)
+    if (res.status === 202 && res.data.data?.approval_state === 'PENDING') {
+      toast.warning('Generate report berisi PII menunggu approval. Ulangi request yang sama setelah disetujui.')
+      return
+    }
     toast.success(res.data.data?.cached ? 'Returned cached report' : 'Report generated')
     fetchAll()
     // Otomatis open hasil yang baru di-generate

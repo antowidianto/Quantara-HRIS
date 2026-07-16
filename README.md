@@ -34,9 +34,10 @@ Tiga aplikasi terintegrasi:
 | PDF      | dompdf 2                                                              |
 | Excel    | phpoffice/phpspreadsheet 2                                            |
 | Charts   | Chart.js 4 + vue-chartjs                                              |
-| Testing  | PHPUnit 10 + PHPStan 1.12 + Pint, Vitest 2 + ESLint, Jest 29 (mobile) |
+| Testing  | PHPUnit 10 + PHPStan 1.12 + Pint, Vitest 2 + ESLint + Playwright, Jest 29 (mobile) |
 | CI       | GitHub Actions (backend matrix, frontend matrix, mobile pipeline)     |
 | Container | Docker Compose (dev + prod), multi-stage Dockerfile                  |
+| AI Assistant | Mock, Gemini, Groq, OpenAI, Anthropic, atau provider custom dengan API Chat Completions kompatibel OpenAI |
 
 ---
 
@@ -46,24 +47,24 @@ Tiga aplikasi terintegrasi:
 hris-project-1/
 ├── backend/                       # CodeIgniter 4 REST API
 │   ├── app/
-│   │   ├── Controllers/           # 95 controllers (Api/V1, Auth, Public, dst)
-│   │   ├── Libraries/             # 96 services & helpers (PayrollService, AuditLogger, ...)
-│   │   ├── Models/                # 13 model + BaseModel (multi-tenant + encryption casts)
-│   │   ├── Database/Migrations/   # 75 migrations
-│   │   ├── Commands/              # 24 spark commands (cron, audit, cleanup)
+│   │   ├── Controllers/           # 122 controllers (Api/V1, Auth, Public, dst)
+│   │   ├── Libraries/             # 200 services & helpers (ApprovalEngine, PayrollService, ...)
+│   │   ├── Models/                # 19 model files (multi-tenant + encryption casts)
+│   │   ├── Database/Migrations/   # 145 migrations
+│   │   ├── Commands/              # 42 spark commands (cron, audit, outbox, cleanup)
 │   │   ├── Filters/               # JWT, Permission, RateLimit, Idempotency, ...
 │   │   ├── Constants/             # ApprovalStatus, AttendanceStatus, ErrorCode, ...
 │   │   ├── Notifications/         # In-app + email + push templates
 │   │   └── Validation/            # Custom rules (NIK, NPWP, magic-byte)
 │   ├── scripts/                   # Database migration, test, and refactor scripts
-│   ├── tests/Unit/                # 53 test files, 761 test methods
+│   ├── tests/Unit/                # 120 unit/integration policy test files
 │   ├── env-templates/             # local/staging/production .env templates
 │   ├── Dockerfile                 # Production multi-stage build
 │   └── Dockerfile.dev             # Dev build
 │
 ├── frontend/                      # Vue 3 SPA (PWA)
 │   ├── src/
-│   │   ├── views/                 # 141 view components
+│   │   ├── views/                 # 170 view components
 │   │   ├── components/            # Reusable UI (SimpleMaster, FormField, ...)
 │   │   ├── composables/           # useConfirm, useDarkMode, useApi, ...
 │   │   ├── locales/               # i18n (Bahasa Indonesia + English)
@@ -140,6 +141,27 @@ hris-project-1/
 
 ### Modul Utama
 Auth & RBAC · Master Data (Company, Branch, Department, Position, Job Grade, Work Location, Cost Center) · Employee Management (data pribadi, kontrak PKWT/PKWTT, dokumen, riwayat jabatan) · Attendance (clock-in/out + selfie + geofence + cross-day shift, anti-cheat) · Shift & Roster (template, pattern, matrix view, generator) · Leave Management (annual/sick/maternity/special, half-day, balance prorata, anniversary carry-over) · Overtime (request + approval, perhitungan PP 35/2021) · Payroll (komponen, slip gaji, BPJS, PPh21 TER, THR, bank export, ePPT-21) · Reimbursement & Loans · Bonus Engine (formula DSL + gross-up) · Reports & Analytics · Audit Log (severity, request_id, diff, sanitization PII, hash chain) · HR Helpdesk / Tickets dengan SLA · Recruitment & Career Portal (public landing + apply + offer self-service) · Training & Sertifikasi · Performance Management (OKR, KPI, Review cycle) · Manpower Planning (MPP) + Job Information Change (JIC) · Asset Management (assignment, BAST) · Disciplinary (Surat Peringatan) · Resignation, Severance/PHK, Employee Transfer (mutasi) · Business Trip / SPPD · Anniversary & Birthday Widget · Onboarding/Offboarding Tasks · Notifications · PWA (offline queue, install prompt, service worker).
+
+### Approval Governance
+
+- Generic approval engine dengan **workflow snapshot** dan `chain_version_hash`, sehingga urutan step, kondisi, fallback, dan approver asli tetap dapat diaudit walaupun konfigurasi organisasi berubah.
+- Prinsip **four-eyes / maker-checker**, larangan self-approval, tenant scoping, delegasi berbatas waktu/modul, idempotent submit, dan mode fail-closed untuk transaksi material.
+- Domain adapter tersedia untuk Leave, Overtime, Attendance Change, Reimbursement, Loan, Business Trip, Bonus, Payroll Adjustment, Compensation Review, Training Registration, Timesheet, Candidate Offer, Generated Contract, dan Asset Transaction.
+- Finalisasi status, saldo, attendance, jadwal cicilan, budget, atau side effect domain lain berjalan atomik dalam transaksi yang sama dengan keputusan final.
+- Notification dan webhook setelah commit dikirim melalui transactional outbox dengan stable event ID, exponential retry, serta reclaim lease worker yang stale.
+- Inbox Approval dan Delegation UI telah mencakup modul-modul baru; status offer, kontrak, aset, compensation review, dan bonus mengikuti lifecycle approval yang sama.
+
+Panduan kontrol, tier risiko, matriks approver, dan status rollout tersedia di `docs/02_Business_Features/APPROVAL_GOVERNANCE_FMCG_INDONESIA.md`.
+
+### Penyempurnaan UI Master Data
+
+- Shift Assignment, Shift Pattern, dan Task Template memiliki loading state saat simpan/hapus untuk mencegah submit ganda.
+- Form master Approval Chain, Allowance/Natura, Benefit Policy, Contract Template, Organization Role, dan Recruitment Pipeline diperjelas dengan label dialog dinamis, placeholder konsisten, serta atribut tombol dan ARIA yang lebih ramah screen reader.
+- Terjemahan Bahasa Indonesia dan English ditambahkan untuk Allowance/Natura, Benefit Policy, dan Recruitment Pipeline.
+
+### HR AI Copilot
+
+Selain driver bawaan, backend mendukung provider pihak ketiga dengan endpoint **OpenAI-compatible Chat Completions** melalui `AI_ASSISTANT_DRIVER=custom`. Konfigurasikan `AI_ASSISTANT_BASE_URL`, `AI_ASSISTANT_API_KEY`, dan `AI_ASSISTANT_MODEL`; `AI_ASSISTANT_CA_BUNDLE` bersifat opsional. Jangan commit API key asli ke repository. Respons Markdown di frontend dirender dengan escaping HTML untuk mengurangi risiko injeksi konten.
 
 ### Security
 - JWT dengan rotation refresh token, single-flight refresh
@@ -243,6 +265,17 @@ Service yang nyala:
 | `localhost:3306`             | MySQL 8                              |
 | `localhost:6379`             | Redis 7                              |
 
+### Memproses approval outcome outbox
+
+Keputusan approval menyimpan event notification/webhook di transactional outbox. Jalankan command berikut secara berkala melalui cron/scheduler agar event yang sudah committed dipublikasikan:
+
+```bash
+cd backend
+php spark approval-outbox:process --batch=50
+```
+
+Worker aman dijalankan berulang; event menggunakan ID stabil, retry eksponensial, dan lease untuk mengambil kembali job worker yang stale.
+
 ---
 
 ## Switch Environment (local / staging / production)
@@ -272,10 +305,10 @@ bash scripts/switch-env.sh status
 ```bash
 # Backend
 cd backend
-composer test            # PHPUnit (53 file, 761 test method)
+composer test            # PHPUnit (120 unit/integration policy test files)
 composer stan            # PHPStan (level 0 saat ini, target naik bertahap)
 composer format          # Pint auto-format
-composer ci              # stan + test (yang dijalankan di GitHub Actions)
+composer ci              # migration, permission, route, tenant/security checks, PHPStan + PHPUnit
 
 # Frontend
 cd frontend
@@ -316,6 +349,7 @@ Detail static analysis & coverage policy ada di `CONTRIBUTING.md`.
 - **`docs/DATA_PRIVACY.md`** — UU PDP compliance
 - **`docs/PWA.md`** — service worker + offline queue
 - **`docs/MOBILE_APP_PLAN.md`** — mobile roadmap & arsitektur
+- **`docs/02_Business_Features/APPROVAL_GOVERNANCE_FMCG_INDONESIA.md`** — governance approval, tier risiko, matriks approver, transactional outbox, dan status adapter domain
 - **`docs/CRON_JOBS.md`** — daftar scheduled task
 - **`docs/BACKUP_DR.md`** — backup & disaster recovery
 - **`docs/decisions/`** — Architecture Decision Records (ADR)

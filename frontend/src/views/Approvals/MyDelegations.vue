@@ -57,6 +57,12 @@ const moduleOptions = computed(() => [
   { value: 'CANDIDATE_OFFER', label: 'Candidate Offer' },
   { value: 'GENERATED_CONTRACT', label: 'Kontrak Kerja' },
   { value: 'ASSET_TRANSACTION', label: 'Transaksi Asset' },
+  { value: 'HIRE_CONVERSION', label: 'Konversi Kandidat' },
+  { value: 'PERFORMANCE_GOAL', label: 'Performance Goal' },
+  { value: 'IDP_ACTIVATION', label: 'Aktivasi IDP' },
+  { value: 'EMPLOYEE_SENSITIVE_CHANGE', label: 'Perubahan Data Sensitif Employee' },
+  { value: 'MASTER_RATE_CHANGE', label: 'Perubahan Master Rate Payroll' },
+  { value: 'PRIVILEGED_ACTION', label: 'Aksi Administratif Berisiko' },
 ])
 
 function emptyForm() {

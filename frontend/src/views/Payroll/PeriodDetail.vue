@@ -224,6 +224,12 @@ async function openExport() {
 async function download(url, params = {}) {
   try {
     const res = await api.get(url, { params, responseType: 'blob' })
+    if (res.status === 202 || String(res.headers['content-type'] || '').includes('application/json')) {
+      const text = res.data instanceof Blob ? await res.data.text() : String(res.data || '')
+      const pending = JSON.parse(text)
+      toast.warning(pending.message || 'Export menunggu approval. Ulangi download setelah disetujui.')
+      return
+    }
     const disposition = res.headers['content-disposition'] || ''
     const match = disposition.match(/filename="?([^";]+)"?/)
     const filename = match ? match[1] : 'export.csv'

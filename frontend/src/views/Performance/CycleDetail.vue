@@ -107,9 +107,11 @@
                 <span class="px-2 py-0.5 rounded text-xs" :class="goalStatusClass(g.status)">{{ g.status }}</span>
               </td>
               <td class="px-3 py-2 text-right space-x-1 whitespace-nowrap">
-                <button v-if="canApprove && g.status === 'DRAFT'" @click="approveGoal(g)"
-                  class="px-2 py-1 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs">
-                  Approve
+                <button
+                  v-if="Number(g.employee_id) === Number(auth.employee?.id) && ['DRAFT', 'APPROVAL_REJECTED'].includes(g.status)"
+                  @click="submitGoal(g)"
+                  class="px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs">
+                  Submit Approval
                 </button>
                 <button v-if="['APPROVED','IN_PROGRESS'].includes(g.status)" @click="openCheckIn(g)"
                   class="px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs">
@@ -354,7 +356,6 @@ const route = useRoute()
 const auth = useAuthStore()
 const cycleId = computed(() => Number(route.params.id))
 const canManage = computed(() => auth.can('performance.manage'))
-const canApprove = computed(() => auth.can('goal.approve'))
 const canConduct = computed(() => auth.can('review.conduct'))
 
 const cycle = ref(null)
@@ -418,13 +419,13 @@ async function saveGoal() {
   } finally { goalModal.value.saving = false }
 }
 
-async function approveGoal(g) {
-  if (! confirm(`Approve goal "${g.title}"?`)) return
+async function submitGoal(g) {
+  if (! confirm(`Ajukan goal "${g.title}" untuk persetujuan atasan?`)) return
   try {
-    await api.post(`/goals/${g.id}/approve`)
+    await api.post(`/goals/${g.id}/submit`)
     await fetchGoals()
   } catch (e) {
-    alert(e.response?.data?.message || 'Gagal approve')
+    alert(e.response?.data?.message || 'Gagal mengajukan approval')
   }
 }
 
@@ -491,6 +492,8 @@ function statusClass(s) {
 function goalStatusClass(s) {
   return {
     DRAFT: 'bg-gray-100 text-gray-700',
+    PENDING_APPROVAL: 'bg-yellow-100 text-yellow-700',
+    APPROVAL_REJECTED: 'bg-red-100 text-red-700',
     APPROVED: 'bg-blue-100 text-blue-700',
     IN_PROGRESS: 'bg-amber-100 text-amber-700',
     ACHIEVED: 'bg-emerald-100 text-emerald-700',

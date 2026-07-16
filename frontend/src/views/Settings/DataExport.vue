@@ -77,7 +77,11 @@ async function createExport() {
 
   submitting.value = true
   try {
-    await api.post('/companies/me/data-exports', { include: scope.selected })
+    const res = await api.post('/companies/me/data-exports', { include: scope.selected })
+    if (res.status === 202 && res.data.data?.approval_state === 'PENDING') {
+      toast.warning('Export PII menunggu approval. Ulangi request yang sama setelah disetujui.')
+      return
+    }
     toast.success('Export request dibuat. Tunggu hingga status READY.')
     await loadRequests()
     startPolling()

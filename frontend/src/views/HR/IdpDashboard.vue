@@ -28,6 +28,8 @@ const detailData = ref(null)
 
 const STATUS_BADGE = {
   DRAFT:     { label: 'Draft',     color: 'bg-gray-100 text-gray-700' },
+  PENDING_APPROVAL: { label: 'Menunggu Approval', color: 'bg-amber-100 text-amber-700' },
+  APPROVAL_REJECTED: { label: 'Approval Ditolak', color: 'bg-rose-100 text-rose-700' },
   ACTIVE:    { label: 'Aktif',     color: 'bg-blue-100 text-blue-700' },
   COMPLETED: { label: 'Selesai',   color: 'bg-emerald-100 text-emerald-700' },
   REVIEWED:  { label: 'Direview',  color: 'bg-purple-100 text-purple-700' },
@@ -78,15 +80,14 @@ async function openDetail(idp) {
 
 async function finalize(id) {
   const ok = await confirmDialog({
-    title: 'Finalize IDP?',
-    message: 'Status akan berubah dari DRAFT → ACTIVE. Setelah aktif, hanya '
-      + 'progress action_items dan employee_notes yang bisa diedit.',
-    okText: 'Finalize',
+    title: 'Ajukan aktivasi IDP?',
+    message: 'IDP akan dikunci dan dikirim ke Approval Inbox. Status ACTIVE baru diberikan setelah checker menyetujui.',
+    okText: 'Submit Approval',
   })
   if (! ok) return
   try {
     await api.post(`/idp/${id}/finalize`)
-    toast.success('IDP DRAFT → ACTIVE')
+    toast.success('Aktivasi IDP diajukan untuk approval')
     fetchAll()
     if (showDetailModal.value?.id === id) openDetail(showDetailModal.value)
   } catch (e) {
@@ -316,15 +317,15 @@ function progressColor(p) {
         </div>
 
         <div class="px-6 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
-          <button v-if="canManage && detailData.status === 'DRAFT'"
+          <button v-if="canManage && ['DRAFT','APPROVAL_REJECTED'].includes(detailData.status)"
             class="btn-primary text-sm" @click="finalize(detailData.id)">
-            Finalize → ACTIVE
+            Submit Activation Approval
           </button>
           <button v-if="canManage && detailData.status === 'ACTIVE'"
             class="btn-primary text-sm" @click="complete(detailData.id)">
             Mark Completed
           </button>
-          <button v-if="canManage && ['DRAFT','ACTIVE'].includes(detailData.status)"
+          <button v-if="canManage && ['DRAFT','APPROVAL_REJECTED','ACTIVE'].includes(detailData.status)"
             class="text-sm px-3 py-1.5 rounded border border-rose-300 text-rose-600 hover:bg-rose-50"
             @click="cancelIdp(detailData.id)">
             Cancel

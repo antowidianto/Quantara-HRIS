@@ -142,12 +142,11 @@ async function rejectCandidate() {
 
 async function hireCandidate() {
   if (!candidateId.value) return
-  if (!window.confirm('Convert kandidat ini menjadi employee?')) return
+  if (!window.confirm('Ajukan konversi kandidat ini menjadi employee?')) return
   actionLoading.value = true
   try {
-    const res = await api.post(`/candidates/${candidateId.value}/hire`, {})
-    const d = res.data.data || {}
-    toast.success(`Kandidat berhasil di-hire sebagai employee #${d.employee_id || ''}`)
+    await api.post(`/candidates/${candidateId.value}/hire`, {})
+    toast.success('Konversi kandidat diajukan untuk approval')
     await load()
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal hire kandidat')

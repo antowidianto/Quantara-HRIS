@@ -74,7 +74,7 @@ Method | Output / Fungsi
 
 #### Controller `AssetController`
 
-10 endpoint baru:
+11 endpoint utama:
 
 | Endpoint | Aksi |
 |---|---|
@@ -82,7 +82,8 @@ Method | Output / Fungsi
 | `GET /assets/(:num)` | Detail + history 50 assignment terakhir |
 | `POST /assets` | Create (auto-generate asset_number) |
 | `PUT /assets/(:num)` | Update field master |
-| `DELETE /assets/(:num)` | Soft-delete (hanya status AVAILABLE/RETIRED) |
+| `DELETE /assets/(:num)` | Soft-delete setelah status RETIRED |
+| `POST /assets/(:num)/retire` | Submit retirement/write-off untuk approval |
 | `POST /assets/(:num)/assign` | Assign ke karyawan |
 | `POST /assets/(:num)/return` | Terima return + tentukan kondisi |
 | `GET /asset-assignments` | List assignment cross-asset dengan filter |
@@ -103,6 +104,7 @@ aset diterima.
 - **Action per row**:
   - Assign (status AVAILABLE) → modal pilih karyawan + kondisi + tujuan
   - Return (status ASSIGNED) → modal kondisi + catatan kerusakan
+  - Retire / Write-off (AVAILABLE/REPAIR/LOST tanpa assignment aktif) → approval disposal
   - Download BAST PDF (untuk assignment aktif)
   - Edit / Hapus
 - **Form modal** Tambah/Edit aset dengan auto-generate asset_number kalau kosong
@@ -148,15 +150,17 @@ Router: `/hr/assets`.
 
 ### Skenario 3 — Aset rusak, perlu service
 
-Aset yang return dengan kondisi DAMAGED otomatis berstatus REPAIR.
-HR bisa update status manual ke AVAILABLE setelah selesai service
-(via Edit modal — sengaja dibatasi hanya transisi AVAILABLE↔RETIRED untuk
-mencegah salah pilih).
+Aset yang return dengan kondisi DAMAGED otomatis berstatus REPAIR. Perubahan
+status lifecycle tidak dilakukan melalui Edit master; retirement memakai aksi
+khusus ber-approval agar histori fisik dan finansial tidak tertimpa.
 
 ### Skenario 4 — Aset pensiun
 
-Untuk laptop yang sudah end-of-life, HR Edit → ubah status ke RETIRED.
-Aset RETIRED tidak bisa di-assign lagi tapi tetap muncul di list untuk
+Untuk laptop yang sudah end-of-life, custodian memakai aksi **Retire / Write-off**
+dan mengisi tanggal, alasan, metode disposal, nilai buku, proceeds, serta
+referensi bukti. Asset tetap pada status semula selama approval atasan,
+HR/custodian, Finance, dan Director untuk nilai tinggi belum selesai. Status
+`RETIRED` hanya dibentuk oleh final approval. Aset RETIRED tidak bisa di-assign lagi tapi tetap muncul di list untuk
 arsip purchase history.
 
 ## Verifikasi

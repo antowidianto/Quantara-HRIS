@@ -379,8 +379,28 @@ async function save() {
       toast.success(t('employee_modal.employee_added'))
       emit('saved', res.data.data?.id || null)
     } else {
+      const sensitiveFields = [
+        'employee_number', 'nik', 'npwp', 'bank_name', 'bank_account', 'bank_account_holder',
+        'bpjs_kesehatan_no', 'bpjs_tk_no', 'tax_method', 'ptkp_status', 'pph21_method',
+      ]
+      const normalize = value => value == null ? '' : String(value).trim()
+      if (normalize(payload.basic_salary) !== normalize(employee.value?.basic_salary)) {
+        toast.error('Perubahan gaji pokok wajib diajukan melalui Compensation Review agar effective date dan salary history tercatat.')
+        return
+      }
+      const sensitivePayload = Object.fromEntries(
+        sensitiveFields
+          .filter(field => normalize(payload[field]) !== normalize(employee.value?.[field]))
+          .map(field => [field, payload[field]])
+      )
+      for (const field of [...sensitiveFields, 'basic_salary']) delete payload[field]
       await api.put(`/employees/${props.employeeId}`, payload)
-      toast.success(t('employee_modal.employee_updated'))
+      if (Object.keys(sensitivePayload).length > 0) {
+        await api.post(`/employees/${props.employeeId}/sensitive-change`, sensitivePayload)
+        toast.success('Data umum diperbarui; perubahan data sensitif menunggu approval checker.')
+      } else {
+        toast.success(t('employee_modal.employee_updated'))
+      }
       await loadEmployee()
       internalMode.value = 'view'
       emit('saved', props.employeeId)
@@ -1211,7 +1231,7 @@ function lifecycleTaskTypeLabel(type) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                   <div class="field">
                     <label class="label">{{ t('employee_modal.basic_salary') }}</label>
-                    <input v-if="isEditing" v-model.number="form.basic_salary" type="number" min="0" class="input" />
+                    <input v-if="isEditing" v-model.number="form.basic_salary" type="number" min="0" class="input bg-gray-50" disabled />
                     <div v-else class="value text-lg font-semibold text-gray-900">
                       {{ fmtCurrency(employee?.basic_salary) }}
                     </div>
