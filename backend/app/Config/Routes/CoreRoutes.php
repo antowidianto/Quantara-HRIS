@@ -36,9 +36,15 @@ final class CoreRoutes
         $routes->post('notification-broadcast/send', 'Notification\NotificationBroadcastController::send', ['filter' => ['permission:notifications.broadcast', 'idempotency:required']]);
 
         // Roles & Permissions (admin)
-        $routes->resource('roles', ['controller' => 'Identity\RoleController', 'filter' => 'permission:role.manage']);
+        $routes->resource('roles', ['controller' => 'Identity\RoleController', 'only' => ['index', 'show'], 'filter' => 'permission:role.manage']);
+        $routes->post('roles', 'Identity\RoleController::create', ['filter' => ['permission:role.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
+        $routes->put('roles/(:num)', 'Identity\RoleController::update/$1', ['filter' => ['permission:role.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
+        $routes->delete('roles/(:num)', 'Identity\RoleController::delete/$1', ['filter' => ['permission:role.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
         $routes->resource('permissions', ['controller' => 'Identity\PermissionController', 'filter' => 'permission:role.manage']);
-        $routes->resource('users', ['controller' => 'Identity\UserController', 'filter' => 'permission:user.manage']);
+        $routes->resource('users', ['controller' => 'Identity\UserController', 'only' => ['index', 'show'], 'filter' => 'permission:user.manage']);
+        $routes->post('users', 'Identity\UserController::create', ['filter' => ['permission:user.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
+        $routes->put('users/(:num)', 'Identity\UserController::update/$1', ['filter' => ['permission:user.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
+        $routes->delete('users/(:num)', 'Identity\UserController::delete/$1', ['filter' => ['permission:user.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
 
         // â”€â”€â”€ Menu (sidebar dinamis, Migration #076) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // GET /menus/me dipanggil setiap layout AppLayout mount untuk
@@ -66,7 +72,7 @@ final class CoreRoutes
         $routes->get('audit-logs', 'Compliance\AuditLogController::index', ['filter' => 'permission:audit.view']);
         $routes->get('audit-logs/stats', 'Compliance\AuditLogController::stats', ['filter' => 'permission:audit.view']);
         // Sprint 3 â€” throttle berat export
-        $routes->get('audit-logs/export', 'Compliance\AuditLogController::export', ['filter' => ['permission:audit.view', 'throttle:export']]);
+        $routes->get('audit-logs/export', 'Compliance\AuditLogController::export', ['filter' => ['permission:audit.view', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);
         $routes->get('audit-logs/(:num)', 'Compliance\AuditLogController::show/$1', ['filter' => 'permission:audit.view']);
 
         // Settings (per company)
@@ -106,14 +112,14 @@ final class CoreRoutes
 
         // Allowance mapping (per cabang & grade)
         $routes->get('allowance-types',          'Payroll\AllowanceController::listTypes', ['filter' => 'permission:payroll.view']);
-        $routes->post('allowance-types',         'Payroll\AllowanceController::createType', ['filter' => 'permission:payroll.manage']);
-        $routes->put('allowance-types/(:num)',   'Payroll\AllowanceController::updateType/$1', ['filter' => 'permission:payroll.manage']);
-        $routes->delete('allowance-types/(:num)','Payroll\AllowanceController::deleteType/$1', ['filter' => 'permission:payroll.manage']);
+        $routes->post('allowance-types',         'Payroll\MasterRateChangeController::createAllowanceType', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
+        $routes->put('allowance-types/(:num)',   'Payroll\MasterRateChangeController::updateAllowanceType/$1', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
+        $routes->delete('allowance-types/(:num)','Payroll\MasterRateChangeController::deleteAllowanceType/$1', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
 
         $routes->get('allowance-rates',          'Payroll\AllowanceController::listRates', ['filter' => 'permission:payroll.view']);
-        $routes->post('allowance-rates',         'Payroll\AllowanceController::createRate', ['filter' => 'permission:payroll.manage']);
-        $routes->put('allowance-rates/(:num)',   'Payroll\AllowanceController::updateRate/$1', ['filter' => 'permission:payroll.manage']);
-        $routes->delete('allowance-rates/(:num)','Payroll\AllowanceController::deleteRate/$1', ['filter' => 'permission:payroll.manage']);
+        $routes->post('allowance-rates',         'Payroll\MasterRateChangeController::createAllowanceRate', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
+        $routes->put('allowance-rates/(:num)',   'Payroll\MasterRateChangeController::updateAllowanceRate/$1', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
+        $routes->delete('allowance-rates/(:num)','Payroll\MasterRateChangeController::deleteAllowanceRate/$1', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
 
         $routes->get('employee-allowances/(:num)',                    'Payroll\AllowanceController::listForEmployee/$1', ['filter' => 'permission:payroll.view']);
         $routes->post('employee-allowances/(:num)/recompute',         'Payroll\AllowanceController::recomputeEmployee/$1', ['filter' => 'permission:payroll.manage']);
@@ -166,6 +172,7 @@ final class CoreRoutes
         $routes->post('performance-cycles/(:num)/status',      'Performance\PerformanceController::changeCycleStatus/$1', ['filter' => ['permission:performance.manage', 'idempotency:required']]);
         // Goals â€” endpoint khusus di atas resource
         $routes->get('goals/weights/(:num)/(:num)',            'Performance\PerformanceController::validateWeights/$1/$2', ['filter' => 'permission:goal.view']);
+        $routes->post('goals/(:num)/submit',                   'Performance\PerformanceController::submitGoal/$1', ['filter' => ['permission:goal.manage', 'idempotency:required']]);
         $routes->post('goals/(:num)/approve',                  'Performance\PerformanceController::approveGoal/$1', ['filter' => ['permission:goal.approve', 'idempotency:required']]);
         $routes->post('goals/(:num)/check-in',                 'Performance\PerformanceController::checkInGoal/$1', ['filter' => ['permission:goal.view,goal.manage', 'idempotency:required']]);
         $routes->get('goals',                                  'Performance\PerformanceController::listGoals', ['filter' => 'permission:goal.view']);

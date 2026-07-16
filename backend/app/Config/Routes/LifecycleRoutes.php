@@ -39,6 +39,7 @@ final class LifecycleRoutes
         $routes->delete('assets/(:num)',                 'Asset\AssetController::delete/$1', ['filter' => 'permission:asset.manage']);
         $routes->post('assets/(:num)/assign',            'Asset\AssetController::assign/$1', ['filter' => ['permission:asset.manage', 'idempotency:required']]);
         $routes->post('assets/(:num)/return',            'Asset\AssetController::returnAsset/$1', ['filter' => ['permission:asset.manage', 'idempotency:required']]);
+        $routes->post('assets/(:num)/retire',            'Asset\AssetController::retire/$1', ['filter' => ['permission:asset.manage', 'idempotency:required']]);
 
         // â”€â”€â”€ Onboarding & Offboarding Tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Templates
@@ -305,9 +306,9 @@ final class LifecycleRoutes
         // Throttle export berat (sama bucket dengan export lain).
         $routes->get('compliance-reports/types',             'Compliance\ComplianceReportController::types', ['filter' => 'permission:compliance.report.view']);
         $routes->get('compliance-reports/runs',              'Compliance\ComplianceReportController::runs', ['filter' => 'permission:compliance.report.view']);
-        $routes->post('compliance-reports/generate',         'Compliance\ComplianceReportController::generate', ['filter' => ['permission:compliance.report.export', 'idempotency:required']]);
+        $routes->post('compliance-reports/generate',         'Compliance\ComplianceReportController::generate', ['filter' => ['permission:compliance.report.export', 'idempotency:required', 'privilegedapproval:PII_EXPORT']]);
         $routes->get('compliance-reports/runs/(:num)',       'Compliance\ComplianceReportController::showRun/$1', ['filter' => 'permission:compliance.report.view']);
         $routes->get('compliance-reports/runs/(:num)/csv',   'Compliance\ComplianceReportController::exportCsv/$1',
-            ['filter' => ['permission:compliance.report.export', 'throttle:export']]);
+            ['filter' => ['permission:compliance.report.export', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);
     }
 }

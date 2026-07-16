@@ -55,6 +55,7 @@ final class WebhookEvent
     public const CANDIDATE_HIRED  = 'recruitment.candidate_hired';
     public const POSTING_PUBLISHED = 'recruitment.posting_published';
     public const CANDIDATE_REGISTERED = 'recruitment.candidate_registered';
+    public const CANDIDATE_HIRE_REJECTED = 'recruitment.candidate_hire_rejected';
     public const ONLINE_TEST_ASSIGNED = 'recruitment.online_test_assigned';
     public const ONLINE_TEST_COMPLETED = 'recruitment.online_test_completed';
 
@@ -85,6 +86,16 @@ final class WebhookEvent
     public const GENERATED_CONTRACT_REJECTED = 'generated_contract.rejected';
     public const ASSET_TRANSACTION_APPROVED = 'asset.transaction_approved';
     public const ASSET_TRANSACTION_REJECTED = 'asset.transaction_rejected';
+    public const PERFORMANCE_GOAL_APPROVED = 'performance.goal_approved';
+    public const PERFORMANCE_GOAL_REJECTED = 'performance.goal_rejected';
+    public const IDP_ACTIVATION_APPROVED = 'performance.idp_activation_approved';
+    public const IDP_ACTIVATION_REJECTED = 'performance.idp_activation_rejected';
+    public const EMPLOYEE_SENSITIVE_CHANGE_APPROVED = 'employee.sensitive_change_approved';
+    public const EMPLOYEE_SENSITIVE_CHANGE_REJECTED = 'employee.sensitive_change_rejected';
+    public const MASTER_RATE_CHANGE_APPROVED = 'payroll.master_rate_change_approved';
+    public const MASTER_RATE_CHANGE_REJECTED = 'payroll.master_rate_change_rejected';
+    public const PRIVILEGED_ACTION_APPROVED = 'security.privileged_action_approved';
+    public const PRIVILEGED_ACTION_REJECTED = 'security.privileged_action_rejected';
 
     /** All known events — untuk validation di WebhookController create. */
     public const ALL = [
@@ -116,6 +127,7 @@ final class WebhookEvent
         self::CANDIDATE_HIRED,
         self::POSTING_PUBLISHED,
         self::CANDIDATE_REGISTERED,
+        self::CANDIDATE_HIRE_REJECTED,
         self::ONLINE_TEST_ASSIGNED,
         self::ONLINE_TEST_COMPLETED,
         self::SP_ISSUED,
@@ -140,6 +152,16 @@ final class WebhookEvent
         self::GENERATED_CONTRACT_REJECTED,
         self::ASSET_TRANSACTION_APPROVED,
         self::ASSET_TRANSACTION_REJECTED,
+        self::PERFORMANCE_GOAL_APPROVED,
+        self::PERFORMANCE_GOAL_REJECTED,
+        self::IDP_ACTIVATION_APPROVED,
+        self::IDP_ACTIVATION_REJECTED,
+        self::EMPLOYEE_SENSITIVE_CHANGE_APPROVED,
+        self::EMPLOYEE_SENSITIVE_CHANGE_REJECTED,
+        self::MASTER_RATE_CHANGE_APPROVED,
+        self::MASTER_RATE_CHANGE_REJECTED,
+        self::PRIVILEGED_ACTION_APPROVED,
+        self::PRIVILEGED_ACTION_REJECTED,
     ];
 
     public static function isValid(string $eventType): bool

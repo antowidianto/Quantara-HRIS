@@ -421,9 +421,8 @@ async function doHire() {
   }
 
   try {
-    const candidateName = showHireModal.value.full_name
-    // Backend memvalidasi offer ACCEPTED lalu memindahkan stage dan membuat
-    // employee secara atomic. Jangan ubah stage lebih dulu dari UI.
+    // Backend memvalidasi offer ACCEPTED dan mengajukan payload terenkripsi.
+    // Employee baru dibentuk oleh adapter setelah final approval.
     // Build payload — kirim semua field yang HR lengkapi. Backend akan
     // skip field yang kosong-string supaya tidak overwrite carry-over
     // dari candidate dengan empty value.
@@ -432,23 +431,9 @@ async function doHire() {
     for (const k of Object.keys(payload)) {
       if (payload[k] === '' || payload[k] === null) delete payload[k]
     }
-    const res = await api.post(`/candidates/${showHireModal.value.id}/hire`, payload)
-    const data = res.data.data || {}
+    await api.post(`/candidates/${showHireModal.value.id}/hire`, payload)
     showHireModal.value = null
-    // Kalau auto-create user account berhasil, tampilkan credential modal
-    // (one-time view) sebelum data hilang dari memori.
-    if (data.user_id && data.temp_password) {
-      credentialResult.value = {
-        employee_id: data.employee_id,
-        employee_name: candidateName,
-        user_id: data.user_id,
-        user_email: data.user_email,
-        temp_password: data.temp_password,
-        auto_completed_tasks: data.auto_completed_tasks || 0,
-      }
-    } else {
-      toast.success(`Kandidat di-hire sebagai employee #${data.employee_id}. Onboarding tasks otomatis dibuat.`)
-    }
+    toast.success('Konversi kandidat diajukan untuk approval. Employee dan onboarding dibuat setelah keputusan final.')
     fetchAll()
   } catch (e) { toast.error(e.response?.data?.message || 'Gagal') }
 }
@@ -809,6 +794,9 @@ function downloadDoc(doc) {
               <span v-if="detailData.converted_employee_id" class="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs">
                 Sudah jadi Employee #{{ detailData.converted_employee_id }}
               </span>
+              <span v-else-if="detailData.hire_approval_status === 'PENDING'" class="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">
+                Konversi menunggu approval
+              </span>
             </div>
           </div>
           <button class="text-gray-500" @click="showCandDetail = null">&times;</button>
@@ -984,7 +972,7 @@ function downloadDoc(doc) {
         </div>
 
         <div class="px-6 py-3 border-t flex justify-end gap-2">
-          <button v-if="canManage && ! detailData.converted_employee_id"
+          <button v-if="canManage && !detailData.converted_employee_id && detailData.hire_approval_status !== 'PENDING'"
             class="btn-secondary text-red-600" @click="async () => { await deleteCandidate(detailData); showCandDetail = null }">
             Hapus
           </button>
@@ -1329,7 +1317,7 @@ function downloadDoc(doc) {
           <div>
             <h2 class="font-semibold">Hire {{ showHireModal.full_name }}</h2>
             <div class="text-xs text-gray-500">
-              Konversi ke employee + setup payroll
+              Pengajuan konversi employee + setup payroll
             </div>
           </div>
           <button class="text-gray-500" @click="showHireModal = null">&times;</button>
@@ -1337,9 +1325,9 @@ function downloadDoc(doc) {
 
         <div class="p-6 space-y-5">
           <p class="text-sm text-gray-600">
-            Kandidat akan di-convert ke <strong>employee</strong> dengan auto-generate employee_number.
-            Onboarding tasks (12 task default) otomatis dibuat & assigned ke HR/Supervisor/IT/Karyawan.
-            Data sensitif (NPWP, rekening bank) di-encrypt at-rest.
+            Data akan diajukan untuk approval HR checker. Setelah keputusan final, kandidat baru
+            dikonversi menjadi <strong>employee</strong> dan onboarding dibuat otomatis.
+            Payload sensitif (NPWP dan rekening bank) disimpan terenkripsi selama approval.
           </p>
 
           <!-- Section 1: Employment -->

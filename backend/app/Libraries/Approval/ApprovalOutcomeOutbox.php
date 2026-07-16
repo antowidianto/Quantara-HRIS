@@ -36,13 +36,18 @@ final class ApprovalOutcomeOutbox
         $requestMeta = $request['meta'] ?? [];
         if (is_string($requestMeta)) $requestMeta = json_decode($requestMeta, true) ?: [];
         if (! is_array($requestMeta)) $requestMeta = [];
-        if (in_array($module, ['GENERATED_CONTRACT', 'ASSET_TRANSACTION'], true) && $decision === 'REJECTED') {
+        if (in_array($module, ['GENERATED_CONTRACT', 'ASSET_TRANSACTION', 'HIRE_CONVERSION', 'EMPLOYEE_SENSITIVE_CHANGE', 'MASTER_RATE_CHANGE', 'PRIVILEGED_ACTION'], true) && $decision === 'REJECTED') {
+            $recipientUserId = ! empty($requestMeta['submitted_by'])
+                ? (int) $requestMeta['submitted_by'] : null;
+        }
+        if ($module === 'PRIVILEGED_ACTION') {
             $recipientUserId = ! empty($requestMeta['submitted_by'])
                 ? (int) $requestMeta['submitted_by'] : null;
         }
 
         $requestNumber = (string) ($entity['request_number'] ?? $entity['loan_number'] ?? $entity['offer_number']
-            ?? $entity['contract_number'] ?? $entity['asset_number'] ?? $entity['reference_number'] ?? $entity['name']
+            ?? $entity['contract_number'] ?? $entity['asset_number'] ?? $entity['reference_number'] ?? $entity['full_name']
+            ?? $entity['title'] ?? $entity['name']
             ?? ('#' . $request['entity_id']));
         $notification = $this->notification($module, $decision, $requestNumber, $note);
         if ($module === 'CANDIDATE_OFFER') {
@@ -56,6 +61,9 @@ final class ApprovalOutcomeOutbox
         }
         if ($module === 'GENERATED_CONTRACT') $notification['link'] = '/employees/contracts';
         if ($module === 'ASSET_TRANSACTION') $notification['link'] = '/hr/assets';
+        if ($module === 'EMPLOYEE_SENSITIVE_CHANGE') $notification['link'] = '/employees';
+        if ($module === 'MASTER_RATE_CHANGE') $notification['link'] = '/master/payroll-components';
+        if ($module === 'PRIVILEGED_ACTION') $notification['link'] = '/approvals';
         $payload = [
             'approval_request_id' => (int) $request['id'],
             'module' => $module,
@@ -73,6 +81,8 @@ final class ApprovalOutcomeOutbox
                 'approval_request_id' => (int) $request['id'],
                 'entity_id' => (int) $request['entity_id'],
                 'employee_id' => (int) $request['employee_id'],
+                'converted_employee_id' => $module === 'HIRE_CONVERSION'
+                    ? (int) ($entity['converted_employee_id'] ?? 0) ?: null : null,
                 'request_number' => $requestNumber,
                 'decision' => $decision,
                 'approval_action' => $requestMeta['approval_action'] ?? null,
@@ -197,6 +207,18 @@ final class ApprovalOutcomeOutbox
             'GENERATED_CONTRACT:REJECTED' => WebhookEvent::GENERATED_CONTRACT_REJECTED,
             'ASSET_TRANSACTION:APPROVED' => WebhookEvent::ASSET_TRANSACTION_APPROVED,
             'ASSET_TRANSACTION:REJECTED' => WebhookEvent::ASSET_TRANSACTION_REJECTED,
+            'HIRE_CONVERSION:APPROVED' => WebhookEvent::CANDIDATE_HIRED,
+            'HIRE_CONVERSION:REJECTED' => WebhookEvent::CANDIDATE_HIRE_REJECTED,
+            'PERFORMANCE_GOAL:APPROVED' => WebhookEvent::PERFORMANCE_GOAL_APPROVED,
+            'PERFORMANCE_GOAL:REJECTED' => WebhookEvent::PERFORMANCE_GOAL_REJECTED,
+            'IDP_ACTIVATION:APPROVED' => WebhookEvent::IDP_ACTIVATION_APPROVED,
+            'IDP_ACTIVATION:REJECTED' => WebhookEvent::IDP_ACTIVATION_REJECTED,
+            'EMPLOYEE_SENSITIVE_CHANGE:APPROVED' => WebhookEvent::EMPLOYEE_SENSITIVE_CHANGE_APPROVED,
+            'EMPLOYEE_SENSITIVE_CHANGE:REJECTED' => WebhookEvent::EMPLOYEE_SENSITIVE_CHANGE_REJECTED,
+            'MASTER_RATE_CHANGE:APPROVED' => WebhookEvent::MASTER_RATE_CHANGE_APPROVED,
+            'MASTER_RATE_CHANGE:REJECTED' => WebhookEvent::MASTER_RATE_CHANGE_REJECTED,
+            'PRIVILEGED_ACTION:APPROVED' => WebhookEvent::PRIVILEGED_ACTION_APPROVED,
+            'PRIVILEGED_ACTION:REJECTED' => WebhookEvent::PRIVILEGED_ACTION_REJECTED,
             default => throw new \RuntimeException("Outcome event tidak dikenal: {$module}:{$decision}"),
         };
     }
@@ -216,6 +238,12 @@ final class ApprovalOutcomeOutbox
             'CANDIDATE_OFFER' => 'Penawaran kerja',
             'GENERATED_CONTRACT' => 'Kontrak kerja',
             'ASSET_TRANSACTION' => 'Transaksi asset',
+            'HIRE_CONVERSION' => 'Konversi kandidat',
+            'PERFORMANCE_GOAL' => 'Performance goal',
+            'IDP_ACTIVATION' => 'Aktivasi IDP',
+            'EMPLOYEE_SENSITIVE_CHANGE' => 'Perubahan data sensitif employee',
+            'MASTER_RATE_CHANGE' => 'Perubahan master rate payroll',
+            'PRIVILEGED_ACTION' => 'Aksi administratif berisiko',
             'LOAN' => 'Pinjaman/kasbon', default => 'Pengajuan',
         };
         $approved = $decision === 'APPROVED';
@@ -236,6 +264,12 @@ final class ApprovalOutcomeOutbox
             'CANDIDATE_OFFER' => '/careers',
             'GENERATED_CONTRACT' => '/employees/contracts',
             'ASSET_TRANSACTION' => '/hr/assets',
+            'HIRE_CONVERSION' => '/recruitment/pipeline',
+            'PERFORMANCE_GOAL' => '/performance',
+            'IDP_ACTIVATION' => '/hr/idp',
+            'EMPLOYEE_SENSITIVE_CHANGE' => '/employees',
+            'MASTER_RATE_CHANGE' => '/master/payroll-components',
+            'PRIVILEGED_ACTION' => '/approvals',
             'REIMBURSEMENT' => '/reimbursements', 'LOAN' => '/loans', default => '/',
         };
         return [

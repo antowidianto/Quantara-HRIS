@@ -116,8 +116,11 @@ dan posting akuntansi).
 Generic chain mendukung `LEAVE`, `OVERTIME`, `ATTENDANCE_CHANGE`,
 `REIMBURSEMENT`, `LOAN`, `BUSINESS_TRIP`, `BONUS`,
 `PAYROLL_ADJUSTMENT`, `COMPENSATION_REVIEW`, `TRAINING_REGISTRATION`,
-`TIMESHEET`, `CANDIDATE_OFFER`, `GENERATED_CONTRACT`, dan `ASSET_TRANSACTION`,
-termasuk kondisi, assignment organisasi, delegasi, notifikasi, dan inbox. Dari
+`TIMESHEET`, `CANDIDATE_OFFER`, `GENERATED_CONTRACT`, `ASSET_TRANSACTION`, dan
+`HIRE_CONVERSION`, `PERFORMANCE_GOAL`, `IDP_ACTIVATION`,
+`EMPLOYEE_SENSITIVE_CHANGE`, `MASTER_RATE_CHANGE`, dan `PRIVILEGED_ACTION`,
+termasuk kondisi, assignment organisasi, delegasi,
+notifikasi, dan inbox. Dari
 audit kode:
 
 - Leave, overtime, attendance change, dan reimbursement membuat
@@ -137,7 +140,9 @@ Status implementasi P0 per 16 Juli 2026:
 
 - **Leave, Overtime, Attendance Change, Reimbursement, Loan, Business Trip,
   Bonus, Payroll Adjustment, Compensation Review, Training Registration,
-  Timesheet, Candidate Offer, Generated Contract, dan Asset Transaction:
+  Timesheet, Candidate Offer, Generated Contract, Asset Transaction, Hire
+  Conversion, Performance Goal, IDP Activation, Employee Sensitive Change,
+  Master Rate Change, dan Privileged Action:
   adapter tersedia.** Final decision engine dan perubahan
   status serta side effect domain berjalan dalam satu transaksi. Untuk Leave
   mencakup saldo/attendance; untuk Overtime mencakup kalkulasi uang atau kredit
@@ -153,12 +158,15 @@ Status implementasi P0 per 16 Juli 2026:
   commit, memakai event ID stabil, exponential retry, dan reclaim lease worker
   yang stale tanpa mengulang side effect domain.
 
-### 4.3 Workflow satu level/direct yang perlu dinaikkan sesuai kondisi
+### 4.3 Workflow legacy yang tetap perlu dipantau
 
-- Performance goal, IDP, dan beberapa attendance correction.
-- Hire/convert employee, perubahan data payroll sensitif, asset write-off final,
-  data export, dan perubahan konfigurasi integrasi belum seluruhnya
-  memakai satu governance contract yang konsisten.
+- Beberapa attendance correction yang masih memakai jalur legacy.
+- Jalur baru yang mengekspor PII lintas karyawan wajib didaftarkan ke filter
+  `privilegedapproval:PII_EXPORT`; self-service export milik user sendiri tetap
+  T0 karena ownership scope dan throttle berlaku.
+- Jalur konfigurasi integration baru wajib memakai
+  `privilegedapproval:INTEGRATION`; secret tidak boleh masuk metadata approval,
+  notification, webhook outcome, atau audit diff.
 
 ## 5. Perbaikan fondasi yang diterapkan pada audit ini
 
@@ -247,6 +255,69 @@ Status implementasi P0 per 16 Juli 2026:
     Final approval memeriksa hash asset serta assignment aktif, baru kemudian
     membuat/menutup assignment, mengubah cached pointer/status, dan membentuk
     snapshot BAST tepat satu kali. Penolakan tidak mengubah kondisi fisik asset.
+22. Menyatukan Hire/employee conversion ke engine. Konversi hanya dapat diajukan
+    setelah kandidat menerima offer; default chain adalah HR checker, ditambah
+    Director bila join date berbeda dari offer yang diterima. Gaji, status
+    kerja, posisi, departemen, dan branch tidak boleh dioverride dari accepted
+    offer; perubahan material wajib melalui offer baru yang kembali diterima
+    kandidat. NPWP, rekening bank, dan payload onboarding disimpan terenkripsi
+    dengan hash snapshot. Selama pending, kandidat tidak dapat diedit,
+    dipindahkan stage, ditolak, atau dihapus. Employee, dokumen, onboarding,
+    leave balance, pre-allocation asset, kontrak, job fill, dan sinkronisasi MPP
+    baru dijalankan pada final approval dalam transaksi domain yang sama;
+    notification/webhook final dipublikasikan lewat transactional outbox.
+23. Menyatukan Performance Goal ke engine. Pemilik goal membuat dan mengedit
+    `DRAFT`, lalu mengajukannya menjadi `PENDING_APPROVAL`; manager tidak lagi
+    dapat mengubah `DRAFT` langsung ke `APPROVED`. Default chain adalah atasan
+    langsung dengan `fallback_strategy=BLOCK`. Submit dan final approval
+    memvalidasi tenant employee/cycle/parent goal, periode goal setting, deadline,
+    bobot per goal, dan total bobot 100% per employee-cycle. Isi material goal
+    serta cycle disimpan sebagai hash snapshot. Goal pending/approved tidak dapat
+    diedit atau dihapus; rejection menyimpan alasan dan membuka revisi serta
+    resubmit. Keputusan final dan outcome outbox berjalan dalam transaksi engine.
+24. Menyatukan aktivasi IDP ke engine sekaligus memperketat tenant isolation.
+    Seluruh operasi load, create-from-review, create, update, complete, cancel,
+    dan delete kini membutuhkan company scope eksplisit. Manager/HR menyusun IDP
+    sebagai maker, lalu HR Talent checker yang berbeda menyetujui aktivasi;
+    direct `DRAFT` ke `ACTIVE` dinonaktifkan. Submit memvalidasi periode serta
+    minimum satu action item dengan action, owner, dan due date, kemudian
+    menyimpan hash snapshot IDP beserta cycle/review. Selama pending IDP tidak
+    dapat diedit atau dihapus. Final approval baru mengubah status menjadi
+    `ACTIVE`; rejection membuka revisi dan resubmit dengan alasan tercatat.
+25. Memperluas Asset Transaction untuk retirement/write-off. Status asset tidak
+    lagi dapat diubah langsung menjadi `RETIRED`, dan asset `AVAILABLE` tidak
+    boleh dihapus untuk melewati disposal. Custodian mengajukan tanggal, alasan,
+    metode disposal, nilai buku, proceeds, serta referensi bukti; payload dan
+    master asset di-hash saat submit. Chain memakai atasan → HR/custodian →
+    Finance, ditambah Director bila write-off di atas Rp50 juta. Final approval
+    memastikan asset tidak kembali di-assign, lalu menyimpan nilai buku,
+    proceeds, write-off, bukti, maker, approver, dan timestamp sebelum status
+    menjadi `RETIRED`. Penolakan tidak mengubah status fisik maupun nilai asset.
+26. Menyatukan perubahan data sensitif employee ke engine. PUT employee biasa
+    menolak perubahan employee number/login identifier, NIK KTP, NPWP, rekening,
+    bank, BPJS, dan metode pajak. Payload request disimpan terenkripsi; hanya
+    nama field dan hash yang masuk metadata/inbox/outbox. HR menjadi checker,
+    Finance ditambahkan untuk field payroll, dan perubahan login identifier
+    mendapat checker tambahan. Snapshot employee diverifikasi ulang pada final
+    approval. `basic_salary` sengaja tidak menerima shortcut ini dan wajib
+    melalui Compensation Review agar effective date serta salary history tetap
+    lengkap.
+27. Menyatukan master rate payroll ke engine. Create/update/delete allowance
+    type, allowance rate, dan payroll component sekarang membuat staging request
+    `PENDING_APPROVAL`; master aktif tidak berubah sebelum Finance checker final.
+    Penghapusan menambah Director, payload serta target di-hash, perubahan stale
+    diblokir, tenant reference divalidasi, dan allowance company baru dihitung
+    ulang tepat setelah final approval.
+28. Menambahkan approval sekali pakai untuk privileged action. Mutasi role/user
+    dan permission mapping, outbound/inbound webhook termasuk secret rotation,
+    company/audit/compliance export, serta bank/PPH21/BPJS export kini ditahan
+    filter sebelum controller. Otorisasi terikat pada tenant, maker, action
+    group, HTTP method, path, query, dan body hash; berlaku 24 jam serta berubah
+    menjadi `USED` sebelum aksi yang identik dijalankan. Request pertama
+    mengembalikan HTTP 202, lalu maker mengulangi payload yang sama setelah
+    approval dengan Idempotency-Key baru. Metadata tidak menyimpan body/PII/
+    secret. User dan role controller juga diperketat terhadap referensi
+    employee/role lintas tenant.
 
 ## 6. Konfigurasi chain FMCG yang disarankan
 
@@ -279,9 +350,10 @@ effective date, pembuat, approver perubahan setting, dan audit log.
    outcome outbox, dan snapshot/version chain sudah tersedia.
 2. Adapter Leave, Overtime, Attendance Change, Reimbursement, Loan, Business
    Trip, Bonus, Payroll Adjustment, Compensation Review, Training Registration,
-   Timesheet, Candidate Offer, Generated Contract, dan Asset Transaction sudah
-   tersedia. Pertahankan invariant bahwa satu keputusan mengubah engine + domain
-   dalam satu transaksi.
+   Timesheet, Candidate Offer, Generated Contract, Asset Transaction, Hire
+   Conversion, Performance Goal, IDP Activation, Employee Sensitive Change,
+   Master Rate Change, dan Privileged Action sudah tersedia. Pertahankan invariant bahwa satu keputusan
+   mengubah engine + domain dalam satu transaksi.
 3. Snapshot payload, chain version, kondisi, dan expected approver sudah
    disimpan saat submit; pertahankan kompatibilitas untuk request legacy.
 4. Tambahkan optimistic lock/idempotency key dan unique active request di DB.
@@ -290,15 +362,16 @@ effective date, pembuat, approver perubahan setting, dan audit log.
 
 ### P1 — transaksi finansial dan lifecycle
 
-1. Adapter Hire/employee conversion, asset write-off/retirement, dan lifecycle
-   material lain yang belum tercakup assignment/return.
+1. Adapter lifecycle material lain di luar katalog aktif dan inventaris jalur
+   legacy yang masih mengubah status domain secara langsung.
 2. Threshold tenant untuk amount/headcount/salary variance/severance.
 3. Enforcement maker-checker-disburser lintas modul.
 4. SLA reminder, escalation, out-of-office delegation, dan queue monitoring.
 
 ### P2 — governance lanjutan
 
-1. Approval untuk perubahan master sensitif, RBAC, export PDP, dan integrasi.
+1. Quarterly review chain perubahan master sensitif, RBAC, export PDP, dan
+   integrasi; uji sampling bahwa route baru tidak melewati privileged filter.
 2. Dashboard aging, bottleneck, reject reason, delegation usage, self-approval
    attempts, break-glass, dan policy exceptions.
 3. Quarterly access review dan sampling audit keputusan.
@@ -320,6 +393,52 @@ effective date, pembuat, approver perubahan setting, dan audit log.
 - Lembur melebihi batas legal: hard reject walau approver/BOD menyetujui.
 - Final approval domain: side effect, notification, webhook, dan audit log
   terjadi tepat sekali.
+- Privileged action diulang dengan path/query/body berbeda: approval lama tidak
+  dapat dipakai; approval yang sama hanya dapat dikonsumsi sekali dan expired
+  setelah 24 jam.
+- Payload sensitif employee tidak muncul di approval request, notification,
+  webhook, audit description, atau outbox; ciphertext baru didekripsi pada
+  finalisasi domain.
+
+### 8.1 Audit kesiapan operasional
+
+Setelah migration dan seed dijalankan, readiness setiap tenant wajib diperiksa
+dari direktori `backend`:
+
+```bash
+php spark approval:readiness --company=1
+```
+
+Audit ini memeriksa default chain aktif, keberadaan step, kandidat approver
+global berdasarkan role, cakupan atasan langsung, department head, dan hiring
+manager pada job posting aktif. Exit code bukan nol menandakan chain tanpa step
+atau step global wajib yang tidak memiliki kandidat aktif. Gap reporting line
+tetap ditampilkan untuk ditindaklanjuti, tetapi tidak otomatis dianggap gagal
+karena pucuk struktur organisasi memang dapat tidak memiliki supervisor.
+
+Hasil tenant PT Quantara Nusantara Sejahtera pada 16 Juli 2026:
+
+- migration `2026-09-01-000048` sudah mengoreksi role approver default dari
+  Super Admin generik menjadi CEO, CFO, HR Director, IT Admin, atau
+  Legal/Compliance sesuai jenis transaksi;
+- 20 default chain aktif dan seluruh step global mempunyai kandidat aktif;
+- department-head coverage 70/70 dan supervisor coverage 69/70;
+- satu reporting-line root adalah `EMP-0001 - Sumarno Hadiwijaya`, Komisaris
+  Utama. Tidak diberi supervisor secara artifisial; transaksi employee yang
+  mensyaratkan supervisor untuk root ini harus tetap fail-closed dan memakai
+  chain khusus yang disahkan perusahaan bila memang diperlukan;
+- belum ada job posting berstatus OPEN/PAUSED, sehingga hiring-manager coverage
+  0/0. Setiap posting baru wajib memiliki hiring manager aktif sebelum offer
+  dapat diajukan;
+- hasil akhir `failures=0`.
+
+Perintah ini wajib dijalankan setelah perubahan struktur organisasi, aktivasi
+atau deaktivasi user approver, perubahan role, deployment migration approval,
+dan sebelum UAT/go-live. Hasilnya adalah pemeriksaan konfigurasi, bukan
+pengganti UAT skenario keputusan dan side effect pada bagian 8.
+
+Pelaksanaan dan bukti sign-off mengikuti
+[`APPROVAL_UAT_RUNBOOK_FMCG_INDONESIA.md`](../05_Security_Audit_Test/APPROVAL_UAT_RUNBOOK_FMCG_INDONESIA.md).
 
 ## 9. Dasar regulasi dan batas interpretasi
 

@@ -16,6 +16,12 @@ use App\Libraries\Approval\Adapters\TimesheetApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\CandidateOfferApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\GeneratedContractApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\AssetTransactionApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\HireConversionApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\PerformanceGoalApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\IdpActivationApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\EmployeeSensitiveChangeApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\MasterRateChangeApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\PrivilegedActionApprovalDomainAdapter;
 
 final class ApprovalDomainAdapterRegistry
 {
@@ -40,6 +46,12 @@ final class ApprovalDomainAdapterRegistry
             new CandidateOfferApprovalDomainAdapter(),
             new GeneratedContractApprovalDomainAdapter(),
             new AssetTransactionApprovalDomainAdapter(),
+            new HireConversionApprovalDomainAdapter(),
+            new PerformanceGoalApprovalDomainAdapter(),
+            new IdpActivationApprovalDomainAdapter(),
+            new EmployeeSensitiveChangeApprovalDomainAdapter(),
+            new MasterRateChangeApprovalDomainAdapter(),
+            new PrivilegedActionApprovalDomainAdapter(),
         ];
         foreach ($adapters as $adapter) {
             $this->adapters[$adapter->module()] = $adapter;

@@ -59,6 +59,49 @@ final class AssetApprovalWorkflowService
         return $this->submit($asset, $employee, $userId, 'RETURN', (int) $assignment['id'], $payload);
     }
 
+    /** @param array<string,mixed> $params @return array<string,mixed> */
+    public function submitRetire(int $assetId, int $companyId, int $userId, array $params): array
+    {
+        $asset = $this->asset($assetId, $companyId);
+        if (! in_array((string) $asset['status'], ['AVAILABLE', 'REPAIR', 'LOST'], true)
+            || ! empty($asset['current_assignment_id']) || ! empty($asset['approval_action'])) {
+            throw new AssetApprovalException('Asset harus sudah tidak dipegang karyawan dan tidak sedang menunggu approval');
+        }
+        $actor = $this->db()->table('users')->where('id', $userId)->where('company_id', $companyId)
+            ->where('is_active', 1)->get()->getRowArray();
+        $employee = $this->employee((int) ($actor['employee_id'] ?? 0), $companyId);
+        $method = strtoupper(trim((string) ($params['disposal_method'] ?? '')));
+        if (! in_array($method, ['SALE', 'DONATION', 'SCRAP', 'RECYCLE', 'RETURN_VENDOR', 'OTHER'], true)) {
+            throw new AssetApprovalException('Metode disposal tidak valid', 'ASSET_RETIRE_INVALID', 422);
+        }
+        $reason = trim((string) ($params['retirement_reason'] ?? ''));
+        $reference = trim((string) ($params['disposal_reference'] ?? ''));
+        if (mb_strlen($reason) < 5 || mb_strlen($reference) < 3) {
+            throw new AssetApprovalException('Alasan retirement dan referensi bukti disposal wajib diisi', 'ASSET_RETIRE_EVIDENCE_REQUIRED', 422);
+        }
+        $bookValue = (float) ($params['book_value'] ?? -1);
+        $purchasePrice = (float) ($asset['purchase_price'] ?? 0);
+        $proceeds = (float) ($params['disposal_proceeds'] ?? 0);
+        if ($bookValue < 0 || $proceeds < 0 || ($purchasePrice > 0 && $bookValue > $purchasePrice)) {
+            throw new AssetApprovalException('Nilai buku/proceeds disposal tidak valid', 'ASSET_RETIRE_VALUE_INVALID', 422);
+        }
+        $retirementDate = (string) ($params['retirement_date'] ?? date('Y-m-d'));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $retirementDate)
+            || strtotime($retirementDate) === false || $retirementDate > date('Y-m-d')) {
+            throw new AssetApprovalException('Tanggal retirement tidak valid atau berada di masa depan', 'ASSET_RETIRE_DATE_INVALID', 422);
+        }
+        $payload = [
+            'retirement_date' => $retirementDate,
+            'retirement_reason' => $reason,
+            'disposal_method' => $method,
+            'disposal_proceeds' => $proceeds,
+            'disposal_reference' => $reference,
+            'book_value' => $bookValue,
+            'write_off_amount' => max(0.0, $bookValue - $proceeds),
+        ];
+        return $this->submit($asset, $employee, $userId, 'RETIRE', null, $payload);
+    }
+
     /** @param array<string,mixed> $request @return array<string,mixed> */
     public function approve(array $request, int $userId): array
     {
@@ -67,7 +110,7 @@ final class AssetApprovalWorkflowService
         $asset = $this->asset($id, $companyId);
         $meta = $this->meta($request);
         $action = strtoupper((string) ($meta['approval_action'] ?? ''));
-        if (! in_array($action, ['ASSIGN', 'RETURN'], true)
+        if (! in_array($action, ['ASSIGN', 'RETURN', 'RETIRE'], true)
             || $action !== strtoupper((string) ($asset['approval_action'] ?? ''))) {
             throw new AssetApprovalException('Aksi asset berubah setelah submit');
         }
@@ -75,8 +118,38 @@ final class AssetApprovalWorkflowService
             throw new AssetApprovalException('Asset berubah setelah submit; ajukan ulang approval');
         }
         $employee = $this->employee((int) $asset['approval_employee_id'], $companyId);
-        $payload = json_decode((string) ($asset['approval_payload'] ?? ''), true) ?: [];
+        $payloadJson = (string) ($asset['approval_payload'] ?? '');
+        if (! hash_equals((string) ($meta['asset_payload_hash'] ?? ''), hash('sha256', $payloadJson))) {
+            throw new AssetApprovalException('Payload transaksi asset berubah setelah submit');
+        }
+        $payload = json_decode($payloadJson, true) ?: [];
         $db = $this->db();
+        if ($action === 'RETIRE') {
+            if (! in_array((string) $asset['status'], ['AVAILABLE', 'REPAIR', 'LOST'], true)
+                || ! empty($asset['current_assignment_id'])) {
+                throw new AssetApprovalException('Asset kembali di-assign atau statusnya tidak dapat dipensiunkan');
+            }
+            $retiredAt = (string) ($payload['retirement_date'] ?? date('Y-m-d')) . ' 23:59:59';
+            $db->table('assets')->where('id', $id)->where('company_id', $companyId)
+                ->where('approval_action', 'RETIRE')->where('current_assignment_id IS NULL')->update(
+                    $this->clearPendingFields() + [
+                        'status' => 'RETIRED',
+                        'retired_at' => $retiredAt,
+                        'retired_by' => (int) ($meta['submitted_by'] ?? 0),
+                        'retirement_approved_by' => $userId,
+                        'retirement_reason' => (string) ($payload['retirement_reason'] ?? ''),
+                        'disposal_method' => (string) ($payload['disposal_method'] ?? ''),
+                        'disposal_proceeds' => (float) ($payload['disposal_proceeds'] ?? 0),
+                        'disposal_reference' => (string) ($payload['disposal_reference'] ?? ''),
+                        'book_value_at_retirement' => (float) ($payload['book_value'] ?? 0),
+                        'write_off_amount' => (float) ($payload['write_off_amount'] ?? 0),
+                    ]
+                );
+            if ($db->affectedRows() !== 1) throw new AssetApprovalException('Asset berubah saat finalisasi retirement');
+            return ['id' => $id, 'asset_number' => $asset['asset_number'], 'status' => 'RETIRED',
+                'approval_action' => $action, 'employee_id' => (int) $employee['id'],
+                'write_off_amount' => (float) ($payload['write_off_amount'] ?? 0)];
+        }
         $db->table('assets')->where('id', $id)->where('company_id', $companyId)
             ->where('approval_action', $action)->update($this->clearPendingFields());
         if ($db->affectedRows() !== 1) throw new AssetApprovalException('Asset berubah; muat ulang data');
@@ -130,8 +203,11 @@ final class AssetApprovalWorkflowService
             throw new AssetApprovalException('Pembuat transaksi asset harus user aktif yang terhubung ke employee', 'ASSET_MAKER_INVALID', 422);
         }
         $condition = strtoupper((string) ($payload['condition_when_returned'] ?? ''));
-        $lossOrDamage = in_array($condition, ['LOST', 'DAMAGED'], true);
-        $amount = (float) ($asset['purchase_price'] ?? 0);
+        $lossOrDamage = $action === 'RETIRE' || in_array($condition, ['LOST', 'DAMAGED'], true);
+        $amount = $action === 'RETIRE'
+            ? (float) ($payload['write_off_amount'] ?? 0)
+            : (float) ($asset['purchase_price'] ?? 0);
+        $payloadJson = (string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $now = date('Y-m-d H:i:s');
         $db = $this->db();
         $db->transBegin();
@@ -141,7 +217,7 @@ final class AssetApprovalWorkflowService
                     'approval_action' => $action,
                     'approval_employee_id' => (int) $employee['id'],
                     'approval_assignment_id' => $assignmentId,
-                    'approval_payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'approval_payload' => $payloadJson,
                     'approval_rejected_by' => null,
                     'approval_rejected_at' => null,
                     'approval_rejection_reason' => null,
@@ -157,7 +233,9 @@ final class AssetApprovalWorkflowService
                     'approval_action' => $action,
                     'is_loss_or_damage' => $lossOrDamage ? 1 : 0,
                     'is_high_value_loss' => $lossOrDamage && $amount > 50000000 ? 1 : 0,
+                    'is_asset_retirement' => $action === 'RETIRE' ? 1 : 0,
                     'asset_snapshot_hash' => $this->snapshotHash($asset),
+                    'asset_payload_hash' => hash('sha256', $payloadJson),
                     'submitted_by' => $userId,
                 ],
             ];

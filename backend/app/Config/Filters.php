@@ -47,6 +47,7 @@ class Filters extends BaseConfig
         'sameorigin'    => \App\Filters\SameOriginFilter::class,
         // Mobile Prep / MOB-3 — Idempotency-Key anti-duplikat untuk POST critical
         'idempotency'   => \App\Filters\IdempotencyFilter::class,
+        'privilegedapproval' => \App\Filters\PrivilegedActionApprovalFilter::class,
         // S1.1 SaaS — Feature flag gate untuk plan tiers
         'feature'       => \App\Filters\FeatureGateFilter::class,
         // S1.6 SaaS — Block write op untuk tenant SUSPENDED/CANCELLED

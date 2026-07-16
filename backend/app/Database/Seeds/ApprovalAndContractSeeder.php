@@ -88,6 +88,13 @@ class ApprovalAndContractSeeder extends Seeder
 
     private function seedApprovalChains(int $companyId, string $now): void
     {
+        $ceoRoleId = $this->roleId('ceo');
+        $cfoRoleId = $this->roleId('cfo');
+        $hrDirectorRoleId = $this->roleId('hr_director');
+        $itAdminRoleId = $this->roleId('it_admin');
+        // Default ke Legal/Compliance yang tersedia luas; tenant dapat mengganti
+        // step ini ke role data_privacy_officer ketika pejabat DPO sudah ditunjuk.
+        $privacyRoleId = $this->roleId('legal_compliance');
         $chains = [
             // CUTI
             [
@@ -199,7 +206,7 @@ class ApprovalAndContractSeeder extends Seeder
                 'steps' => [
                     ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
                     ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $ceoRoleId,
                         'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 100000000],
                 ],
             ],
@@ -213,7 +220,7 @@ class ApprovalAndContractSeeder extends Seeder
                 'steps' => [
                     ['name' => 'Verifikasi HR Payroll', 'approver_type' => 'HR'],
                     ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $cfoRoleId,
                         'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 10000000],
                 ],
             ],
@@ -227,7 +234,7 @@ class ApprovalAndContractSeeder extends Seeder
                 'steps' => [
                     ['name' => 'Verifikasi HR C&B', 'approver_type' => 'HR'],
                     ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $hrDirectorRoleId,
                         'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 2000000],
                 ],
             ],
@@ -246,7 +253,7 @@ class ApprovalAndContractSeeder extends Seeder
                         'condition_field' => 'is_external', 'condition_op' => '=', 'condition_value' => 1],
                     ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
                         'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 5000000],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $hrDirectorRoleId,
                         'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 20000000],
                 ],
             ],
@@ -275,7 +282,7 @@ class ApprovalAndContractSeeder extends Seeder
                     ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
                     ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
                         'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $ceoRoleId,
                         'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
                 ],
             ],
@@ -290,7 +297,7 @@ class ApprovalAndContractSeeder extends Seeder
                     ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
                     ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
                         'condition_field' => 'is_salary_change', 'condition_op' => '=', 'condition_value' => 1],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $hrDirectorRoleId,
                         'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
                 ],
             ],
@@ -307,8 +314,86 @@ class ApprovalAndContractSeeder extends Seeder
                         'condition_field' => 'is_loss_or_damage', 'condition_op' => '=', 'condition_value' => 1],
                     ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
                         'condition_field' => 'is_loss_or_damage', 'condition_op' => '=', 'condition_value' => 1],
-                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $cfoRoleId,
                         'condition_field' => 'is_high_value_loss', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'HIRE-DEFAULT',
+                'name' => 'Konversi Kandidat (HR checker -> Direksi jika exception)',
+                'module' => 'HIRE_CONVERSION',
+                'description' => 'Employee, payroll identity, kontrak, dan onboarding baru dibentuk setelah checker final.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => $hrDirectorRoleId,
+                        'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'PERFORMANCE-GOAL-DEFAULT',
+                'name' => 'Performance Goal (Atasan Langsung)',
+                'module' => 'PERFORMANCE_GOAL',
+                'description' => 'Pemilik goal mengajukan target dan bobot; atasan langsung memverifikasi alignment serta ekspektasi kerja.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                ],
+            ],
+            [
+                'code' => 'IDP-ACTIVATION-DEFAULT',
+                'name' => 'Aktivasi IDP (HR Talent Checker)',
+                'module' => 'IDP_ACTIVATION',
+                'description' => 'Manager/HR menyusun IDP; HR Talent yang berbeda memverifikasi action plan sebelum aktif.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR Talent', 'approver_type' => 'HR'],
+                ],
+            ],
+            [
+                'code' => 'EMPLOYEE-SENSITIVE-CHANGE-DEFAULT',
+                'name' => 'Perubahan Data Sensitif Employee (HR -> Finance/IT Risk)',
+                'module' => 'EMPLOYEE_SENSITIVE_CHANGE',
+                'description' => 'Maker tidak boleh menjadi checker; HR memverifikasi identitas, Finance memverifikasi data payroll, dan perubahan login identifier mendapat kontrol tambahan.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
+                        'condition_field' => 'is_payroll_sensitive', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Verifikasi Login Identifier', 'approver_type' => 'ROLE', 'approver_role_id' => $itAdminRoleId,
+                        'condition_field' => 'is_login_identifier_change', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'MASTER-RATE-CHANGE-DEFAULT',
+                'name' => 'Master Rate Payroll (Finance Checker -> Direksi untuk delete)',
+                'module' => 'MASTER_RATE_CHANGE',
+                'description' => 'Tarif tunjangan dan komponen payroll baru berlaku setelah Finance checker; penghapusan master mendapat persetujuan Direksi.',
+                'is_default' => 1, 'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE'],
+                    ['name' => 'Persetujuan Penghapusan', 'approver_type' => 'ROLE', 'approver_role_id' => $cfoRoleId,
+                        'condition_field' => 'is_delete', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'PRIVILEGED-ACTION-DEFAULT',
+                'name' => 'Privileged Action (Security/HR -> DPO/Finance sesuai risiko)',
+                'module' => 'PRIVILEGED_ACTION',
+                'description' => 'RBAC, ekspor PII lintas karyawan, dan konfigurasi integration/secret memerlukan approval sekali pakai, terikat method/path/query/body, berlaku 24 jam.',
+                'is_default' => 1, 'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Security Checker', 'approver_type' => 'HR'],
+                    ['name' => 'DPO/Compliance untuk Ekspor PII', 'approver_type' => 'ROLE', 'approver_role_id' => $privacyRoleId,
+                        'condition_field' => 'is_pii_export', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Security Owner untuk RBAC/Secret', 'approver_type' => 'ROLE', 'approver_role_id' => $itAdminRoleId,
+                        'condition_field' => 'is_rbac', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Integration Secret Owner', 'approver_type' => 'ROLE', 'approver_role_id' => $itAdminRoleId,
+                        'condition_field' => 'is_integration_secret', 'condition_op' => '=', 'condition_value' => 1],
                 ],
             ],
         ];
@@ -641,6 +726,13 @@ HTML;
      * oleh perusahaan (kandidat respond via portal, bukan tanda tangan basah
      * di awal).
      */
+    private function roleId(string $slug): int
+    {
+        $role = $this->db->table('roles')->select('id')->where('slug', $slug)->get()->getRowArray();
+        if (! $role) throw new \RuntimeException("Role system {$slug} belum tersedia");
+        return (int) $role['id'];
+    }
+
     private static function offerLetterFooter(): string
     {
         return <<<HTML

@@ -10,7 +10,7 @@ final class ApprovalGovernancePolicyTest extends TestCase
     public function testCatalogContainsAllEngineModules(): void
     {
         $this->assertSame(
-            ['LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN', 'BUSINESS_TRIP', 'BONUS', 'PAYROLL_ADJUSTMENT', 'COMPENSATION_REVIEW', 'TRAINING_REGISTRATION', 'TIMESHEET', 'CANDIDATE_OFFER', 'GENERATED_CONTRACT', 'ASSET_TRANSACTION', 'GENERIC'],
+            ['LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN', 'BUSINESS_TRIP', 'BONUS', 'PAYROLL_ADJUSTMENT', 'COMPENSATION_REVIEW', 'TRAINING_REGISTRATION', 'TIMESHEET', 'CANDIDATE_OFFER', 'GENERATED_CONTRACT', 'ASSET_TRANSACTION', 'HIRE_CONVERSION', 'PERFORMANCE_GOAL', 'IDP_ACTIVATION', 'EMPLOYEE_SENSITIVE_CHANGE', 'MASTER_RATE_CHANGE', 'PRIVILEGED_ACTION', 'GENERIC'],
             ApprovalModuleCatalog::modules(),
         );
     }
@@ -46,7 +46,8 @@ final class ApprovalGovernancePolicyTest extends TestCase
         $this->assertStringContainsString("Self-approval tidak diizinkan", $source);
         $this->assertStringContainsString("Employee tidak ditemukan di tenant aktif", $source);
         $this->assertStringContainsString("Entitas approval tidak ditemukan di tenant aktif", $source);
-        $this->assertStringContainsString("->where('role_id', 2)", $source);
+        $this->assertStringContainsString('roleIdsForSlugs', $source);
+        $this->assertStringContainsString("'hr_director'", $source);
         $this->assertStringContainsString('decideWithinTransaction', $source);
         $this->assertStringContainsString('Step sudah diputuskan oleh approver lain', $source);
         $this->assertStringContainsString('domainAdapters', $source);
@@ -288,8 +289,55 @@ final class ApprovalGovernancePolicyTest extends TestCase
         $this->assertStringContainsString("'module' => 'ASSET_TRANSACTION'", $workflow);
         $this->assertStringContainsString('asset_snapshot_hash', $workflow);
         $this->assertStringContainsString('is_high_value_loss', $workflow);
+        $this->assertStringContainsString('submitRetire(', $workflow);
+        $this->assertStringContainsString('asset_payload_hash', $workflow);
         $this->assertStringContainsString('submitAssign(', $controller);
         $this->assertStringContainsString('submitReturn(', $controller);
+        $this->assertStringContainsString('function retire(', $controller);
+        $this->assertStringNotContainsString('$update[\'status\'] = $data[\'status\']', $controller);
         $this->assertStringContainsString("return 'ASSET_TRANSACTION';", $adapter);
+    }
+
+    public function testHireConversionUsesEncryptedPayloadAndFinalDomainAdapter(): void
+    {
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Recruitment/RecruitmentController.php');
+        $workflow = file_get_contents(APPPATH . 'Libraries/Recruitment/HireApprovalWorkflowService.php');
+        $adapter = file_get_contents(APPPATH . 'Libraries/Approval/Adapters/HireConversionApprovalDomainAdapter.php');
+
+        $this->assertStringContainsString("'module' => 'HIRE_CONVERSION'", $workflow);
+        $this->assertStringContainsString('hire_payload_encrypted', $workflow);
+        $this->assertStringContainsString('hire_snapshot_hash', $workflow);
+        $this->assertStringContainsString('HIRE_OFFER_MISMATCH', $workflow);
+        $this->assertStringContainsString('HireApprovalWorkflowService())', $controller);
+        $this->assertStringNotContainsString('Services::recruitment()->convertToEmployee(', $controller);
+        $this->assertStringContainsString("return 'HIRE_CONVERSION';", $adapter);
+    }
+
+    public function testPerformanceGoalUsesOwnerSubmitAndFinalDomainAdapter(): void
+    {
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Performance/PerformanceController.php');
+        $workflow = file_get_contents(APPPATH . 'Libraries/Performance/PerformanceGoalApprovalService.php');
+        $adapter = file_get_contents(APPPATH . 'Libraries/Approval/Adapters/PerformanceGoalApprovalDomainAdapter.php');
+
+        $this->assertStringContainsString('function submitGoal(', $controller);
+        $this->assertStringContainsString('Direct approval dinonaktifkan', $controller);
+        $this->assertStringContainsString("'module' => 'PERFORMANCE_GOAL'", $workflow);
+        $this->assertStringContainsString('goal_snapshot_hash', $workflow);
+        $this->assertStringContainsString('Total bobot goal dalam cycle harus 100%', $workflow);
+        $this->assertStringContainsString("return 'PERFORMANCE_GOAL';", $adapter);
+    }
+
+    public function testIdpActivationIsTenantScopedAndUsesFinalDomainAdapter(): void
+    {
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Performance/IdpController.php');
+        $service = file_get_contents(APPPATH . 'Libraries/Performance/IdpService.php');
+        $workflow = file_get_contents(APPPATH . 'Libraries/Performance/IdpApprovalWorkflowService.php');
+        $adapter = file_get_contents(APPPATH . 'Libraries/Approval/Adapters/IdpActivationApprovalDomainAdapter.php');
+
+        $this->assertStringContainsString('submitActivation(', $controller);
+        $this->assertStringContainsString('Direct finalize dinonaktifkan', $service);
+        $this->assertStringContainsString("'module' => 'IDP_ACTIVATION'", $workflow);
+        $this->assertStringContainsString('idp_snapshot_hash', $workflow);
+        $this->assertStringContainsString("return 'IDP_ACTIVATION';", $adapter);
     }
 }

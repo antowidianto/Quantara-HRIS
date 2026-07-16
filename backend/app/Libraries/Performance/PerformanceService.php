@@ -300,6 +300,7 @@ class PerformanceService
                 \Config\Services::idp()->createFromReview(
                     $reviewId,
                     \Config\Services::tenant()->getUserId() ?: 0,
+                    (int) $r['company_id'],
                 );
             } catch (\Throwable $e) {
                 log_message('warning', "Auto-bootstrap IDP from review #{$reviewId} failed: " . $e->getMessage());

@@ -2,6 +2,7 @@
 
 namespace App\Libraries\Performance;
 
+use CodeIgniter\Database\BaseConnection;
 use Config\Database;
 use Config\Services;
 
@@ -27,7 +28,11 @@ use Config\Services;
  */
 class IdpService
 {
-    public const STATUSES = ['DRAFT', 'ACTIVE', 'COMPLETED', 'REVIEWED', 'CANCELLED'];
+    public const STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'ACTIVE', 'COMPLETED', 'REVIEWED', 'CANCELLED'];
+
+    public function __construct(private readonly ?BaseConnection $connection = null)
+    {
+    }
 
     /**
      * Auto-bootstrap IDP dari performance review yang sudah finalize.
@@ -36,11 +41,12 @@ class IdpService
      *
      * @return array IDP row + decoded JSON
      */
-    public function createFromReview(int $reviewId, int $userId): array
+    public function createFromReview(int $reviewId, int $userId, int $companyId): array
     {
-        $db = Database::connect();
+        $db = $this->db();
         $review = $db->table('performance_reviews')
             ->where('id', $reviewId)
+            ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
         if (! $review) {
@@ -57,6 +63,7 @@ class IdpService
         $existing = $db->table('individual_development_plans')
             ->where('review_id', $reviewId)
             ->where('employee_id', (int) $review['employee_id'])
+            ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
         if ($existing) {
@@ -65,7 +72,8 @@ class IdpService
 
         // Fetch cycle untuk plan_period_start/end
         $cycle = $db->table('performance_cycles')
-            ->where('id', (int) $review['cycle_id'])->get()->getRowArray();
+            ->where('id', (int) $review['cycle_id'])->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         $planStart = date('Y-m-d');
         $planEnd = $cycle && ! empty($cycle['end_date'])
             ? $cycle['end_date']
@@ -104,20 +112,21 @@ class IdpService
             );
         } catch (\Throwable $e) {}
 
-        return $this->load($idpId);
+        return $this->load($idpId, $companyId);
     }
 
     /**
      * Manual create IDP (standalone, tidak dari review).
      */
-    public function create(array $data, int $userId): array
+    public function create(array $data, int $userId, int $companyId): array
     {
-        $db = Database::connect();
+        $db = $this->db();
         $employeeId = (int) ($data['employee_id'] ?? 0);
         if ($employeeId <= 0) {
             throw new \InvalidArgumentException('employee_id wajib');
         }
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $employeeId)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $emp) {
             throw new \InvalidArgumentException("Employee #{$employeeId} tidak ditemukan");
         }
@@ -127,10 +136,21 @@ class IdpService
         if (strtotime($data['plan_period_end']) <= strtotime($data['plan_period_start'])) {
             throw new \InvalidArgumentException('plan_period_end harus > plan_period_start');
         }
+        if (! empty($data['cycle_id'])) {
+            $cycle = $db->table('performance_cycles')->where('id', (int) $data['cycle_id'])
+                ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
+            if (! $cycle) throw new \InvalidArgumentException('cycle_id tidak valid untuk tenant aktif');
+        }
+        if (! empty($data['review_id'])) {
+            $review = $db->table('performance_reviews')->where('id', (int) $data['review_id'])
+                ->where('company_id', $companyId)->where('employee_id', $employeeId)
+                ->where('deleted_at IS NULL')->get()->getRowArray();
+            if (! $review) throw new \InvalidArgumentException('review_id tidak valid untuk employee dan tenant aktif');
+        }
 
         $now = date('Y-m-d H:i:s');
         $insert = [
-            'company_id'        => (int) $emp['company_id'],
+            'company_id'        => $companyId,
             'employee_id'       => $employeeId,
             'cycle_id'          => isset($data['cycle_id']) ? (int) $data['cycle_id'] : null,
             'review_id'         => isset($data['review_id']) ? (int) $data['review_id'] : null,
@@ -150,7 +170,7 @@ class IdpService
         ];
         $db->table('individual_development_plans')->insert($insert);
         $idpId = (int) $db->insertID();
-        return $this->load($idpId);
+        return $this->load($idpId, $companyId);
     }
 
     /**
@@ -159,20 +179,24 @@ class IdpService
      *   - ACTIVE: hanya progress (action_items.status update) + employee_notes
      *   - COMPLETED/REVIEWED: hanya manager_notes (review akhir)
      */
-    public function update(int $idpId, array $data, int $userId): array
+    public function update(int $idpId, array $data, int $userId, int $companyId): array
     {
-        $db = Database::connect();
+        $db = $this->db();
         $idp = $db->table('individual_development_plans')
             ->where('id', $idpId)
+            ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
         if (! $idp) {
             throw new \InvalidArgumentException("IDP #{$idpId} tidak ditemukan");
         }
+        if ($idp['status'] === 'PENDING_APPROVAL') {
+            throw new \RuntimeException('IDP sedang menunggu approval dan tidak dapat diedit');
+        }
 
         $update = [];
 
-        if ($idp['status'] === 'DRAFT') {
+        if (in_array($idp['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
             // Semua field boleh edit
             foreach (['plan_period_start', 'plan_period_end', 'manager_notes', 'employee_notes'] as $f) {
                 if (array_key_exists($f, $data)) $update[$f] = $data[$f];
@@ -204,7 +228,8 @@ class IdpService
             );
         }
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('individual_development_plans')->where('id', $idpId)->update($update);
+        $db->table('individual_development_plans')->where('id', $idpId)
+            ->where('company_id', $companyId)->update($update);
 
         try {
             Services::audit()->forModule('PERFORMANCE')->logUpdate(
@@ -212,74 +237,26 @@ class IdpService
             );
         } catch (\Throwable $e) {}
 
-        return $this->load($idpId);
+        return $this->load($idpId, $companyId);
     }
 
-    /**
-     * DRAFT → ACTIVE. Validasi: minimum 1 action item terisi.
-     */
-    public function finalize(int $idpId, int $userId): array
+    /** Direct activation is intentionally unavailable outside ApprovalEngine. */
+    public function finalize(int $idpId, int $userId, int $companyId): never
     {
-        $db = Database::connect();
-        $idp = $db->table('individual_development_plans')->where('id', $idpId)->get()->getRowArray();
-        if (! $idp) throw new \InvalidArgumentException("IDP #{$idpId} tidak ditemukan");
-        if ($idp['status'] !== 'DRAFT') {
-            throw new \RuntimeException("Hanya DRAFT yang bisa di-finalize. Current: {$idp['status']}");
-        }
-
-        $actionItems = json_decode((string) ($idp['action_items_json'] ?? '[]'), true) ?: [];
-        if (empty($actionItems)) {
-            throw new \RuntimeException(
-                'IDP harus punya minimum 1 action item sebelum di-finalize. '
-                . 'Tambah action concrete di action_items dengan owner & due_date.'
-            );
-        }
-
-        $now = date('Y-m-d H:i:s');
-        $db->table('individual_development_plans')->where('id', $idpId)->update([
-            'status'        => 'ACTIVE',
-            'finalized_at'  => $now,
-            'updated_at'    => $now,
-        ]);
-
-        // Notifikasi karyawan
-        $emp = $db->table('employees')->where('id', $idp['employee_id'])->get()->getRowArray();
-        if ($emp && ! empty($emp['user_id'])) {
-            try {
-                Services::notification()->send(
-                    (int) $emp['user_id'],
-                    (int) $idp['company_id'],
-                    'idp.activated',
-                    'Individual Development Plan (IDP) Anda Aktif',
-                    'IDP Anda untuk periode ' . $idp['plan_period_start'] . ' s/d ' . $idp['plan_period_end']
-                    . ' telah aktif. Lihat menu HR → My IDP untuk track progress.',
-                    ['idp_id' => $idpId],
-                    null,
-                    true,
-                );
-            } catch (\Throwable $e) {}
-        }
-
-        try {
-            Services::audit()->forModule('PERFORMANCE')->log(
-                action: 'idp.finalize',
-                entity: 'individual_development_plan',
-                entityId: $idpId,
-                description: "IDP DRAFT → ACTIVE untuk employee #{$idp['employee_id']}",
-                severity: 'NOTICE',
-            );
-        } catch (\Throwable $e) {}
-
-        return $this->load($idpId);
+        unset($idpId, $userId, $companyId);
+        throw new \RuntimeException(
+            'Direct finalize dinonaktifkan; gunakan workflow approval aktivasi IDP'
+        );
     }
 
     /**
      * ACTIVE → COMPLETED. Manager / HR mark IDP as completed di akhir cycle.
      */
-    public function complete(int $idpId, int $userId, ?string $managerNotes = null): array
+    public function complete(int $idpId, int $userId, int $companyId, ?string $managerNotes = null): array
     {
-        $db = Database::connect();
-        $idp = $db->table('individual_development_plans')->where('id', $idpId)->get()->getRowArray();
+        $db = $this->db();
+        $idp = $db->table('individual_development_plans')->where('id', $idpId)
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $idp) throw new \InvalidArgumentException("IDP #{$idpId} tidak ditemukan");
         if ($idp['status'] !== 'ACTIVE') {
             throw new \RuntimeException("Hanya ACTIVE yang bisa di-complete. Current: {$idp['status']}");
@@ -294,7 +271,9 @@ class IdpService
         if ($managerNotes !== null) {
             $update['manager_notes'] = $managerNotes;
         }
-        $db->table('individual_development_plans')->where('id', $idpId)->update($update);
+        $db->table('individual_development_plans')->where('id', $idpId)
+            ->where('company_id', $companyId)->where('status', 'ACTIVE')->update($update);
+        if ($db->affectedRows() !== 1) throw new \RuntimeException('IDP berubah saat finalisasi completion');
 
         try {
             Services::audit()->forModule('PERFORMANCE')->log(
@@ -306,31 +285,34 @@ class IdpService
             );
         } catch (\Throwable $e) {}
 
-        return $this->load($idpId);
+        return $this->load($idpId, $companyId);
     }
 
     /**
      * Cancel IDP. Hanya allowed dari DRAFT atau ACTIVE.
      */
-    public function cancel(int $idpId, int $userId, string $reason): array
+    public function cancel(int $idpId, int $userId, int $companyId, string $reason): array
     {
         if (strlen(trim($reason)) < 5) {
             throw new \InvalidArgumentException('Alasan cancel minimum 5 karakter');
         }
-        $db = Database::connect();
-        $idp = $db->table('individual_development_plans')->where('id', $idpId)->get()->getRowArray();
+        $db = $this->db();
+        $idp = $db->table('individual_development_plans')->where('id', $idpId)
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $idp) throw new \InvalidArgumentException("IDP #{$idpId} tidak ditemukan");
-        if (! in_array($idp['status'], ['DRAFT', 'ACTIVE'], true)) {
+        if (! in_array($idp['status'], ['DRAFT', 'APPROVAL_REJECTED', 'ACTIVE'], true)) {
             throw new \RuntimeException("Tidak bisa cancel di status {$idp['status']}");
         }
 
         $now = date('Y-m-d H:i:s');
-        $db->table('individual_development_plans')->where('id', $idpId)->update([
+        $db->table('individual_development_plans')->where('id', $idpId)
+            ->where('company_id', $companyId)->whereIn('status', ['DRAFT', 'ACTIVE', 'APPROVAL_REJECTED'])->update([
             'status'        => 'CANCELLED',
             'manager_notes' => '[CANCELLED] ' . $reason
                 . (! empty($idp['manager_notes']) ? "\n\n--- Notes lama ---\n" . $idp['manager_notes'] : ''),
             'updated_at'    => $now,
         ]);
+        if ($db->affectedRows() !== 1) throw new \RuntimeException('IDP berubah saat pembatalan');
 
         try {
             Services::audit()->forModule('PERFORMANCE')->log(
@@ -342,21 +324,22 @@ class IdpService
             );
         } catch (\Throwable $e) {}
 
-        return $this->load($idpId);
+        return $this->load($idpId, $companyId);
     }
 
     /**
      * Load IDP dengan join karyawan + cycle untuk display.
      */
-    public function load(int $idpId): array
+    public function load(int $idpId, int $companyId): array
     {
-        $db = Database::connect();
+        $db = $this->db();
         $row = $db->table('individual_development_plans i')
             ->select('i.*, e.full_name AS employee_name, e.employee_number, '
                 . 'c.name AS cycle_name, c.code AS cycle_code')
-            ->join('employees e', 'e.id = i.employee_id')
-            ->join('performance_cycles c', 'c.id = i.cycle_id', 'left')
+            ->join('employees e', 'e.id = i.employee_id AND e.company_id = i.company_id')
+            ->join('performance_cycles c', 'c.id = i.cycle_id AND c.company_id = i.company_id', 'left')
             ->where('i.id', $idpId)
+            ->where('i.company_id', $companyId)
             ->where('i.deleted_at IS NULL')
             ->get()->getRowArray();
         if (! $row) {
@@ -370,7 +353,10 @@ class IdpService
      */
     public function listIdps(array $filters = []): array
     {
-        $db = Database::connect();
+        if (empty($filters['company_id'])) {
+            throw new \InvalidArgumentException('company_id wajib untuk list IDP');
+        }
+        $db = $this->db();
         $b = $db->table('individual_development_plans i')
             ->select('i.id, i.employee_id, i.cycle_id, i.review_id, '
                 . 'i.plan_period_start, i.plan_period_end, '
@@ -378,8 +364,8 @@ class IdpService
                 . 'i.created_at, '
                 . 'e.full_name AS employee_name, e.employee_number, '
                 . 'c.name AS cycle_name')
-            ->join('employees e', 'e.id = i.employee_id')
-            ->join('performance_cycles c', 'c.id = i.cycle_id', 'left')
+            ->join('employees e', 'e.id = i.employee_id AND e.company_id = i.company_id')
+            ->join('performance_cycles c', 'c.id = i.cycle_id AND c.company_id = i.company_id', 'left')
             ->where('i.deleted_at IS NULL');
 
         if (! empty($filters['company_id'])) {
@@ -462,5 +448,10 @@ class IdpService
                 : [];
         }
         return $row;
+    }
+
+    private function db(): BaseConnection
+    {
+        return $this->connection ?? Database::connect();
     }
 }

@@ -423,6 +423,15 @@ final class RecruitmentHireService
             ]);
         }
 
+        // Pertahankan sinkronisasi MPP yang sebelumnya dilakukan controller.
+        // Service ini dipanggil oleh adapter approval final sehingga sinkronisasi
+        // ikut berada di lifecycle transaksi domain yang sama.
+        try {
+            Services::manpower()->syncForJobPosting((int) $job['id']);
+        } catch (\Throwable $e) {
+            log_message('warning', "MPP sync after hire failed for job posting #{$job['id']}: " . $e->getMessage());
+        }
+
         return [
             'employee_id'          => $employeeId,
             'user_id'              => $autoResult['user_created'] ?? null,

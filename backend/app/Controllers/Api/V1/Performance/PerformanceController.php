@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Performance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Performance\PerformanceGoalApprovalService;
 use Config\Services;
 
 /**
@@ -23,7 +24,7 @@ use Config\Services;
  *     GET    /goals/(:num)                      Detail + check-ins history
  *     PUT    /goals/(:num)
  *     DELETE /goals/(:num)
- *     POST   /goals/(:num)/approve              Manager approve
+ *     POST   /goals/(:num)/submit               Employee submit untuk approval manager
  *     POST   /goals/(:num)/check-in             Karyawan submit progress
  *     GET    /goals/weights/(:num)/(:num)       Validate cycle+employee weights
  *
@@ -57,7 +58,9 @@ class PerformanceController extends ApiController
         if ($eid > 0) return $eid;
         $userId = (int) $this->tenant()->getUserId();
         if (! $userId) return null;
+        $companyId = (int) $this->tenant()->getCompanyId();
         $emp = $this->db()->table('employees')->where('user_id', $userId)
+            ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')->limit(1)->get()->getRowArray();
         return $emp ? (int) $emp['id'] : null;
     }
@@ -362,6 +365,18 @@ class PerformanceController extends ApiController
 
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return $this->response;
+        $employee = $this->db()->table('employees')->where('id', $employeeId)
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $employee) return $this->fail('Employee tidak ditemukan di tenant aktif', 404);
+        $cycle = $this->db()->table('performance_cycles')->where('id', (int) $data['cycle_id'])
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $cycle) return $this->fail('Performance cycle tidak ditemukan di tenant aktif', 404);
+        if (! empty($data['parent_id'])) {
+            $parent = $this->db()->table('goals')->where('id', (int) $data['parent_id'])
+                ->where('company_id', $companyId)->where('cycle_id', (int) $data['cycle_id'])
+                ->where('deleted_at IS NULL')->get()->getRowArray();
+            if (! $parent) return $this->fail('Parent goal tidak valid untuk cycle dan tenant ini', 422);
+        }
         $now = date('Y-m-d H:i:s');
         $insert = [
             'company_id' => $companyId,
@@ -380,6 +395,7 @@ class PerformanceController extends ApiController
             'due_date' => $data['due_date'] ?? null,
             'status' => 'DRAFT',
             'progress_percent' => 0,
+            'created_by' => (int) $this->tenant()->getUserId(),
             'created_at' => $now, 'updated_at' => $now,
         ];
         $this->db()->table('goals')->insert($insert);
@@ -391,11 +407,19 @@ class PerformanceController extends ApiController
     {
         if (! $this->can('goal.view')) return $this->fail('Forbidden', 403);
         $id = (int) $id;
-        $g = $this->db()->table('goals')->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
+        $g = $this->db()->table('goals')->where('id', $id)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $g) return $this->fail('Not found', 404);
+        if ((int) $g['employee_id'] !== (int) $this->getMyEmployeeId()
+            && ! $this->can('performance.view') && ! $this->can('performance.manage')) {
+            return $this->fail('Forbidden', 403);
+        }
 
         $g['check_ins'] = $this->db()->table('goal_check_ins')
-            ->where('goal_id', $id)->orderBy('check_in_date', 'DESC')->get()->getResultArray();
+            ->where('goal_id', $id)->where('company_id', $companyId)
+            ->orderBy('check_in_date', 'DESC')->get()->getResultArray();
 
         return $this->ok($g);
     }
@@ -403,7 +427,10 @@ class PerformanceController extends ApiController
     public function updateGoal($id = null)
     {
         $id = (int) $id;
-        $g = $this->db()->table('goals')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
+        $g = $this->db()->table('goals')->where('id', $id)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $g) return $this->fail('Not found', 404);
 
         $myEmpId = $this->getMyEmployeeId();
@@ -415,7 +442,19 @@ class PerformanceController extends ApiController
             return $this->fail('Goal sudah disetujui — pakai check-in untuk update progress', 422);
         }
 
+        if (! in_array((string) $g['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
+            return $this->fail('Goal hanya dapat diedit saat DRAFT atau setelah approval ditolak', 409);
+        }
+
         $data = $this->getJsonInput();
+        if (array_key_exists('parent_id', $data) && ! empty($data['parent_id'])) {
+            $parent = $this->db()->table('goals')->where('id', (int) $data['parent_id'])
+                ->where('company_id', $companyId)->where('cycle_id', (int) $g['cycle_id'])
+                ->where('deleted_at IS NULL')->get()->getRowArray();
+            if (! $parent || (int) $parent['id'] === $id) {
+                return $this->fail('Parent goal tidak valid untuk cycle dan tenant ini', 422);
+            }
+        }
         $update = [];
         foreach (['title','description','goal_type','category','measurement_type','target_value',
                  'unit','weight','due_date','parent_id'] as $f) {
@@ -423,7 +462,8 @@ class PerformanceController extends ApiController
         }
         if (! $update) return $this->fail('Tidak ada perubahan', 400);
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $this->db()->table('goals')->where('id', $id)->update($update);
+        $this->db()->table('goals')->where('id', $id)->where('company_id', $companyId)
+            ->whereIn('status', ['DRAFT', 'APPROVAL_REJECTED'])->update($update);
 
         try { $this->svc()->recomputeGoalProgress($id); } catch (\Throwable $e) {}
         return $this->ok(['id' => $id]);
@@ -432,7 +472,10 @@ class PerformanceController extends ApiController
     public function deleteGoal($id = null)
     {
         $id = (int) $id;
-        $g = $this->db()->table('goals')->where('id', $id)->get()->getRowArray();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
+        $g = $this->db()->table('goals')->where('id', $id)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $g) return $this->fail('Not found', 404);
 
         $myEmpId = $this->getMyEmployeeId();
@@ -443,34 +486,45 @@ class PerformanceController extends ApiController
             return $this->fail('Goal sudah lewat draft, tidak bisa dihapus', 422);
         }
 
-        $this->db()->table('goals')->where('id', $id)->update([
+        if (! in_array((string) $g['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
+            return $this->fail('Goal pending atau sudah disetujui tidak dapat dihapus', 409);
+        }
+
+        $this->db()->table('goals')->where('id', $id)->where('company_id', $companyId)
+            ->whereIn('status', ['DRAFT', 'APPROVAL_REJECTED'])->update([
             'deleted_at' => date('Y-m-d H:i:s'),
         ]);
         return $this->ok(['id' => $id]);
     }
 
+    public function submitGoal($id = null)
+    {
+        try {
+            $companyId = $this->requireCompanyId();
+            if ($companyId === null) return $this->response;
+            $employeeId = (int) $this->getMyEmployeeId();
+            if ($employeeId <= 0) return $this->fail('Employee tidak ditemukan', 422);
+            $userId = (int) $this->tenant()->getUserId();
+            $result = (new PerformanceGoalApprovalService())->submit(
+                (int) $id, $companyId, $employeeId, $userId
+            );
+            Services::audit()->forModule('PERFORMANCE')->log(
+                action: 'goal.submit', entity: 'goals', entityId: (int) $id,
+                description: 'Goal diajukan untuk approval atasan',
+            );
+            return $this->ok($result, 'Goal diajukan untuk approval', 202);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+    }
+
     public function approveGoal($id = null)
     {
-        if (! $this->can('goal.approve')) return $this->fail('Forbidden', 403);
-        $id = (int) $id;
-        $g = $this->db()->table('goals')->where('id', $id)->get()->getRowArray();
-        if (! $g) return $this->fail('Not found', 404);
-        if ($g['status'] !== 'DRAFT') return $this->fail("Hanya status DRAFT yang bisa di-approve, current: {$g['status']}", 422);
-
-        $userId = (int) $this->tenant()->getUserId();
-        $this->db()->table('goals')->where('id', $id)->update([
-            'status' => 'APPROVED',
-            'approved_by' => $userId,
-            'approved_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-        try {
-            Services::audit()->forModule('PERFORMANCE')->log(
-                action: 'goal.approve', entity: 'goals', entityId: $id,
-                description: "Goal disetujui: {$g['title']}",
-            );
-        } catch (\Throwable $e) {}
-        return $this->ok(['id' => $id, 'status' => 'APPROVED']);
+        return $this->fail(
+            'Direct approval dinonaktifkan. Pemilik goal harus submit dan manager memutuskan melalui Approval Inbox.',
+            409,
+            'APPROVAL_ENGINE_REQUIRED'
+        );
     }
 
     public function checkInGoal($id = null)

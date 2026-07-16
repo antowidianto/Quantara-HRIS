@@ -17,7 +17,7 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
         foreach ($verbs as $verb) {
             $count += count($routes->getRoutes($verb, false));
         }
-        self::assertSame(959, $count, 'Intentional route changes must update the audited snapshot count.');
+        self::assertSame(953, $count, 'Intentional route changes must update the audited snapshot count.');
 
         $getPaths = array_keys($routes->getRoutes('GET', false));
         $myTeam = array_search('api/v1/employees/my-team', $getPaths, true);
@@ -25,6 +25,14 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
         self::assertIsInt($myTeam);
         self::assertIsInt($employeeWildcard);
         self::assertLessThan($employeeWildcard, $myTeam, 'Specific employee routes must precede the wildcard route.');
+    }
+
+    public function testPrivilegedMutationsAndPiiExportsAreApprovalGated(): void
+    {
+        $routes = service('routes');
+        self::assertSame(['jwt', 'permission:user.manage', 'idempotency:required', 'privilegedapproval:RBAC'], $routes->getRoutesOptions('api/v1/users/([0-9]+)', 'PUT')['filter'] ?? []);
+        self::assertSame(['jwt', 'permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION'], $routes->getRoutesOptions('api/v1/webhooks/([0-9]+)/rotate-secret', 'POST')['filter'] ?? []);
+        self::assertSame(['jwt', 'permission:payroll.view', 'privilegedapproval:PII_EXPORT', 'throttle:export'], $routes->getRoutesOptions('api/v1/payroll-periods/([0-9]+)/bank-export', 'GET')['filter'] ?? []);
     }
 
     public function testPayrollMutationPoliciesSurviveRegistrationRefactors(): void
@@ -53,6 +61,7 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
         self::assertSame(['jwt', 'permission:employee.view'], $routes->getRoutesOptions('api/v1/employees/([0-9]+)/effective-history', 'GET')['filter'] ?? []);
         self::assertSame(['jwt', 'permission:employee.view'], $routes->getRoutesOptions('api/v1/employees/([0-9]+)/as-of', 'GET')['filter'] ?? []);
         self::assertSame(['jwt', 'permission:employee.manage', 'idempotency:required'], $routes->getRoutesOptions('api/v1/employees/([0-9]+)/effective-history', 'POST')['filter'] ?? []);
+        self::assertSame(['jwt', 'permission:employee.manage', 'idempotency:required'], $routes->getRoutesOptions('api/v1/employees/([0-9]+)/sensitive-change', 'POST')['filter'] ?? []);
     }
 
     public function testCompensationReviewMutationsRetainPermissionAndIdempotencyPolicies(): void

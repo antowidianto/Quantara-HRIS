@@ -3,8 +3,10 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import api from '@/api/client'
 import { fmtDateTime } from '@/composables/useResource'
 import { useI18n } from '@/locales'
+import { useToast } from 'vue-toastification'
 
 const { t } = useI18n()
+const toast = useToast()
 
 const items = ref([])
 const total = ref(0)
@@ -104,6 +106,12 @@ async function exportCsv() {
   const params = new URLSearchParams()
   Object.entries(filters).forEach(([k, v]) => { if (v !== '' && v != null) params.set(k, v) })
   const res = await api.get(`/audit-logs/export?${params.toString()}`, { responseType: 'blob' })
+  if (res.status === 202 || String(res.headers['content-type'] || '').includes('application/json')) {
+    const text = res.data instanceof Blob ? await res.data.text() : String(res.data || '')
+    const pending = JSON.parse(text)
+    toast.warning(pending.message || 'Export audit menunggu approval. Ulangi setelah disetujui.')
+    return
+  }
   const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

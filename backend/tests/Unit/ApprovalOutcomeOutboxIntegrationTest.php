@@ -8,7 +8,7 @@ use CodeIgniter\Test\CIUnitTestCase;
 final class ApprovalOutcomeOutboxIntegrationTest extends CIUnitTestCase
 {
     /** @var list<string> */
-    private array $tables = ['webhooks', 'approval_outbox_events', 'assets', 'generated_contracts', 'candidate_offers', 'candidates', 'companies', 'leaves', 'employees'];
+    private array $tables = ['webhooks', 'approval_outbox_events', 'privileged_action_requests', 'master_rate_change_requests', 'employee_sensitive_change_requests', 'individual_development_plans', 'goals', 'assets', 'generated_contracts', 'candidate_offers', 'candidates', 'companies', 'leaves', 'employees'];
 
     protected function setUp(): void
     {
@@ -18,19 +18,29 @@ final class ApprovalOutcomeOutboxIntegrationTest extends CIUnitTestCase
         $db->query('CREATE TABLE db_employees (id INTEGER PRIMARY KEY, company_id INTEGER, user_id INTEGER, full_name TEXT)');
         $db->query('CREATE TABLE db_companies (id INTEGER PRIMARY KEY, career_slug TEXT)');
         $db->query('CREATE TABLE db_leaves (id INTEGER PRIMARY KEY, company_id INTEGER, employee_id INTEGER, request_number TEXT, status TEXT)');
-        $db->query('CREATE TABLE db_candidates (id INTEGER PRIMARY KEY, company_id INTEGER, user_id INTEGER)');
+        $db->query('CREATE TABLE db_candidates (id INTEGER PRIMARY KEY, company_id INTEGER, user_id INTEGER, full_name TEXT, converted_employee_id INTEGER)');
         $db->query('CREATE TABLE db_candidate_offers (id INTEGER PRIMARY KEY, company_id INTEGER, candidate_id INTEGER, job_posting_id INTEGER, offer_number TEXT, status TEXT)');
         $db->query('CREATE TABLE db_generated_contracts (id INTEGER PRIMARY KEY, company_id INTEGER, employee_id INTEGER, contract_number TEXT, status TEXT)');
         $db->query('CREATE TABLE db_assets (id INTEGER PRIMARY KEY, company_id INTEGER, asset_number TEXT, status TEXT)');
+        $db->query('CREATE TABLE db_goals (id INTEGER PRIMARY KEY, company_id INTEGER, employee_id INTEGER, title TEXT, status TEXT)');
+        $db->query('CREATE TABLE db_individual_development_plans (id INTEGER PRIMARY KEY, company_id INTEGER, employee_id INTEGER, status TEXT)');
+        $db->query('CREATE TABLE db_employee_sensitive_change_requests (id INTEGER PRIMARY KEY, company_id INTEGER, employee_id INTEGER, request_number TEXT, payload_encrypted TEXT, status TEXT)');
+        $db->query('CREATE TABLE db_master_rate_change_requests (id INTEGER PRIMARY KEY, company_id INTEGER, request_number TEXT, entity_type TEXT, status TEXT)');
+        $db->query('CREATE TABLE db_privileged_action_requests (id INTEGER PRIMARY KEY, company_id INTEGER, request_number TEXT, action_group TEXT, request_hash TEXT, status TEXT)');
         $db->query('CREATE TABLE db_approval_outbox_events (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, approval_request_id INTEGER UNIQUE, module TEXT, entity_table TEXT, entity_id INTEGER, decision TEXT, event_type TEXT, event_id TEXT UNIQUE, payload TEXT, status TEXT, attempts INTEGER, max_attempts INTEGER, available_at TEXT, processing_at TEXT, published_at TEXT, last_error TEXT, created_at TEXT, updated_at TEXT)');
         $db->query('CREATE TABLE db_webhooks (id INTEGER PRIMARY KEY, company_id INTEGER, is_active INTEGER, event_types TEXT)');
         $db->table('employees')->insert(['id' => 901, 'company_id' => 901, 'user_id' => 9901, 'full_name' => 'Outbox Test']);
         $db->table('companies')->insert(['id' => 901, 'career_slug' => 'acme-fmcg']);
         $db->table('leaves')->insert(['id' => 901, 'company_id' => 901, 'employee_id' => 901, 'request_number' => 'LV-901', 'status' => 'APPROVED']);
-        $db->table('candidates')->insert(['id' => 902, 'company_id' => 901, 'user_id' => 9955]);
+        $db->table('candidates')->insert(['id' => 902, 'company_id' => 901, 'user_id' => 9955, 'full_name' => 'Sari Kandidat', 'converted_employee_id' => 905]);
         $db->table('candidate_offers')->insert(['id' => 902, 'company_id' => 901, 'candidate_id' => 902, 'job_posting_id' => 77, 'offer_number' => 'OFR-901', 'status' => 'SENT']);
         $db->table('generated_contracts')->insert(['id' => 903, 'company_id' => 901, 'employee_id' => 901, 'contract_number' => 'CTR-901', 'status' => 'SENT']);
         $db->table('assets')->insert(['id' => 904, 'company_id' => 901, 'asset_number' => 'AST-901', 'status' => 'ASSIGNED']);
+        $db->table('goals')->insert(['id' => 905, 'company_id' => 901, 'employee_id' => 901, 'title' => 'OTIF 98%', 'status' => 'APPROVED']);
+        $db->table('individual_development_plans')->insert(['id' => 906, 'company_id' => 901, 'employee_id' => 901, 'status' => 'ACTIVE']);
+        $db->table('employee_sensitive_change_requests')->insert(['id' => 907, 'company_id' => 901, 'employee_id' => 901, 'request_number' => 'ESC-901', 'payload_encrypted' => 'cipher-secret', 'status' => 'APPROVED']);
+        $db->table('master_rate_change_requests')->insert(['id' => 908, 'company_id' => 901, 'request_number' => 'MRC-901', 'entity_type' => 'PAYROLL_COMPONENT', 'status' => 'APPROVED']);
+        $db->table('privileged_action_requests')->insert(['id' => 909, 'company_id' => 901, 'request_number' => 'PAR-901', 'action_group' => 'PII_EXPORT', 'request_hash' => 'secret-hash', 'status' => 'APPROVED']);
     }
 
     public function testOutcomeIsRecordedWithMinimalTenantScopedPayload(): void
@@ -138,6 +148,84 @@ final class ApprovalOutcomeOutboxIntegrationTest extends CIUnitTestCase
         $this->assertSame(9977, $rejected['recipient_user_id']);
         $this->assertSame('asset.transaction_approved', $approved['webhook']['event']);
         $this->assertSame('/hr/assets', $rejected['notification']['link']);
+    }
+
+    public function testHireOutcomePublishesConvertedEmployeeAndNotifiesMakerOnRejection(): void
+    {
+        $db = \Config\Database::connect();
+        $outbox = new ApprovalOutcomeOutbox($db);
+        $approvedId = $outbox->record([
+            'id' => 1940, 'company_id' => 901, 'module' => 'HIRE_CONVERSION',
+            'entity_table' => 'candidates', 'entity_id' => 902, 'employee_id' => 901,
+            'meta' => ['submitted_by' => 9966],
+        ], 'APPROVED', 8901, '', []);
+        $rejectedId = $outbox->record([
+            'id' => 1941, 'company_id' => 901, 'module' => 'HIRE_CONVERSION',
+            'entity_table' => 'candidates', 'entity_id' => 902, 'employee_id' => 901,
+            'meta' => ['submitted_by' => 9966],
+        ], 'REJECTED', 8901, 'data rekening belum terverifikasi', []);
+
+        $approved = json_decode($db->table('approval_outbox_events')->where('id', $approvedId)
+            ->get()->getRowArray()['payload'], true, 512, JSON_THROW_ON_ERROR);
+        $rejected = json_decode($db->table('approval_outbox_events')->where('id', $rejectedId)
+            ->get()->getRowArray()['payload'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('recruitment.candidate_hired', $approved['webhook']['event']);
+        $this->assertSame(905, $approved['webhook']['converted_employee_id']);
+        $this->assertSame('Sari Kandidat', $approved['request_number']);
+        $this->assertSame('/recruitment/pipeline', $approved['notification']['link']);
+        $this->assertSame('recruitment.candidate_hire_rejected', $rejected['webhook']['event']);
+        $this->assertSame(9966, $rejected['recipient_user_id']);
+    }
+
+    public function testPerformanceGoalOutcomeTargetsOwnerAndUsesReadableTitle(): void
+    {
+        $db = \Config\Database::connect();
+        $id = (new ApprovalOutcomeOutbox($db))->record([
+            'id' => 1950, 'company_id' => 901, 'module' => 'PERFORMANCE_GOAL',
+            'entity_table' => 'goals', 'entity_id' => 905, 'employee_id' => 901,
+            'meta' => ['submitted_by' => 9901],
+        ], 'APPROVED', 8901, '', []);
+        $payload = json_decode($db->table('approval_outbox_events')->where('id', $id)
+            ->get()->getRowArray()['payload'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('performance.goal_approved', $payload['webhook']['event']);
+        $this->assertSame(9901, $payload['recipient_user_id']);
+        $this->assertSame('OTIF 98%', $payload['request_number']);
+        $this->assertSame('/performance', $payload['notification']['link']);
+    }
+
+    public function testIdpActivationOutcomeTargetsEmployee(): void
+    {
+        $db = \Config\Database::connect();
+        $id = (new ApprovalOutcomeOutbox($db))->record([
+            'id' => 1960, 'company_id' => 901, 'module' => 'IDP_ACTIVATION',
+            'entity_table' => 'individual_development_plans', 'entity_id' => 906,
+            'employee_id' => 901, 'meta' => ['submitted_by' => 9981],
+        ], 'APPROVED', 8901, '', []);
+        $payload = json_decode($db->table('approval_outbox_events')->where('id', $id)
+            ->get()->getRowArray()['payload'], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('performance.idp_activation_approved', $payload['webhook']['event']);
+        $this->assertSame(9901, $payload['recipient_user_id']);
+        $this->assertSame('/hr/idp', $payload['notification']['link']);
+    }
+
+    public function testSensitiveAndPrivilegedOutcomesNeverLeakStoredPayloadOrRequestHash(): void
+    {
+        $db = \Config\Database::connect();
+        foreach ([
+            ['id'=>1970,'module'=>'EMPLOYEE_SENSITIVE_CHANGE','table'=>'employee_sensitive_change_requests','entity'=>907,'event'=>'employee.sensitive_change_approved'],
+            ['id'=>1971,'module'=>'MASTER_RATE_CHANGE','table'=>'master_rate_change_requests','entity'=>908,'event'=>'payroll.master_rate_change_approved'],
+            ['id'=>1972,'module'=>'PRIVILEGED_ACTION','table'=>'privileged_action_requests','entity'=>909,'event'=>'security.privileged_action_approved'],
+        ] as $case) {
+            $id=(new ApprovalOutcomeOutbox($db))->record(['id'=>$case['id'],'company_id'=>901,'module'=>$case['module'],'entity_table'=>$case['table'],'entity_id'=>$case['entity'],'employee_id'=>901,'meta'=>['submitted_by'=>9988]],'APPROVED',8901,'',[]);
+            $row=$db->table('approval_outbox_events')->where('id',$id)->get()->getRowArray();
+            $this->assertSame($case['event'],$row['event_type']);
+            $this->assertStringNotContainsString('cipher-secret',(string)$row['payload']);
+            $this->assertStringNotContainsString('secret-hash',(string)$row['payload']);
+            if ($case['module']==='PRIVILEGED_ACTION') {
+                $payload=json_decode((string)$row['payload'],true,512,JSON_THROW_ON_ERROR);
+                $this->assertSame(9988,$payload['recipient_user_id']);
+            }
+        }
     }
 
     public function testCrossTenantEntityCannotProduceOutcome(): void

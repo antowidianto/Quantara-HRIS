@@ -49,7 +49,7 @@ final class AdminRoutes
         // Async generation; download link signed token (lihat public route
         // /data-exports/download di luar JWT group).
         $routes->post('companies/me/data-exports',             'Backup\DataExportController::create',
-            ['filter' => ['permission:data_export.manage', 'throttle:export']]);
+            ['filter' => ['permission:data_export.manage', 'idempotency:required', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);
         $routes->get('companies/me/data-exports',              'Backup\DataExportController::index', ['filter' => 'permission:data_export.manage']);
         $routes->get('companies/me/data-exports/(:num)',       'Backup\DataExportController::show/$1', ['filter' => 'permission:data_export.manage']);
 

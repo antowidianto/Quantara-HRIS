@@ -7,7 +7,7 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { fmtCurrency, fmtDate } from '@/composables/useResource'
 import {
   ComputerDesktopIcon, PlusIcon, ArrowUpTrayIcon, ArrowDownTrayIcon,
-  DocumentArrowDownIcon, PencilIcon, TrashIcon,
+  DocumentArrowDownIcon, PencilIcon, TrashIcon, ArchiveBoxXMarkIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
@@ -26,6 +26,7 @@ const filters = reactive({ q: '', status: '', category: '', employee_id: '', pag
 const showForm = ref(false)
 const showAssign = ref(null)   // asset row
 const showReturn = ref(null)
+const showRetire = ref(null)
 const editing = ref(null)
 
 const formAssign = reactive({
@@ -34,6 +35,10 @@ const formAssign = reactive({
 })
 const formReturn = reactive({
   condition_when_returned: 'GOOD', damage_note: '',
+})
+const formRetire = reactive({
+  retirement_date: new Date().toISOString().slice(0, 10), retirement_reason: '',
+  disposal_method: 'SCRAP', disposal_proceeds: 0, disposal_reference: '', book_value: 0,
 })
 
 const canManage = computed(() => auth.can('asset.manage'))
@@ -152,6 +157,26 @@ async function doReturn() {
   }
 }
 
+function openRetire(row) {
+  showRetire.value = row
+  Object.assign(formRetire, {
+    retirement_date: new Date().toISOString().slice(0, 10), retirement_reason: '',
+    disposal_method: 'SCRAP', disposal_proceeds: 0, disposal_reference: '',
+    book_value: Number(row.purchase_price || 0),
+  })
+}
+
+async function doRetire() {
+  try {
+    await api.post(`/assets/${showRetire.value.id}/retire`, formRetire)
+    toast.success('Retirement/write-off asset diajukan untuk approval')
+    showRetire.value = null
+    fetchData()
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal mengajukan retirement')
+  }
+}
+
 async function downloadBast(row, mode = 'ASSIGN') {
   if (! row.current_assignment_id) {
     toast.error('Asset belum punya assignment aktif')
@@ -266,7 +291,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                   {{ STATUS_BADGE[r.status]?.label || r.status }}
                 </span>
                 <span v-if="r.approval_action" class="ml-1 px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700">
-                  {{ r.approval_action === 'ASSIGN' ? 'Assignment' : 'Return' }} menunggu approval
+                  {{ r.approval_action === 'ASSIGN' ? 'Assignment' : (r.approval_action === 'RETIRE' ? 'Retirement' : 'Return') }} menunggu approval
                 </span>
               </td>
               <td class="text-xs">
@@ -291,10 +316,14 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                     @click="downloadBast(r, 'ASSIGN')">
                     <DocumentArrowDownIcon class="w-4 h-4" />
                   </button>
+                  <button v-if="canManage && ['AVAILABLE','REPAIR','LOST'].includes(r.status) && !r.current_assignment_id && !r.approval_action"
+                    class="text-orange-600 hover:text-orange-800 p-1" title="Retire / Write-off" @click="openRetire(r)">
+                    <ArchiveBoxXMarkIcon class="w-4 h-4" />
+                  </button>
                   <button v-if="canManage && !r.approval_action" class="text-gray-600 hover:text-primary-600 p-1" title="Edit" @click="openEdit(r)">
                     <PencilIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage && ['AVAILABLE','RETIRED'].includes(r.status) && !r.approval_action"
+                  <button v-if="canManage && r.status === 'RETIRED' && !r.approval_action"
                     class="text-red-600 hover:text-red-800 p-1" title="Hapus" @click="remove(r)">
                     <TrashIcon class="w-4 h-4" />
                   </button>
@@ -426,6 +455,53 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         <div class="px-6 py-3 border-t flex justify-end gap-2">
           <button class="btn-secondary" @click="showReturn = null">Batal</button>
           <button class="btn-primary" @click="doReturn">Konfirmasi Return</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Retirement / write-off modal -->
+    <div v-if="showRetire" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg">
+        <div class="px-6 py-3 border-b flex items-center justify-between">
+          <h2 class="font-semibold">Retire / Write-off {{ showRetire.asset_number }}</h2>
+          <button class="text-gray-500" @click="showRetire = null">&times;</button>
+        </div>
+        <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="label">Tanggal retirement *</label>
+            <input v-model="formRetire.retirement_date" type="date" class="input" />
+          </div>
+          <div>
+            <label class="label">Metode disposal *</label>
+            <select v-model="formRetire.disposal_method" class="input">
+              <option v-for="method in ['SALE','DONATION','SCRAP','RECYCLE','RETURN_VENDOR','OTHER']"
+                :key="method" :value="method">{{ method }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Nilai buku *</label>
+            <input v-model.number="formRetire.book_value" type="number" min="0" class="input" />
+          </div>
+          <div>
+            <label class="label">Hasil penjualan/disposal</label>
+            <input v-model.number="formRetire.disposal_proceeds" type="number" min="0" class="input" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label">Referensi bukti disposal *</label>
+            <input v-model="formRetire.disposal_reference" class="input"
+              placeholder="No. BA disposal, invoice, atau path dokumen" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label">Alasan retirement/write-off *</label>
+            <textarea v-model="formRetire.retirement_reason" class="input" rows="3"></textarea>
+          </div>
+          <p class="md:col-span-2 text-xs text-amber-700">
+            Status aset tidak berubah sampai seluruh approver menyetujui. Finance memverifikasi nilai buku dan write-off.
+          </p>
+        </div>
+        <div class="px-6 py-3 border-t flex justify-end gap-2">
+          <button class="btn-secondary" @click="showRetire = null">Batal</button>
+          <button class="btn-primary" @click="doRetire">Submit Approval</button>
         </div>
       </div>
     </div>
