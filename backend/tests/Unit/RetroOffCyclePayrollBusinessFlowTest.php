@@ -21,13 +21,13 @@ final class RetroOffCyclePayrollBusinessFlowTest extends TestCase
     public function testOffCyclePeriodAndAppendOnlyPayslipWiringExist(): void
     {
         $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Payroll/PayrollPeriodController.php');
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $calculation = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
         $adjustment = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollAdjustmentService.php');
         self::assertIsString($controller);
-        self::assertIsString($payroll);
+        self::assertIsString($calculation);
         self::assertIsString($adjustment);
         self::assertStringContainsString('OFF_CYCLE', $controller);
-        self::assertStringContainsString("'code' => 'ADJ-'", $payroll);
+        self::assertStringContainsString("'code' => 'ADJ-'", $calculation);
         self::assertStringContainsString("'original_period_id'", $adjustment);
         self::assertStringNotContainsString("table('payslips')->where('id', \$original", $adjustment);
     }

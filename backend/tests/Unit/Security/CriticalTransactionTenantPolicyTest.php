@@ -35,11 +35,7 @@ final class CriticalTransactionTenantPolicyTest extends TestCase
             ],
             'overtime' => [
                 'Controllers/Api/V1/Attendance/OvertimeController.php',
-                ['overtimes', 'employees', 'leave_balances'],
-            ],
-            'leave' => [
-                'Controllers/Api/V1/Leave/LeaveController.php',
-                ['leaves', 'leave_types', 'leave_balances', 'attendances'],
+                ['overtimes', 'employees'],
             ],
             'reimbursement' => [
                 'Controllers/Api/V1/Payroll/ReimbursementController.php',
@@ -52,16 +48,58 @@ final class CriticalTransactionTenantPolicyTest extends TestCase
         ];
     }
 
+    public function testOvertimeApprovalSideEffectsAreTenantScopedInWorkflow(): void
+    {
+        $source = file_get_contents(APPPATH . 'Libraries/Attendance/OvertimeApprovalWorkflowService.php');
+        self::assertNotFalse($source);
+        foreach (['overtimes', 'employees', 'leave_balances'] as $table) {
+            self::assertMatchesRegularExpression(
+                "/table\\('{$table}'\\)[\\s\\S]{0,500}where\\([^\\n]*company_id/",
+                $source,
+                "Overtime approval workflow must tenant-scope {$table}",
+            );
+        }
+    }
+
+    public function testLeaveControllerDelegatesToTenantScopedRepositoryAndWorkflow(): void
+    {
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Leave/LeaveController.php');
+        $repository = file_get_contents(APPPATH . 'Repositories/Leave/LeaveRepository.php');
+        $workflow = file_get_contents(APPPATH . 'Libraries/Leave/LeaveWorkflowService.php');
+        self::assertNotFalse($controller);
+        self::assertNotFalse($repository);
+        self::assertNotFalse($workflow);
+        self::assertStringContainsString('requireCompanyId()', $controller);
+        self::assertStringContainsString('new LeaveRepository()', $controller);
+        self::assertStringContainsString('new LeaveWorkflowService()', $controller);
+        self::assertStringNotContainsString('Database::connect()', $controller);
+
+        foreach (['leaves', 'leave_types', 'leave_balances'] as $table) {
+            self::assertMatchesRegularExpression(
+                "/table\\('{$table}'\\)[\\s\\S]{0,500}where\\([^\\n]*company_id/",
+                $repository . $workflow,
+                "Leave repository/workflow must tenant-scope {$table}",
+            );
+        }
+        self::assertMatchesRegularExpression(
+            "/table\\('attendances'\\)[\\s\\S]{0,500}where\\([^\\n]*company_id/",
+            $workflow,
+        );
+    }
+
     public function testPayrollOrchestratorRequiresActiveCompanyAndScopesAllInputs(): void
     {
         $source = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $inputs = file_get_contents(APPPATH . 'Repositories/Payroll/PayrollRepository.php')
+            . file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
         self::assertNotFalse($source);
+        self::assertIsString($inputs);
         self::assertStringContainsString('Active company context is required for payroll operations', $source);
         foreach (['payroll_periods', 'payslips', 'attendances', 'overtimes', 'reimbursements', 'loans'] as $table) {
             self::assertMatchesRegularExpression(
                 "/table\\('{$table}'\\)[\\s\\S]{0,500}where\\([^\\n]*company_id/",
-                $source,
-                "PayrollService must tenant-scope {$table}",
+                $inputs,
+                "Payroll repository/calculation use case must tenant-scope {$table}",
             );
         }
 

@@ -22,10 +22,12 @@ class LoanModel extends BaseModel
         'paid_installments',
         'remaining',
         'start_period_id',
+        'first_installment_date',
         'status',
         'reason',
         'approved_by',
         'approved_at',
+        'rejection_note',
     ];
 
     // Automatic cast to native PHP types

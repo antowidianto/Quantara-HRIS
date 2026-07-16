@@ -2,6 +2,7 @@ parameters:
     level: 0
     paths:
         - app/Libraries
+        - app/Repositories
         - app/Validation
     excludePaths:
         analyse:

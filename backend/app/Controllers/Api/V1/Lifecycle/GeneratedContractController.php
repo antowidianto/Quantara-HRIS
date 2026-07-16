@@ -71,10 +71,7 @@ class GeneratedContractController extends ApiController
             ->setBody($this->wrapPrintableHtml($row));
     }
 
-    /**
-     * Tandai status kontrak (mis. SENT setelah dikirim ke karyawan, atau
-     * SIGNED ketika diunggah versi tertanda-tangan).
-     */
+    /** Ajukan pelepasan atau pencabutan kontrak untuk approval. */
     public function updateStatus($id = null)
     {
         $row = $this->loadOwned((int) $id);
@@ -82,32 +79,31 @@ class GeneratedContractController extends ApiController
 
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
-            'status' => 'required|in_list[DRAFT,SENT,SIGNED,REVOKED]',
+            'status' => 'required|in_list[SENT,REVOKED]',
         ]);
         if (! $valid) return null;
-
-        $now = date('Y-m-d H:i:s');
-        $update = [
-            'status'     => $data['status'],
-            'updated_at' => $now,
-        ];
-        if ($data['status'] === 'SENT')   $update['sent_at']    = $now;
-        if ($data['status'] === 'SIGNED') $update['signed_at']  = $now;
-        if (! empty($data['signed_url'])) $update['signed_url'] = $data['signed_url'];
-
-        $db = \Config\Database::connect();
-        $db->table('generated_contracts')->where('id', (int) $id)->update($update);
-        Services::audit()
-            ->forModule('EMPLOYEE')
-            ->logUpdate('generated_contract', (int) $id, ['status' => $row['status']], $update,
-                "Status kontrak {$row['contract_number']} diubah ke {$data['status']}");
-        return $this->ok(null, 'Status diperbarui');
+        $action = $data['status'] === 'SENT' ? 'SEND' : 'REVOKE';
+        try {
+            $result = (new \App\Libraries\Lifecycle\GeneratedContractApprovalWorkflowService())
+                ->submit((int) $id, (int) $row['company_id'], $this->userId(), $action);
+            Services::audit()->forModule('EMPLOYEE')->logUpdate(
+                'generated_contract', (int) $id, ['status' => $row['status']],
+                ['status' => 'PENDING_APPROVAL', 'approval_action' => $action],
+                "Kontrak {$row['contract_number']} diajukan untuk approval {$action}"
+            );
+            return $this->ok($result, 'Kontrak diajukan untuk approval');
+        } catch (\App\Libraries\Lifecycle\GeneratedContractApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode);
+        }
     }
 
     public function delete($id = null)
     {
         $row = $this->loadOwned((int) $id);
         if ($row instanceof \CodeIgniter\HTTP\ResponseInterface) return $row;
+        if (! in_array($row['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
+            return $this->fail('Hanya kontrak DRAFT atau yang ditolak approval yang dapat dihapus', 422);
+        }
         $db = \Config\Database::connect();
         $db->table('generated_contracts')->where('id', (int) $id)->update([
             'deleted_at' => date('Y-m-d H:i:s'),

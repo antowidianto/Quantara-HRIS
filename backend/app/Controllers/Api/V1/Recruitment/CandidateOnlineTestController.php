@@ -105,6 +105,7 @@ class CandidateOnlineTestController extends BaseController
         try {
             $view = Services::onlineTest()->startAttempt(
                 (int) $assignment['id'],
+                (int) $assignment['company_id'],
                 $this->request->getIPAddress(),
                 $this->request->getHeaderLine('User-Agent'),
             );
@@ -171,11 +172,12 @@ class CandidateOnlineTestController extends BaseController
         $account = $this->candidateAccount();
         if (! $account) return $this->fail('Not authenticated', 401);
 
-        if (! $this->ownsAttempt((int) $attemptId, (int) $account['id'])) {
+        $assignment = $this->getAssignmentForAttempt((int) $attemptId, (int) $account['id']);
+        if (! $assignment) {
             return $this->fail('Attempt tidak ditemukan', 404);
         }
         try {
-            $view = Services::onlineTest()->buildAttemptView((int) $attemptId);
+            $view = Services::onlineTest()->buildAttemptView((int) $attemptId, (int) $assignment['company_id']);
         } catch (\RuntimeException $e) {
             return $this->fail($e->getMessage(), 404);
         }
@@ -187,7 +189,8 @@ class CandidateOnlineTestController extends BaseController
         $account = $this->candidateAccount();
         if (! $account) return $this->fail('Not authenticated', 401);
 
-        if (! $this->ownsAttempt((int) $attemptId, (int) $account['id'])) {
+        $assignment = $this->getAssignmentForAttempt((int) $attemptId, (int) $account['id']);
+        if (! $assignment) {
             return $this->fail('Attempt tidak ditemukan', 404);
         }
         $body = $this->getBody();
@@ -196,7 +199,13 @@ class CandidateOnlineTestController extends BaseController
         $response = $body['response'] ?? null;
         $time = (int) ($body['time_spent_sec'] ?? 0);
         try {
-            Services::onlineTest()->saveAnswer((int) $attemptId, $answerId, $response, $time);
+            Services::onlineTest()->saveAnswer(
+                (int) $attemptId,
+                $answerId,
+                (int) $assignment['company_id'],
+                $response,
+                $time,
+            );
         } catch (\RuntimeException $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -208,37 +217,35 @@ class CandidateOnlineTestController extends BaseController
         $account = $this->candidateAccount();
         if (! $account) return $this->fail('Not authenticated', 401);
 
-        if (! $this->ownsAttempt((int) $attemptId, (int) $account['id'])) {
+        $assignment = $this->getAssignmentForAttempt((int) $attemptId, (int) $account['id']);
+        if (! $assignment) {
             return $this->fail('Attempt tidak ditemukan', 404);
         }
         try {
             $svc = Services::onlineTest();
             // Hide correct_answer/explanation kalau test set show_result_to_candidate=0
-            $result = $svc->submitAttempt((int) $attemptId);
+            $result = $svc->submitAttempt((int) $attemptId, (int) $assignment['company_id']);
         } catch (\RuntimeException $e) {
             return $this->fail($e->getMessage(), 422);
         }
 
         // Webhook: test completed (idempotent — tetap aman dipanggil
         // walau submit dipanggil 2x karena submitAttempt idempotent juga)
-        $assignment = $this->getAssignmentForAttempt((int) $attemptId);
-        if ($assignment) {
-            $this->dispatchWebhook(
-                \App\Constants\WebhookEvent::ONLINE_TEST_COMPLETED,
-                (int) $assignment['company_id'],
-                [
-                    'assignment_id'        => (int) $assignment['id'],
-                    'attempt_id'           => (int) $attemptId,
-                    'candidate_id'         => (int) $assignment['candidate_id'],
-                    'candidate_account_id' => (int) ($assignment['candidate_account_id'] ?? 0),
-                    'online_test_id'       => (int) $assignment['online_test_id'],
-                    'job_posting_id'       => isset($assignment['job_posting_id']) ? (int) $assignment['job_posting_id'] : null,
-                    'percentage'           => $result['attempt']['percentage'] ?? null,
-                    'result'               => $result['attempt']['result'] ?? null,
-                    'submitted_at'         => $result['attempt']['submitted_at'] ?? date('c'),
-                ],
-            );
-        }
+        $this->dispatchWebhook(
+            \App\Constants\WebhookEvent::ONLINE_TEST_COMPLETED,
+            (int) $assignment['company_id'],
+            [
+                'assignment_id'        => (int) $assignment['id'],
+                'attempt_id'           => (int) $attemptId,
+                'candidate_id'         => (int) $assignment['candidate_id'],
+                'candidate_account_id' => (int) ($assignment['candidate_account_id'] ?? 0),
+                'online_test_id'       => (int) $assignment['online_test_id'],
+                'job_posting_id'       => isset($assignment['job_posting_id']) ? (int) $assignment['job_posting_id'] : null,
+                'percentage'           => $result['attempt']['percentage'] ?? null,
+                'result'               => $result['attempt']['result'] ?? null,
+                'submitted_at'         => $result['attempt']['submitted_at'] ?? date('c'),
+            ],
+        );
 
         return $this->ok($this->scrubResultForCandidate($result), 'Submitted');
     }
@@ -248,7 +255,8 @@ class CandidateOnlineTestController extends BaseController
         $account = $this->candidateAccount();
         if (! $account) return $this->fail('Not authenticated', 401);
 
-        if (! $this->ownsAttempt((int) $attemptId, (int) $account['id'])) {
+        $assignment = $this->getAssignmentForAttempt((int) $attemptId, (int) $account['id']);
+        if (! $assignment) {
             return $this->fail('Attempt tidak ditemukan', 404);
         }
 
@@ -262,7 +270,10 @@ class CandidateOnlineTestController extends BaseController
         $meta = isset($body['meta']) && is_array($body['meta']) ? $body['meta'] : null;
         $now = date('Y-m-d H:i:s');
         $db = \Config\Database::connect();
-        $db->table('online_test_events')->insert([
+        $eventInsert = $db->table('online_test_events');
+        $companyId = (int) $assignment['company_id'];
+        if ($companyId <= 0) return $this->fail('Attempt tidak ditemukan', 404);
+        $eventInsert->insert([
             'attempt_id'  => (int) $attemptId,
             'event_type'  => $type,
             'occurred_at' => $now,
@@ -271,9 +282,15 @@ class CandidateOnlineTestController extends BaseController
         ]);
         // Increment counter di attempt untuk indicator anti-cheat
         if ($type === 'TAB_SWITCH') {
-            $db->query('UPDATE online_test_attempts SET tab_switch_count = tab_switch_count + 1 WHERE id = ?', [(int) $attemptId]);
+            $db->query(
+                'UPDATE online_test_attempts SET tab_switch_count = tab_switch_count + 1 WHERE id = ? AND assignment_id = ?',
+                [(int) $attemptId, (int) $assignment['id']],
+            );
         } elseif ($type === 'FULLSCREEN_EXIT') {
-            $db->query('UPDATE online_test_attempts SET fullscreen_exit_count = fullscreen_exit_count + 1 WHERE id = ?', [(int) $attemptId]);
+            $db->query(
+                'UPDATE online_test_attempts SET fullscreen_exit_count = fullscreen_exit_count + 1 WHERE id = ? AND assignment_id = ?',
+                [(int) $attemptId, (int) $assignment['id']],
+            );
         }
         return $this->ok(null, 'Logged');
     }
@@ -283,10 +300,15 @@ class CandidateOnlineTestController extends BaseController
         $account = $this->candidateAccount();
         if (! $account) return $this->fail('Not authenticated', 401);
 
-        if (! $this->ownsAttempt((int) $attemptId, (int) $account['id'])) {
+        $assignment = $this->getAssignmentForAttempt((int) $attemptId, (int) $account['id']);
+        if (! $assignment) {
             return $this->fail('Attempt tidak ditemukan', 404);
         }
-        $result = Services::onlineTest()->buildResultView((int) $attemptId, true);
+        $result = Services::onlineTest()->buildResultView(
+            (int) $attemptId,
+            (int) $assignment['company_id'],
+            true,
+        );
         // Status check: kalau attempt belum submit, jangan tampilkan jawaban
         if (! in_array($result['attempt']['status'] ?? '', ['SUBMITTED', 'GRADED', 'EXPIRED'], true)) {
             return $this->fail('Attempt belum disubmit', 422);
@@ -311,27 +333,15 @@ class CandidateOnlineTestController extends BaseController
         return $row ?: null;
     }
 
-    private function ownsAttempt(int $attemptId, int $accountId): bool
+    private function getAssignmentForAttempt(int $attemptId, int $accountId): ?array
     {
-        if ($attemptId <= 0) return false;
-        $db = \Config\Database::connect();
-        $row = $db->table('online_test_attempts ota')
-            ->select('ota.id')
-            ->join('online_test_assignments oa', 'oa.id = ota.assignment_id')
-            ->where('ota.id', $attemptId)
-            ->where('oa.candidate_account_id', $accountId)
-            ->where('oa.company_id >', 0)
-            ->get()->getRowArray();
-        return $row !== null;
-    }
-
-    private function getAssignmentForAttempt(int $attemptId): ?array
-    {
+        if ($attemptId <= 0 || $accountId <= 0) return null;
         $db = \Config\Database::connect();
         $row = $db->table('online_test_assignments oa')
             ->select('oa.*')
             ->join('online_test_attempts ota', 'ota.assignment_id = oa.id')
             ->where('ota.id', $attemptId)
+            ->where('oa.candidate_account_id', $accountId)
             ->where('oa.company_id >', 0)
             ->get()->getRowArray();
         return $row ?: null;

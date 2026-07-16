@@ -17,7 +17,7 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
         foreach ($verbs as $verb) {
             $count += count($routes->getRoutes($verb, false));
         }
-        self::assertSame(958, $count, 'Intentional route changes must update the audited snapshot count.');
+        self::assertSame(959, $count, 'Intentional route changes must update the audited snapshot count.');
 
         $getPaths = array_keys($routes->getRoutes('GET', false));
         $myTeam = array_search('api/v1/employees/my-team', $getPaths, true);
@@ -62,8 +62,6 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
             'api/v1/compensation-reviews' => 'Compensation review cycle creation',
             'api/v1/compensation-reviews/([0-9]+)/open' => 'Cycle opening',
             'api/v1/compensation-reviews/([0-9]+)/proposals' => 'Manager proposal',
-            'api/v1/compensation-proposals/([0-9]+)/approve' => 'Proposal approval',
-            'api/v1/compensation-proposals/([0-9]+)/reject' => 'Proposal rejection',
         ] as $path => $label) {
             self::assertSame(['jwt', 'permission:employee.manage', 'idempotency:required'], $routes->getRoutesOptions($path, 'POST')['filter'] ?? [], $label);
         }

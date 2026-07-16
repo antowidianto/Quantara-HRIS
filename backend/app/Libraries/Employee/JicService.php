@@ -112,10 +112,12 @@ class JicService
      *
      * @return array<string,mixed> kolom siap untuk insert/update job_information_changes
      */
-    public function snapshotEmployee(int $employeeId): array
+    public function snapshotEmployee(int $employeeId, int $companyId): array
     {
+        if ($companyId <= 0) throw new \DomainException('Active company context is required for JIC operations');
         $db  = Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $employeeId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $emp) {
             throw new \RuntimeException("Employee #{$employeeId} tidak ditemukan");
         }
@@ -124,7 +126,7 @@ class JicService
         if (! empty($emp['position_id'])) {
             $row = $db->table('positions')
                 ->select('name, tier')
-                ->where('id', (int) $emp['position_id'])->get()->getRowArray();
+                ->where('id', (int) $emp['position_id'])->where('company_id', $companyId)->get()->getRowArray();
             if ($row) {
                 $posName = $row['name'];
                 $tier    = $row['tier'] ?? 'STAFF';
@@ -134,14 +136,14 @@ class JicService
         $deptName = null;
         if (! empty($emp['department_id'])) {
             $row = $db->table('departments')->select('name')
-                ->where('id', (int) $emp['department_id'])->get()->getRowArray();
+                ->where('id', (int) $emp['department_id'])->where('company_id', $companyId)->get()->getRowArray();
             $deptName = $row['name'] ?? null;
         }
 
         $gradeName = null;
         if (! empty($emp['job_grade_id'])) {
             $row = $db->table('job_grades')->select('name')
-                ->where('id', (int) $emp['job_grade_id'])->get()->getRowArray();
+                ->where('id', (int) $emp['job_grade_id'])->where('company_id', $companyId)->get()->getRowArray();
             $gradeName = $row['name'] ?? null;
         }
 

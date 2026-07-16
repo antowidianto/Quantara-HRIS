@@ -9,7 +9,7 @@ final class EmployeeTransferBusinessFlowTest extends TestCase
     public function testEffectiveTransferChangesOrganizationBeforePayrollResolvesAllocation(): void
     {
         $transfer = file_get_contents(APPPATH . 'Libraries/Employee/EmployeeTransferService.php');
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
 
         self::assertIsString($transfer);
         self::assertIsString($payroll);

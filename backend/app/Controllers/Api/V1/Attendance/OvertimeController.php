@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Attendance\OvertimeApprovalException;
 use Config\Services;
 
 class OvertimeController extends ApiController
@@ -99,6 +100,40 @@ class OvertimeController extends ApiController
             ->where('date', $data['work_date'])
             ->countAllResults();
         if ($isHoliday > 0) $dayType = 'HOLIDAY';
+
+        // PP 35/2021 Pasal 26: maksimum 4 jam/hari dan 18 jam/minggu.
+        // Batas tersebut tidak mencakup istirahat mingguan/libur resmi, jadi
+        // hard stop diterapkan pada WEEKDAY dan tidak dapat dioverride oleh
+        // approval tambahan.
+        if ($dayType === 'WEEKDAY' && $hours > 4.0) {
+            return $this->fail(
+                'Lembur hari kerja maksimal 4 jam per hari sesuai PP 35/2021',
+                422,
+                'OVERTIME_DAILY_LIMIT_EXCEEDED'
+            );
+        }
+        if ($dayType === 'WEEKDAY') {
+            $timestamp = strtotime((string) $data['work_date']);
+            $weekStart = date('Y-m-d', strtotime('monday this week', $timestamp));
+            $weekEnd = date('Y-m-d', strtotime('sunday this week', $timestamp));
+            $weekly = $db->table('overtimes')
+                ->selectSum('hours', 'total_hours')
+                ->where('company_id', $companyId)
+                ->where('employee_id', $employeeId)
+                ->where('work_date >=', $weekStart)
+                ->where('work_date <=', $weekEnd)
+                ->where('day_type', 'WEEKDAY')
+                ->whereNotIn('status', ['REJECTED', 'CANCELLED'])
+                ->get()->getRowArray();
+            $weeklyHours = (float) ($weekly['total_hours'] ?? 0) + $hours;
+            if ($weeklyHours > 18.0) {
+                return $this->fail(
+                    "Akumulasi lembur hari kerja minggu ini {$weeklyHours} jam; maksimum 18 jam sesuai PP 35/2021",
+                    422,
+                    'OVERTIME_WEEKLY_LIMIT_EXCEEDED'
+                );
+            }
+        }
 
         // Compensation type: CASH (default, dibayar uang) atau LEAVE (cuti pengganti)
         $compType = strtoupper((string) ($data['compensation_type'] ?? 'CASH'));
@@ -383,235 +418,55 @@ class OvertimeController extends ApiController
     public function approve($id = null)
     {
         $id = (int) $id;
-        $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $ot = $db->table('overtimes')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->get()->getRowArray();
-        if (! $ot) return $this->fail('Not found', 404);
-        if ($ot['status'] !== 'PENDING') return $this->fail('Not pending', 422);
-
-        $emp = $db->table('employees')
-            ->where('id', $ot['employee_id'])
-            ->where('company_id', $companyId)
-            ->get()->getRowArray();
-        if (! $emp) return $this->fail('Employee not found in active tenant', 422);
-        $compType = strtoupper((string) ($ot['compensation_type'] ?? 'CASH'));
-
-        $update = [
-            'status'       => 'APPROVED',
-            'approved_by'  => $this->userId(),
-            'approved_at'  => date('Y-m-d H:i:s'),
-            'updated_at'   => date('Y-m-d H:i:s'),
-        ];
-
-        $description = '';
-        $amount = 0.0;
-
-        if ($compType === 'LEAVE') {
-            // Konversi jam lembur ke jam cuti pengganti
-            $ratio = 1.0;
-            if ($db->tableExists('settings')) {
-                $st = $db->table('settings')->where('company_id', (int) $ot['company_id'])
-                    ->where('`key`', 'overtime_to_leave_ratio')->get()->getRowArray();
-                if ($st && (float) $st['value'] > 0) $ratio = (float) $st['value'];
-            }
-            $hours = (float) $ot['hours'];
-            $leaveHours = round($hours * $ratio, 2);
-
-            // Cari leave_type CPL (source=OVERTIME_COMP) untuk company ini
-            $leaveType = $db->table('leave_types')
-                ->where('company_id', (int) $ot['company_id'])
-                ->where('source', 'OVERTIME_COMP')
-                ->where('is_active', 1)
-                ->where('deleted_at IS NULL')
-                ->get()->getRowArray();
-            if (! $leaveType) {
-                return $this->fail('Leave type "Cuti Pengganti Lembur" belum dikonfigurasi. Hubungi admin.', 422);
-            }
-
-            // Cek max days per tahun (kalau ada setting)
-            $maxDaysYear = 12;
-            if ($db->tableExists('settings')) {
-                $st = $db->table('settings')->where('company_id', (int) $ot['company_id'])
-                    ->where('`key`', 'overtime_to_leave_max_days_year')->get()->getRowArray();
-                if ($st && (int) $st['value'] > 0) $maxDaysYear = (int) $st['value'];
-            }
-
-            $year = (int) date('Y', strtotime((string) $ot['work_date']));
-            // Hari kerja standar: 8 jam = 1 hari cuti
-            $hoursPerDay = 8;
-
-            // Ensure balance row ada
-            $balance = $db->table('leave_balances')
-                ->where('company_id', $companyId)
-                ->where('employee_id', (int) $ot['employee_id'])
-                ->where('leave_type_id', (int) $leaveType['id'])
-                ->where('period_year', $year)
-                ->get()->getRowArray();
-
-            if (! $balance) {
-                $db->table('leave_balances')->insert([
-                    'company_id'    => (int) $ot['company_id'],
-                    'employee_id'   => (int) $ot['employee_id'],
-                    'leave_type_id' => (int) $leaveType['id'],
-                    'period_year'   => $year,
-                    'allocated'     => 0,
-                    'carried_over'  => 0,
-                    'used'          => 0,
-                    'remaining'     => 0,
-                    'created_at'    => date('Y-m-d H:i:s'),
-                    'updated_at'    => date('Y-m-d H:i:s'),
-                ]);
-                $balanceId = (int) $db->insertID();
-                $balance = $db->table('leave_balances')
-                    ->where('id', $balanceId)
-                    ->where('company_id', $companyId)
-                    ->get()->getRowArray();
-            }
-
-            // Cek total accumulated tahun ini (allocated source OT) — pakai
-            // allocated + leaveHours baru (semua dlm satuan jam → hari)
-            $newAllocatedHours = (float) $balance['allocated'] * $hoursPerDay + $leaveHours;
-            $maxHoursYear = $maxDaysYear * $hoursPerDay;
-            if ($newAllocatedHours > $maxHoursYear) {
-                $availableHours = max(0, $maxHoursYear - (float) $balance['allocated'] * $hoursPerDay);
-                if ($availableHours <= 0) {
-                    return $this->fail("Quota cuti pengganti tahun {$year} sudah mencapai max {$maxDaysYear} hari", 422);
-                }
-                $leaveHours = $availableHours;
-            }
-
-            // Tambah ke balance — convert jam ke hari (allocated dlm satuan hari)
-            $addDays = round($leaveHours / $hoursPerDay, 2);
-            $newAllocated = (float) $balance['allocated'] + $addDays;
-            $newRemaining = $newAllocated + (float) $balance['carried_over'] - (float) $balance['used'];
-            $db->table('leave_balances')
-                ->where('id', (int) $balance['id'])
-                ->where('company_id', $companyId)
-                ->update([
-                'allocated' => $newAllocated,
-                'remaining' => $newRemaining,
-                'updated_at'=> date('Y-m-d H:i:s'),
-            ]);
-
-            $update['leave_balance_id'] = (int) $balance['id'];
-            $update['leave_hours_credited'] = $leaveHours;
-            $update['leave_conversion_ratio'] = $ratio;
-            $update['computed_amount'] = 0;
-            $description = "Menyetujui lembur #{$ot['request_number']} ({$hours} jam → {$addDays} hari cuti pengganti)";
-        } else {
-            // CASH (behaviour lama)
-            $base = (float) $emp['basic_salary'];
-            $calc = new \App\Libraries\Attendance\OvertimeCalculator();
-            $amount = $calc->calculate($base, (float) $ot['hours'], $ot['day_type']);
-            $update['computed_amount'] = $amount;
-            $description = "Menyetujui lembur #{$ot['request_number']} ({$ot['hours']} jam = Rp " . number_format($amount, 0, ',', '.') . ")";
+        if ($companyId === null) return null;
+        $note = trim((string) ($this->getJsonInput()['note'] ?? ''));
+        try {
+            $approval = Services::approval()->approveEntity(
+                'OVERTIME', 'overtimes', $id, $companyId, $this->userId(), $note
+            );
+        } catch (OvertimeApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+        } catch (\Throwable $exception) {
+            return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
         }
 
-        $db->table('overtimes')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->update($update);
-
-        if ($emp['user_id']) {
-            $msg = $compType === 'LEAVE'
-                ? "Lembur Anda disetujui dan dikonversi ke {$update['leave_hours_credited']} jam cuti pengganti"
-                : 'Pengajuan lembur Anda telah disetujui';
-            Services::notification()->send((int) $emp['user_id'], (int) $ot['company_id'], 'overtime.approved',
-                'Lembur disetujui', $msg,
-                ['overtime_id' => $id], '/overtimes/' . $id, true);
+        if (! ($approval['final'] ?? false)) {
+            Services::audit()->forModule('OVERTIME')->logApprove(
+                'approval_request', (int) $approval['request_id'], $approval,
+                'Menyetujui satu step approval lembur'
+            );
+            return $this->ok($approval, 'Approval step recorded');
         }
 
-        // Sprint 13+ — webhook dispatch via trait helper
-        $this->dispatchWebhook(
-            \App\Constants\WebhookEvent::OVERTIME_APPROVED,
-            (int) $ot['company_id'],
-            [
-                'overtime_id'       => $id,
-                'employee'          => $emp ? [
-                    'id'   => (int) $emp['id'],
-                    'nik'  => $emp['nik'] ?? null,
-                    'name' => $emp['full_name'] ?? $emp['name'] ?? null,
-                ] : null,
-                'work_date'         => $ot['work_date'] ?? null,
-                'hours'             => (float) ($ot['hours'] ?? 0),
-                'compensation_type' => $compType,
-                'amount'            => (float) $amount,
-                'approved_by'       => $this->userId(),
-                'approved_at'       => date('c'),
-            ],
+        $result = $approval['domain_result'];
+        $overtime = $result['overtime'];
+        Services::audit()->forModule('OVERTIME')->logApprove(
+            'overtime', $id, $overtime, "Menyetujui lembur #{$overtime['request_number']}"
         );
-
-        Services::audit()->forModule('OVERTIME')->logApprove('overtime', $id, $ot, $description);
-
-        $resp = ['compensation_type' => $compType];
-        if ($compType === 'LEAVE') {
-            $resp['leave_hours_credited'] = $update['leave_hours_credited'];
-            $resp['leave_balance_id'] = $update['leave_balance_id'];
-        } else {
-            $resp['amount'] = $amount;
-        }
-        return $this->ok($resp, 'Approved');
+        return $this->ok(['approval' => $approval], 'Approved');
     }
 
     public function reject($id = null)
     {
         $id = (int) $id;
-        $data = $this->getJsonInput();
-        $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $ot = $db->table('overtimes')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->get()->getRowArray();
-        if (! $ot) return $this->fail('Not found', 404);
-        if ($ot['status'] !== 'PENDING') return $this->fail('Not pending', 422);
-
-        $db->table('overtimes')
-            ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->update([
-            'status' => 'REJECTED',
-            'approved_by' => $this->userId(),
-            'approved_at' => date('Y-m-d H:i:s'),
-            'rejection_note' => $data['reason'] ?? '',
-            'updated_at'  => date('Y-m-d H:i:s'),
-        ]);
-
-        // Notify employee + dispatch webhook
-        $emp = $db->table('employees')
-            ->where('id', $ot['employee_id'])
-            ->where('company_id', $companyId)
-            ->get()->getRowArray();
-        if ($emp && ! empty($emp['user_id'])) {
-            Services::notification()->send((int) $emp['user_id'], (int) $ot['company_id'], 'overtime.rejected',
-                'Lembur ditolak', 'Pengajuan lembur Anda ditolak: ' . ($data['reason'] ?? '(tanpa alasan)'),
-                ['overtime_id' => $id], '/overtimes/' . $id, true);
+        if ($companyId === null) return null;
+        $reason = trim((string) ($this->getJsonInput()['reason'] ?? ''));
+        try {
+            $approval = Services::approval()->rejectEntity(
+                'OVERTIME', 'overtimes', $id, $companyId, $this->userId(), $reason
+            );
+        } catch (OvertimeApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+        } catch (\Throwable $exception) {
+            return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
         }
 
-        // Sprint 14+ — webhook outbound `overtime.rejected`
-        $this->dispatchWebhook(
-            \App\Constants\WebhookEvent::OVERTIME_REJECTED,
-            (int) $ot['company_id'],
-            [
-                'overtime_id' => $id,
-                'employee'    => $emp ? [
-                    'id'   => (int) $emp['id'],
-                    'name' => $emp['full_name'] ?? null,
-                ] : null,
-                'work_date'   => $ot['work_date'] ?? null,
-                'hours'       => (float) ($ot['hours'] ?? 0),
-                'reason'      => $data['reason'] ?? '',
-                'rejected_by' => $this->userId(),
-                'rejected_at' => date('c'),
-            ],
-        );
-
-        Services::audit()
-            ->forModule('OVERTIME')
-            ->logReject('overtime', $id, $ot, $data['reason'] ?? '(tanpa alasan)');
-        return $this->ok(null, 'Rejected');
+        $result = $approval['domain_result'];
+        $overtime = $result['overtime'];
+        Services::audit()->forModule('OVERTIME')->logReject('overtime', $id, $overtime, $reason);
+        return $this->ok(['approval' => $approval], 'Rejected');
     }
+
 }

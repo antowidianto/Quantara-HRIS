@@ -57,9 +57,9 @@ final class PayrollVarianceBusinessFlowTest extends TestCase
         self::assertNotFalse($disbursement);
         self::assertStringContainsString('Payroll period must be FINALIZED before disbursement', $disbursement);
         self::assertStringContainsString("['IN_PROGRESS', 'COMPLETED']", $disbursement);
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
-        self::assertNotFalse($payroll);
-        self::assertStringContainsString("'status'        => 'FINALIZED'", $payroll);
+        $finalization = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollFinalizationService.php');
+        self::assertNotFalse($finalization);
+        self::assertStringContainsString("'status' => 'FINALIZED'", $finalization);
         self::assertStringContainsString('PayrollPaymentSettlementService', $disbursement);
         $settlement = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollPaymentSettlementService.php');
         self::assertNotFalse($settlement);

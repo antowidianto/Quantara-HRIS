@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Payroll;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Payroll\LoanApprovalException;
 use Config\Services;
 
 class LoanController extends ApiController
@@ -68,6 +69,7 @@ class LoanController extends ApiController
             'principal'    => 'required|numeric|greater_than[0]',
             'installments' => 'required|integer|greater_than[0]',
             'reason'       => 'required|max_length[1000]',
+            'first_installment_date' => 'permit_empty|valid_date',
         ]);
         if (! $valid) return null;
 
@@ -85,6 +87,8 @@ class LoanController extends ApiController
         $principal = (float) $data['principal'];
         $installments = (int) $data['installments'];
         $reason = $data['reason'];
+        $firstInstallmentDate = (string) ($data['first_installment_date']
+            ?? (new \DateTimeImmutable('first day of next month'))->format('Y-m-d'));
 
         $interestRate = 10.0; // Flat 10%
 
@@ -98,9 +102,41 @@ class LoanController extends ApiController
                 $installments,
                 $reason
             );
+            $db->table('loans')->where('id', (int) $loan['id'])
+                ->where('company_id', $companyId)
+                ->update(['first_installment_date' => $firstInstallmentDate]);
+
+            try {
+                $approval = Services::approval()->start([
+                    'company_id' => $companyId,
+                    'module' => 'LOAN',
+                    'entity_table' => 'loans',
+                    'entity_id' => (int) $loan['id'],
+                    'employee_id' => $employeeId,
+                    'meta' => [
+                        'amount' => $principal,
+                        'installments' => $installments,
+                        'first_installment_date' => $firstInstallmentDate,
+                    ],
+                ]);
+            } catch (\Throwable $exception) {
+                $db->table('loans')->where('id', (int) $loan['id'])
+                    ->where('company_id', $companyId)->delete();
+                return $this->fail(
+                    'Gagal membuat workflow approval: ' . $exception->getMessage(),
+                    500,
+                    'APPROVAL_START_FAILED'
+                );
+            }
 
             Services::audit()->log('loan.create', 'loan', $loan['id']);
-            return $this->ok(['id' => $loan['id'], 'loan_number' => $loan['loan_number'], 'installment_amount' => $loan['installment_amount']], 'Loan requested', 201);
+            return $this->ok([
+                'id' => $loan['id'],
+                'loan_number' => $loan['loan_number'],
+                'installment_amount' => $loan['installment_amount'],
+                'first_installment_date' => $firstInstallmentDate,
+                'approval' => $approval,
+            ], 'Loan requested', 201);
         } catch (\Exception $e) {
             return $this->fail('Failed to apply loan: ' . $e->getMessage(), 500);
         }
@@ -139,41 +175,42 @@ class LoanController extends ApiController
         }
 
         if ($action === 'approve') {
-            if ($loan['status'] !== 'PENDING') return $this->fail('Not pending', 422);
-            
-            // first_installment_date is required for generating installments
-            if (empty($data['first_installment_date'])) {
-                return $this->fail('first_installment_date is required', 400);
-            }
-            
             try {
-                $loanService = new \App\Libraries\Payroll\LoanService();
-                $loanService->approveLoan($id, $this->userId(), $data['first_installment_date']);
-                
+                $approval = Services::approval()->approveEntity(
+                    'LOAN', 'loans', $id, $companyId, $this->userId(),
+                    trim((string) ($data['note'] ?? ''))
+                );
+                if (! ($approval['final'] ?? false)) {
+                    Services::audit()->log('loan.approval_step', 'approval_request', (int) $approval['request_id']);
+                    return $this->ok($approval, 'Approval step recorded');
+                }
                 Services::audit()->forModule('FINANCE')->log(
                     action: 'loan.approve', entity: 'loans', entityId: $id,
                     description: "Loan #{$loan['loan_number']} disetujui (akan dipotong otomatis di payroll)",
                     severity: 'NOTICE',
                 );
-                return $this->ok(null, 'Loan approved & running');
-            } catch (\Exception $e) {
-                return $this->fail('Failed to approve loan: ' . $e->getMessage(), 500);
+                return $this->ok(['approval' => $approval], 'Loan approved & running');
+            } catch (LoanApprovalException $exception) {
+                return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+            } catch (\Throwable $exception) {
+                return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
             }
         }
         if ($action === 'reject') {
-            if ($loan['status'] !== 'PENDING') return $this->fail('Not pending', 422);
-            
             try {
-                $loanService = new \App\Libraries\Payroll\LoanService();
-                $loanService->rejectLoan($id, $this->userId());
-                
+                $reason = trim((string) ($data['reason'] ?? ''));
+                $approval = Services::approval()->rejectEntity(
+                    'LOAN', 'loans', $id, $companyId, $this->userId(), $reason
+                );
                 Services::audit()->forModule('FINANCE')->log(
                     action: 'loan.reject', entity: 'loans', entityId: $id,
                     description: "Loan #{$loan['loan_number']} ditolak",
                 );
-                return $this->ok(null, 'Rejected');
-            } catch (\Exception $e) {
-                return $this->fail('Failed to reject loan: ' . $e->getMessage(), 500);
+                return $this->ok(['approval' => $approval], 'Rejected');
+            } catch (LoanApprovalException $exception) {
+                return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+            } catch (\Throwable $exception) {
+                return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
             }
         }
         return $this->fail('Unknown action', 400);
@@ -198,13 +235,21 @@ class LoanController extends ApiController
         }
         if ($loan['status'] !== 'PENDING') return $this->fail('Cannot cancel — only PENDING loans can be cancelled', 422);
 
-        $db->table('loans')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
-            ->update([
-            'status' => 'CANCELLED',
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        $db->transBegin();
+        try {
+            $db->table('loans')
+                ->where('id', (int) $id)
+                ->where('company_id', $companyId)
+                ->where('status', 'PENDING')
+                ->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
+            if ($db->affectedRows() !== 1) throw new \RuntimeException('Request berubah; muat ulang data');
+            Services::approval()->cancelEntity('LOAN', 'loans', (int) $id, $companyId);
+            if (! $db->transStatus()) throw new \RuntimeException('Gagal membatalkan workflow');
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            return $this->fail($exception->getMessage(), 409, 'CANCEL_CONFLICT');
+        }
         Services::audit()->forModule('FINANCE')->log(
             action: 'loan.cancel', entity: 'loans', entityId: (int) $id,
             description: "Loan #{$loan['loan_number']} dibatalkan",

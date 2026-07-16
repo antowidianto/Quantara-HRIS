@@ -42,6 +42,14 @@ final class WebhookEvent
     public const ATTENDANCE_LATE_ABSENT      = 'attendance.late_absent';
     public const ATTENDANCE_ANOMALY_FLAGGED  = 'attendance.anomaly_flagged';
     public const ATTENDANCE_CHANGE_APPROVED  = 'attendance.change_approved';
+    public const ATTENDANCE_CHANGE_REJECTED  = 'attendance.change_rejected';
+
+    public const REIMBURSEMENT_APPROVED = 'reimbursement.approved';
+    public const REIMBURSEMENT_REJECTED = 'reimbursement.rejected';
+    public const LOAN_APPROVED = 'loan.approved';
+    public const LOAN_REJECTED = 'loan.rejected';
+    public const BUSINESS_TRIP_APPROVED = 'business_trip.approved';
+    public const BUSINESS_TRIP_REJECTED = 'business_trip.rejected';
 
     // ─── Recruitment ─────────────────────────────────────────────────
     public const CANDIDATE_HIRED  = 'recruitment.candidate_hired';
@@ -61,7 +69,22 @@ final class WebhookEvent
     // ─── Bonus Engine (Sprint 16+) ───────────────────────────────────
     public const BONUS_RUN_CALCULATED = 'bonus.run_calculated';
     public const BONUS_RUN_APPROVED   = 'bonus.run_approved';
+    public const BONUS_RUN_REJECTED   = 'bonus.run_rejected';
     public const BONUS_RUN_PAID       = 'bonus.run_paid';
+    public const PAYROLL_ADJUSTMENT_APPROVED = 'payroll_adjustment.approved';
+    public const PAYROLL_ADJUSTMENT_REJECTED = 'payroll_adjustment.rejected';
+    public const COMPENSATION_REVIEW_APPROVED = 'compensation_review.approved';
+    public const COMPENSATION_REVIEW_REJECTED = 'compensation_review.rejected';
+    public const TRAINING_REGISTRATION_APPROVED = 'training.registration_approved';
+    public const TRAINING_REGISTRATION_REJECTED = 'training.registration_rejected';
+    public const TIMESHEET_APPROVED = 'timesheet.approved';
+    public const TIMESHEET_REJECTED = 'timesheet.rejected';
+    public const CANDIDATE_OFFER_APPROVED = 'candidate_offer.approved';
+    public const CANDIDATE_OFFER_REJECTED = 'candidate_offer.rejected';
+    public const GENERATED_CONTRACT_APPROVED = 'generated_contract.approved';
+    public const GENERATED_CONTRACT_REJECTED = 'generated_contract.rejected';
+    public const ASSET_TRANSACTION_APPROVED = 'asset.transaction_approved';
+    public const ASSET_TRANSACTION_REJECTED = 'asset.transaction_rejected';
 
     /** All known events — untuk validation di WebhookController create. */
     public const ALL = [
@@ -83,6 +106,13 @@ final class WebhookEvent
         self::ATTENDANCE_LATE_ABSENT,
         self::ATTENDANCE_ANOMALY_FLAGGED,
         self::ATTENDANCE_CHANGE_APPROVED,
+        self::ATTENDANCE_CHANGE_REJECTED,
+        self::REIMBURSEMENT_APPROVED,
+        self::REIMBURSEMENT_REJECTED,
+        self::LOAN_APPROVED,
+        self::LOAN_REJECTED,
+        self::BUSINESS_TRIP_APPROVED,
+        self::BUSINESS_TRIP_REJECTED,
         self::CANDIDATE_HIRED,
         self::POSTING_PUBLISHED,
         self::CANDIDATE_REGISTERED,
@@ -94,7 +124,22 @@ final class WebhookEvent
         self::SEVERANCE_PAID,
         self::BONUS_RUN_CALCULATED,
         self::BONUS_RUN_APPROVED,
+        self::BONUS_RUN_REJECTED,
         self::BONUS_RUN_PAID,
+        self::PAYROLL_ADJUSTMENT_APPROVED,
+        self::PAYROLL_ADJUSTMENT_REJECTED,
+        self::COMPENSATION_REVIEW_APPROVED,
+        self::COMPENSATION_REVIEW_REJECTED,
+        self::TRAINING_REGISTRATION_APPROVED,
+        self::TRAINING_REGISTRATION_REJECTED,
+        self::TIMESHEET_APPROVED,
+        self::TIMESHEET_REJECTED,
+        self::CANDIDATE_OFFER_APPROVED,
+        self::CANDIDATE_OFFER_REJECTED,
+        self::GENERATED_CONTRACT_APPROVED,
+        self::GENERATED_CONTRACT_REJECTED,
+        self::ASSET_TRANSACTION_APPROVED,
+        self::ASSET_TRANSACTION_REJECTED,
     ];
 
     public static function isValid(string $eventType): bool

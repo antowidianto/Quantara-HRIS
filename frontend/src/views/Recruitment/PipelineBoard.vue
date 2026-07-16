@@ -469,6 +469,8 @@ async function deleteCandidate(c) {
 
 const OFFER_STATUS_BADGE = {
   DRAFT:     { label: 'Draft',     color: 'bg-gray-100 text-gray-700' },
+  PENDING_APPROVAL: { label: 'Menunggu Approval', color: 'bg-amber-100 text-amber-700' },
+  APPROVAL_REJECTED: { label: 'Approval Ditolak', color: 'bg-rose-100 text-rose-700' },
   SENT:      { label: 'Terkirim',  color: 'bg-blue-100 text-blue-700' },
   ACCEPTED:  { label: 'Diterima',  color: 'bg-emerald-100 text-emerald-700' },
   REJECTED:  { label: 'Ditolak',   color: 'bg-rose-100 text-rose-700' },
@@ -477,7 +479,7 @@ const OFFER_STATUS_BADGE = {
 }
 
 const offerActiveCount = computed(
-  () => offers.value.filter(o => ['DRAFT', 'SENT'].includes(o.status)).length,
+  () => offers.value.filter(o => ['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'SENT'].includes(o.status)).length,
 )
 
 // Total monthly compensation untuk preview (basic + sum allowances)
@@ -584,16 +586,15 @@ async function saveOfferDraft() {
 
 async function sendOffer(offerId) {
   const ok = await confirmDialog({
-    title: 'Kirim offer ke kandidat?',
-    message: 'Kandidat akan menerima notifikasi (in-app + email) dengan link ke portal untuk respond. '
-      + 'Setelah dikirim, offer tidak bisa diedit lagi (harus withdraw & buat baru).',
-    okText: 'Kirim',
+    title: 'Ajukan approval offer?',
+    message: 'Offer akan diperiksa Hiring Manager dan HR. Finance serta Direksi ikut memeriksa bila salary atau joining bonus merupakan policy exception. Kandidat baru menerima offer setelah approval final.',
+    okText: 'Ajukan',
     variant: 'primary',
   })
   if (! ok) return
   try {
     await api.post(`/offers/${offerId}/send`)
-    toast.success('Offer dikirim ke kandidat')
+    toast.success('Offer diajukan ke workflow approval')
     await loadOffersForCandidate(showOfferModal.value.id)
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal kirim offer')
@@ -1173,12 +1174,12 @@ function downloadDoc(doc) {
                     </div>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <button v-if="offer.status === 'DRAFT'"
+                    <button v-if="['DRAFT', 'APPROVAL_REJECTED'].includes(offer.status)"
                       class="text-xs px-2.5 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1"
                       @click="sendOffer(offer.id)">
                       <EnvelopeIcon class="w-3.5 h-3.5" /> Kirim
                     </button>
-                    <button v-if="['DRAFT', 'SENT'].includes(offer.status)"
+                    <button v-if="['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'SENT'].includes(offer.status)"
                       class="text-xs px-2.5 py-1 rounded border border-gray-300 hover:bg-gray-50 flex items-center gap-1"
                       @click="withdrawOffer(offer.id)">
                       <NoSymbolIcon class="w-3.5 h-3.5" /> Withdraw
@@ -1197,7 +1198,7 @@ function downloadDoc(doc) {
 
             <div v-if="offerActiveCount > 0"
               class="p-4 bg-amber-50 border-b border-amber-200 text-sm text-amber-800">
-              <strong>Ada offer aktif (DRAFT/SENT) untuk kandidat ini.</strong>
+              <strong>Ada offer aktif untuk kandidat ini.</strong>
               Withdraw offer aktif terlebih dahulu kalau mau buat offer baru
               dengan persyaratan berbeda — supaya audit trail jelas.
             </div>

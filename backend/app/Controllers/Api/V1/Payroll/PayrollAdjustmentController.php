@@ -4,6 +4,8 @@ namespace App\Controllers\Api\V1\Payroll;
 
 use App\Controllers\Api\V1\ApiController;
 use App\Libraries\Payroll\PayrollAdjustmentService;
+use App\Libraries\Payroll\PayrollAdjustmentApprovalException;
+use App\Libraries\Payroll\PayrollAdjustmentApprovalWorkflowService;
 use Config\Services;
 
 final class PayrollAdjustmentController extends ApiController
@@ -32,19 +34,22 @@ final class PayrollAdjustmentController extends ApiController
         }
     }
 
-    public function approve($id = null)
+    public function submit($id = null)
     {
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return null;
         try {
-            $row = (new PayrollAdjustmentService())->approve($companyId, (int) $id, $this->userId());
-            Services::audit()->forModule('PAYROLL')->log(
-                'payroll_adjustment.approve', 'payroll_adjustment', (int) $row['id'],
-                description: 'Payroll adjustment independently approved', severity: 'CRITICAL'
+            $result = (new PayrollAdjustmentApprovalWorkflowService())->submit(
+                (int) $id, $companyId, $this->userId()
             );
-            return $this->ok($row, 'Payroll adjustment approved');
-        } catch (\DomainException $e) {
-            return $this->fail($e->getMessage(), 403, 'SEGREGATION_OF_DUTIES');
+            Services::audit()->forModule('PAYROLL')->log(
+                'payroll_adjustment.submit', 'payroll_adjustment', (int) $id,
+                after: ['approval_request_id' => $result['approval']['request_id'] ?? null],
+                description: 'Payroll adjustment submitted to governed approval', severity: 'CRITICAL'
+            );
+            return $this->ok($result, 'Payroll adjustment submitted for approval');
+        } catch (PayrollAdjustmentApprovalException $e) {
+            return $this->fail($e->getMessage(), $e->httpStatus, $e->errorCode);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'PAYROLL_ADJUSTMENT_BLOCKED');
         }
@@ -65,9 +70,29 @@ final class PayrollAdjustmentController extends ApiController
                 after: ['reversal_adjustment_id' => $row['id']],
                 description: 'Posted payroll adjustment reversed through a later period', severity: 'CRITICAL'
             );
-            return $this->ok($row, 'Reversal adjustment created');
+            return $this->ok($row, 'Draft reversal created; submit it for approval');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'PAYROLL_REVERSAL_BLOCKED');
+        }
+    }
+
+    public function cancel($id = null)
+    {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $data = $this->getJsonInput();
+        try {
+            $row = (new PayrollAdjustmentService())->cancel(
+                $companyId, (int) $id, $this->userId(), (string) ($data['reason'] ?? '')
+            );
+            Services::audit()->forModule('PAYROLL')->log(
+                'payroll_adjustment.cancel', 'payroll_adjustment', (int) $id,
+                after: ['reason' => $data['reason'] ?? null],
+                description: 'Payroll adjustment cancelled with pending workflow closure', severity: 'WARNING'
+            );
+            return $this->ok($row, 'Payroll adjustment cancelled');
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422, 'PAYROLL_ADJUSTMENT_CANCEL_BLOCKED');
         }
     }
 }

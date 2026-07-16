@@ -176,6 +176,30 @@ function handleKeyDown(e) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+/**
+ * Render subset Markdown yang aman untuk balasan AI. Link hanya boleh
+ * menuju halaman internal aplikasi; API endpoint dan URL eksternal ditolak.
+ */
+function renderAssistantMessage(content) {
+  let html = escapeHtml(content)
+  html = html.replace(/\[([^\]\n]{1,120})\]\((\/[A-Za-z0-9_/?#=&.-]{0,240})\)/g, (full, label, href) => {
+    if (href.startsWith('/api/') || href.startsWith('//')) return label
+    return `<a href="${href}" class="font-medium text-primary-600 underline hover:text-primary-700">${label}</a>`
+  })
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/`([^`\n]+)`/g, '<code class="rounded bg-gray-100 px-1 py-0.5 text-xs">$1</code>')
+  return html.replace(/\n/g, '<br>')
+}
+
 onMounted(loadSessions)
 </script>
 
@@ -272,7 +296,8 @@ onMounted(loadSessions)
                 ? 'bg-primary-600 text-white'
                 : 'bg-white border border-gray-200 text-gray-800'
             ]">
-              <div class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
+              <div v-if="m.role === 'user'" class="whitespace-pre-wrap text-sm">{{ m.content }}</div>
+              <div v-else class="text-sm leading-6" v-html="renderAssistantMessage(m.content)"></div>
               <div :class="[
                 'text-xs mt-1 flex items-center gap-2',
                 m.role === 'user' ? 'text-primary-100' : 'text-gray-400'

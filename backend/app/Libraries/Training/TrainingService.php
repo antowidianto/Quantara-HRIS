@@ -2,6 +2,7 @@
 
 namespace App\Libraries\Training;
 
+use CodeIgniter\Database\BaseConnection;
 use Config\Services;
 
 /**
@@ -23,7 +24,91 @@ class TrainingService
 
     public const CERT_ALERT_DAYS = [60, 30, 14, 7]; // hari sebelum expire
 
-    private function db() { return \Config\Database::connect(); }
+    /** @var callable(array<string,mixed>):array<string,mixed>|null */
+    private $approvalStarter;
+
+    public function __construct(
+        private readonly ?BaseConnection $connection = null,
+        ?callable $approvalStarter = null
+    ) {
+        $this->approvalStarter = $approvalStarter;
+    }
+
+    private function db(): BaseConnection { return $this->connection ?? \Config\Database::connect(); }
+
+    /** @return array<string,mixed> */
+    public function register(
+        int $companyId,
+        int $trainingId,
+        int $employeeId,
+        int $actorUserId,
+        ?string $notes = null
+    ): array {
+        $db = $this->db();
+        $training = $db->table('trainings')->where('id', $trainingId)
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $training) throw new \InvalidArgumentException('Training tidak ditemukan di perusahaan aktif.');
+        if ($training['status'] !== 'PUBLISHED') throw new \RuntimeException('Training belum dipublish.');
+        $employee = $db->table('employees')->where('id', $employeeId)->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $employee) throw new \InvalidArgumentException('Employee tidak ditemukan di perusahaan aktif.');
+        $actor = $db->table('users')->where('id', $actorUserId)->where('company_id', $companyId)
+            ->where('is_active', 1)->get()->getRowArray();
+        if (! $actor || (int) ($actor['employee_id'] ?? 0) <= 0) {
+            throw new \InvalidArgumentException('Pendaftar harus user aktif yang terhubung ke employee.');
+        }
+        $existing = $db->table('training_registrations')->where('training_id', $trainingId)
+            ->where('employee_id', $employeeId)->where('company_id', $companyId)->get()->getRowArray();
+        if ($existing && ! in_array($existing['status'], ['REJECTED', 'CANCELLED'], true)) {
+            throw new \RuntimeException('Karyawan sudah memiliki registrasi aktif untuk training ini.');
+        }
+        $now = date('Y-m-d H:i:s');
+        $row = [
+            'company_id' => $companyId, 'training_id' => $trainingId, 'employee_id' => $employeeId,
+            'status' => 'REGISTERED', 'registered_at' => $now,
+            'approved_at' => null, 'approved_by' => null,
+            'cost' => (float) $training['cost_per_participant'],
+            'notes' => $notes, 'rejection_reason' => null, 'updated_at' => $now,
+        ];
+        $db->transBegin();
+        try {
+            if ($existing) {
+                $db->table('training_registrations')->where('id', (int) $existing['id'])
+                    ->where('company_id', $companyId)->whereIn('status', ['REJECTED', 'CANCELLED'])->update($row);
+                if ($db->affectedRows() !== 1) throw new \RuntimeException('Registrasi berubah; muat ulang data.');
+                $registrationId = (int) $existing['id'];
+            } else {
+                $row['created_at'] = $now;
+                $db->table('training_registrations')->insert($row);
+                $registrationId = (int) $db->insertID();
+            }
+            $params = [
+                'company_id' => $companyId,
+                'module' => 'TRAINING_REGISTRATION',
+                'entity_table' => 'training_registrations',
+                'entity_id' => $registrationId,
+                'employee_id' => $employeeId,
+                'meta' => [
+                    'amount' => (float) $training['cost_per_participant'],
+                    'training_id' => $trainingId,
+                    'target_employee_id' => $employeeId,
+                    'department_id' => $training['department_id'] ?? $employee['department_id'] ?? null,
+                    'is_external' => ($training['training_type'] ?? 'INTERNAL') === 'EXTERNAL',
+                    'start_date' => $training['start_date'],
+                    'submitted_by' => $actorUserId,
+                ],
+            ];
+            $approval = $this->approvalStarter !== null
+                ? ($this->approvalStarter)($params)
+                : Services::approval()->start($params);
+            if (! $db->transStatus()) throw new \RuntimeException('Gagal membuat workflow approval training.');
+            $db->transCommit();
+            return ['id' => $registrationId, 'status' => 'REGISTERED', 'approval' => $approval];
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            throw $exception;
+        }
+    }
 
     public function nextTrainingCode(int $companyId): string
     {
@@ -61,16 +146,21 @@ class TrainingService
     /**
      * Approve registration + cek kapasitas + reserve budget.
      */
-    public function approveRegistration(int $regId, int $byUserId): array
+    public function approveRegistration(int $regId, int $companyId, int $byUserId): array
     {
-        $reg = $this->db()->table('training_registrations')->where('id', $regId)->get()->getRowArray();
+        $reg = $this->db()->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $reg) throw new \RuntimeException('Registration tidak ditemukan');
         if ($reg['status'] !== 'REGISTERED') {
             throw new \RuntimeException("Hanya status REGISTERED yang bisa di-approve, current: {$reg['status']}");
         }
 
-        $training = $this->db()->table('trainings')->where('id', (int) $reg['training_id'])->get()->getRowArray();
+        $training = $this->db()->table('trainings')->where('id', (int) $reg['training_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $training) throw new \RuntimeException('Training tidak ditemukan');
+        if (! in_array($training['status'], ['PUBLISHED', 'ONGOING'], true)) {
+            throw new \RuntimeException('Training tidak lagi terbuka untuk approval.');
+        }
 
         // Cek kapasitas
         if ((int) $training['max_participants'] > 0) {
@@ -84,33 +174,98 @@ class TrainingService
         }
 
         $now = date('Y-m-d H:i:s');
-        $cost = (float) ($reg['cost'] ?: $training['cost_per_participant']);
-        $this->db()->table('training_registrations')->where('id', $regId)->update([
+        $cost = (float) $reg['cost'];
+        if (abs($cost - (float) $training['cost_per_participant']) > 0.005) {
+            throw new \RuntimeException('Biaya training berubah setelah submit; registrasi harus diajukan ulang.');
+        }
+        $budgetYear = (int) substr((string) $training['start_date'], 0, 4);
+        $this->reserveBudget((int) $training['company_id'], $training['department_id'] ?? null, $budgetYear, $cost);
+        $this->db()->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->where('status', 'REGISTERED')->update([
             'status' => 'APPROVED',
             'approved_at' => $now,
             'approved_by' => $byUserId,
             'cost' => $cost,
             'updated_at' => $now,
         ]);
-
-        // Update budget reserved
-        $this->updateBudgetReserved((int) $training['company_id'], $training['department_id'] ?? null, $cost, +1);
+        if ($this->db()->affectedRows() !== 1) throw new \RuntimeException('Registrasi berubah; muat ulang data.');
 
         return ['status' => 'APPROVED', 'cost' => $cost];
+    }
+
+    public function rejectRegistration(int $regId, int $companyId, int $byUserId, string $reason): array
+    {
+        $reason = trim($reason);
+        if (mb_strlen($reason) < 5) throw new \InvalidArgumentException('Alasan penolakan minimal 5 karakter.');
+        $reg = $this->db()->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $reg) throw new \RuntimeException('Registration tidak ditemukan');
+        if ($reg['status'] !== 'REGISTERED') throw new \RuntimeException('Registration tidak sedang menunggu approval.');
+        $this->db()->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->where('status', 'REGISTERED')->update([
+                'status' => 'REJECTED', 'rejection_reason' => $reason,
+                'approved_by' => $byUserId, 'approved_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        if ($this->db()->affectedRows() !== 1) throw new \RuntimeException('Registrasi berubah; muat ulang data.');
+        return ['status' => 'REJECTED', 'reason' => $reason];
+    }
+
+    /** @return array<string,mixed> */
+    public function cancelRegistration(int $regId, int $companyId): array
+    {
+        $db = $this->db();
+        $reg = $db->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $reg) throw new \RuntimeException('Registration tidak ditemukan');
+        if (! in_array($reg['status'], ['REGISTERED', 'APPROVED'], true)) {
+            throw new \RuntimeException("Tidak bisa cancel status {$reg['status']}");
+        }
+        $training = $db->table('trainings')->where('id', (int) $reg['training_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $training) throw new \RuntimeException('Training tidak ditemukan');
+        $db->transBegin();
+        try {
+            if ($reg['status'] === 'REGISTERED') {
+                Services::approval()->cancelEntity(
+                    'TRAINING_REGISTRATION', 'training_registrations', $regId, $companyId
+                );
+            } else {
+                $year = (int) substr((string) $training['start_date'], 0, 4);
+                $this->updateBudgetReserved(
+                    $companyId, $training['department_id'] ?? null, (float) $reg['cost'], -1, $year
+                );
+            }
+            $db->table('training_registrations')->where('id', $regId)->where('company_id', $companyId)
+                ->where('status', (string) $reg['status'])->update([
+                    'status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            if ($db->affectedRows() !== 1 || ! $db->transStatus()) {
+                throw new \RuntimeException('Registrasi berubah; muat ulang data.');
+            }
+            $db->transCommit();
+            return ['id' => $regId, 'status' => 'CANCELLED'];
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            throw $exception;
+        }
     }
 
     /**
      * Mark sebagai COMPLETED. Optional auto-issue certificate.
      */
-    public function completeRegistration(int $regId, array $data = []): array
+    public function completeRegistration(int $regId, int $companyId, array $data = []): array
     {
-        $reg = $this->db()->table('training_registrations')->where('id', $regId)->get()->getRowArray();
+        $reg = $this->db()->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $reg) throw new \RuntimeException('Registration tidak ditemukan');
         if (! in_array($reg['status'], ['APPROVED','ATTENDING'], true)) {
             throw new \RuntimeException("Hanya APPROVED/ATTENDING yang bisa di-complete, current: {$reg['status']}");
         }
 
-        $training = $this->db()->table('trainings')->where('id', (int) $reg['training_id'])->get()->getRowArray();
+        $training = $this->db()->table('trainings')->where('id', (int) $reg['training_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $training) throw new \RuntimeException('Training tidak ditemukan');
         $now = date('Y-m-d H:i:s');
 
         $score = isset($data['final_score']) ? (float) $data['final_score'] : null;
@@ -132,8 +287,9 @@ class TrainingService
 
         // Update budget: reserved → used
         $cost = (float) $reg['cost'];
-        $this->updateBudgetReserved((int) $training['company_id'], $training['department_id'] ?? null, $cost, -1);
-        $this->updateBudgetUsed((int) $training['company_id'], $training['department_id'] ?? null, $cost, +1);
+        $budgetYear = (int) substr((string) $training['start_date'], 0, 4);
+        $this->updateBudgetReserved((int) $training['company_id'], $training['department_id'] ?? null, $cost, -1, $budgetYear);
+        $this->updateBudgetUsed((int) $training['company_id'], $training['department_id'] ?? null, $cost, +1, $budgetYear);
 
         // Auto-issue certificate kalau training mengeluarkan dan lulus
         $certId = null;
@@ -183,10 +339,34 @@ class TrainingService
     /**
      * Update reserved amount untuk budget. Dampak +1 untuk approve, -1 untuk complete/cancel.
      */
-    private function updateBudgetReserved(int $companyId, ?int $deptId, float $amount, int $direction): void
+    private function reserveBudget(int $companyId, ?int $deptId, int $year, float $amount): void
     {
         if ($amount <= 0) return;
-        $year = (int) date('Y');
+        $db = $this->db();
+        $builder = $db->table('training_budgets')->where('company_id', $companyId)->where('year', $year);
+        if ($deptId === null) $builder->where('department_id IS NULL');
+        else $builder->where('department_id', $deptId);
+        $budget = $builder->get()->getRowArray();
+        if (! $budget && $deptId !== null) {
+            $budget = $db->table('training_budgets')->where('company_id', $companyId)->where('year', $year)
+                ->where('department_id IS NULL')->get()->getRowArray();
+        }
+        if (! $budget) throw new \RuntimeException('Budget training belum dikonfigurasi.');
+        $available = (float) $budget['allocated_amount'] - (float) $budget['used_amount'] - (float) $budget['reserved_amount'];
+        if ($available + 0.005 < $amount) throw new \RuntimeException('Budget training tidak mencukupi.');
+        $oldReserved = (float) $budget['reserved_amount'];
+        $db->table('training_budgets')->where('id', (int) $budget['id'])
+            ->where('company_id', $companyId)->where('reserved_amount', $oldReserved)->update([
+                'reserved_amount' => $oldReserved + $amount,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        if ($db->affectedRows() !== 1) throw new \RuntimeException('Budget training berubah; muat ulang data.');
+    }
+
+    private function updateBudgetReserved(int $companyId, ?int $deptId, float $amount, int $direction, ?int $year = null): void
+    {
+        if ($amount <= 0) return;
+        $year ??= (int) date('Y');
         $delta = $direction * $amount;
 
         $b = $this->db()->table('training_budgets')
@@ -194,6 +374,10 @@ class TrainingService
         if ($deptId === null) $b->where('department_id IS NULL');
         else                  $b->where('department_id', $deptId);
         $row = $b->get()->getRowArray();
+        if (! $row && $deptId !== null) {
+            $row = $this->db()->table('training_budgets')->where('company_id', $companyId)
+                ->where('year', $year)->where('department_id IS NULL')->get()->getRowArray();
+        }
 
         if ($row) {
             $newReserved = max(0, (float) $row['reserved_amount'] + $delta);
@@ -216,10 +400,10 @@ class TrainingService
         }
     }
 
-    private function updateBudgetUsed(int $companyId, ?int $deptId, float $amount, int $direction): void
+    private function updateBudgetUsed(int $companyId, ?int $deptId, float $amount, int $direction, ?int $year = null): void
     {
         if ($amount <= 0) return;
-        $year = (int) date('Y');
+        $year ??= (int) date('Y');
         $delta = $direction * $amount;
 
         $b = $this->db()->table('training_budgets')
@@ -227,6 +411,10 @@ class TrainingService
         if ($deptId === null) $b->where('department_id IS NULL');
         else                  $b->where('department_id', $deptId);
         $row = $b->get()->getRowArray();
+        if (! $row && $deptId !== null) {
+            $row = $this->db()->table('training_budgets')->where('company_id', $companyId)
+                ->where('year', $year)->where('department_id IS NULL')->get()->getRowArray();
+        }
 
         if ($row) {
             $this->db()->table('training_budgets')->where('id', $row['id'])->update([

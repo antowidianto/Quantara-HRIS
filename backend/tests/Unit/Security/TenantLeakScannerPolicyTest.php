@@ -60,6 +60,14 @@ final class TenantLeakScannerPolicyTest extends TestCase
         self::assertNotContains('employees', $tables);
     }
 
+    public function testTenantRepositoriesAreInsideScannerBoundary(): void
+    {
+        $property = (new ReflectionClass(SecurityScanTenantLeaks::class))->getProperty('targetDirs');
+        $directories = $property->getValue($this->scanner());
+
+        self::assertContains('app/Repositories', $directories);
+    }
+
     /** @param array<int, string> $lines */
     private function queryWindow(array $lines): string
     {

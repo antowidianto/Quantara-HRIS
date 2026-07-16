@@ -16,12 +16,14 @@ final class ReimbursementPayrollBusinessFlowTest extends TestCase
             ['amount' => 250_000],
         ]));
 
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
-        self::assertNotFalse($payroll);
-        self::assertStringContainsString("->where('status', 'APPROVED')", $payroll);
-        self::assertStringContainsString("'code' => 'REIMB'", $payroll);
-        self::assertStringContainsString("'is_taxable' => 0", $payroll);
-        self::assertStringContainsString("'paid_in_payroll_period_id' => \$payrollPeriodId", $payroll);
+        $calculation = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
+        $finalization = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollFinalizationService.php');
+        self::assertNotFalse($calculation);
+        self::assertNotFalse($finalization);
+        self::assertStringContainsString("->where('status', 'APPROVED')", $calculation);
+        self::assertStringContainsString("'code' => 'REIMB'", $calculation);
+        self::assertStringContainsString("'is_taxable' => 0", $calculation);
+        self::assertStringContainsString("'paid_in_payroll_period_id' => \$periodId", $finalization);
 
         $settlement = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollPaymentSettlementService.php');
         self::assertNotFalse($settlement);
@@ -31,9 +33,13 @@ final class ReimbursementPayrollBusinessFlowTest extends TestCase
 
     public function testApprovalPersistsActorAndTimestamp(): void
     {
+        $workflow = file_get_contents(APPPATH . 'Libraries/Payroll/ReimbursementApprovalWorkflowService.php');
+        self::assertNotFalse($workflow);
+        self::assertStringContainsString("'approved_by' => \$userId", $workflow);
+        self::assertStringContainsString("'approved_at' => \$now", $workflow);
+
         $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Payroll/ReimbursementController.php');
         self::assertNotFalse($controller);
-        self::assertStringContainsString("'approved_by' => \$this->userId()", $controller);
-        self::assertStringContainsString("'approved_at' => date('Y-m-d H:i:s')", $controller);
+        self::assertStringContainsString('->approveEntity(', $controller);
     }
 }

@@ -262,7 +262,7 @@ class BusinessTripController extends ApiController
             return $this->fail('Forbidden', 403);
         }
         try {
-            $r = Services::businessTrip()->submit((int) $id, $this->userId());
+            $r = Services::businessTrip()->submit((int) $id, $this->requireCompanyId(), $this->userId());
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -280,7 +280,13 @@ class BusinessTripController extends ApiController
         if (! $row) return $this->response;
         $note = (string) ($this->getJsonInput()['note'] ?? '');
         try {
-            Services::businessTrip()->approve((int) $id, $this->userId(), $note);
+            $approval = Services::approval()->approveEntity(
+                'BUSINESS_TRIP', 'business_trips', (int) $id,
+                $this->requireCompanyId(), $this->userId(), $note
+            );
+            if (! ($approval['final'] ?? false)) return $this->ok($approval, 'Approval step recorded');
+        } catch (\App\Libraries\Attendance\BusinessTripApprovalException $e) {
+            return $this->fail($e->getMessage(), $e->status, $e->errorCode);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -289,7 +295,7 @@ class BusinessTripController extends ApiController
             after: ['note' => $note], description: "Approve SPPD {$row['reference_number']}",
             severity: 'NOTICE'
         );
-        return $this->ok(null, 'Approved');
+        return $this->ok(['approval' => $approval], 'Approved');
     }
 
     public function reject($id = null)
@@ -301,7 +307,12 @@ class BusinessTripController extends ApiController
         $reason = trim((string) ($data['reason'] ?? ''));
         if (strlen($reason) < 5) return $this->fail('Alasan minimal 5 karakter', 422);
         try {
-            Services::businessTrip()->reject((int) $id, $reason, $this->userId());
+            $approval = Services::approval()->rejectEntity(
+                'BUSINESS_TRIP', 'business_trips', (int) $id,
+                $this->requireCompanyId(), $this->userId(), $reason
+            );
+        } catch (\App\Libraries\Attendance\BusinessTripApprovalException $e) {
+            return $this->fail($e->getMessage(), $e->status, $e->errorCode);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -310,7 +321,7 @@ class BusinessTripController extends ApiController
             after: ['reason' => $reason], description: "Reject SPPD {$row['reference_number']}",
             severity: 'WARNING'
         );
-        return $this->ok(null, 'Rejected');
+        return $this->ok(['approval' => $approval], 'Rejected');
     }
 
     public function start($id = null)
@@ -323,7 +334,8 @@ class BusinessTripController extends ApiController
             return $this->fail('Forbidden', 403);
         }
         if ($row['status'] !== 'APPROVED') return $this->fail('Hanya APPROVED yang bisa di-start', 422);
-        \Config\Database::connect()->table('business_trips')->where('id', (int) $id)->update([
+        \Config\Database::connect()->table('business_trips')->where('id', (int) $id)
+            ->where('company_id', $this->requireCompanyId())->where('status', 'APPROVED')->update([
             'status' => 'IN_PROGRESS',
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -340,7 +352,7 @@ class BusinessTripController extends ApiController
             return $this->fail('Forbidden', 403);
         }
         try {
-            Services::businessTrip()->markCompleted((int) $id);
+            Services::businessTrip()->markCompleted((int) $id, $this->requireCompanyId());
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -360,7 +372,7 @@ class BusinessTripController extends ApiController
         $row = $this->loadTripOrFail((int) $id);
         if (! $row) return $this->response;
         try {
-            $r = Services::businessTrip()->settle((int) $id, $this->userId());
+            $r = Services::businessTrip()->settle((int) $id, $this->requireCompanyId(), $this->userId());
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -383,7 +395,7 @@ class BusinessTripController extends ApiController
         }
         $reason = (string) ($this->getJsonInput()['reason'] ?? '');
         try {
-            Services::businessTrip()->cancel((int) $id, $reason);
+            Services::businessTrip()->cancel((int) $id, $this->requireCompanyId(), $reason);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -396,7 +408,7 @@ class BusinessTripController extends ApiController
         if (! $row) return $this->response;
         $svc = Services::businessTrip();
         $html = $row['sppd_html'] ?? '';
-        if ($html === '') $html = $svc->renderSppdHtml((int) $id);
+        if ($html === '') $html = $svc->renderSppdHtml((int) $id, $this->requireCompanyId());
 
         $format = strtolower((string) $this->request->getGet('format')) ?: 'pdf';
         if ($format === 'html') {
@@ -463,7 +475,7 @@ class BusinessTripController extends ApiController
         $id = (int) $db->insertID();
 
         // Auto-recompute actual_amount
-        Services::businessTrip()->recomputeActual((int) $tripId);
+        Services::businessTrip()->recomputeActual((int) $tripId, $this->requireCompanyId());
         return $this->ok(['id' => $id], 'Expense added', 201);
     }
 
@@ -492,7 +504,7 @@ class BusinessTripController extends ApiController
             ->where('id', (int) $expenseId)
             ->where('company_id', $companyId)
             ->update($update);
-        Services::businessTrip()->recomputeActual((int) $row['business_trip_id']);
+        Services::businessTrip()->recomputeActual((int) $row['business_trip_id'], $this->requireCompanyId());
         return $this->ok(null, 'Updated');
     }
 
@@ -512,7 +524,7 @@ class BusinessTripController extends ApiController
             ->where('id', (int) $expenseId)
             ->where('company_id', $companyId)
             ->delete();
-        Services::businessTrip()->recomputeActual((int) $row['business_trip_id']);
+        Services::businessTrip()->recomputeActual((int) $row['business_trip_id'], $this->requireCompanyId());
         return $this->ok(null, 'Deleted');
     }
 

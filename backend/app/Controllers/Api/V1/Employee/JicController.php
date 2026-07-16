@@ -4,7 +4,11 @@ namespace App\Controllers\Api\V1\Employee;
 
 use App\Controllers\Api\V1\ApiController;
 use App\Libraries\Employee\JicService;
+use App\Libraries\Employee\JicNotificationService;
+use App\Libraries\Employee\JicWorkflowException;
+use App\Libraries\Employee\JicWorkflowService;
 use App\Repositories\Employee\JicQueryRepository;
+use App\Repositories\Employee\JicWorkflowRepository;
 use Config\Services;
 
 /**
@@ -167,15 +171,13 @@ class JicController extends ApiController
         ]);
         if (! $valid) return null;
 
-        $db   = \Config\Database::connect();
         $svc  = $this->svc();
+        $repository = new JicWorkflowRepository();
         $now  = date('Y-m-d H:i:s');
         $cid  = $this->companyId();
 
         // Cek employee ada & dalam company yg sama
-        $emp = $db->table('employees')->where('id', (int) $valid['employee_id'])
-            ->where('company_id', $cid)
-            ->where('deleted_at IS NULL')->get()->getRowArray();
+        $emp = $repository->employee((int) $valid['employee_id'], $cid);
         if (! $emp) return $this->fail('Karyawan tidak ditemukan', 404);
         if ($cid > 0 && (int) $emp['company_id'] !== $cid) {
             return $this->fail('Karyawan tidak ada di company Anda', 403);
@@ -188,16 +190,7 @@ class JicController extends ApiController
         }
 
         // Cek tidak ada JIC pending lain untuk karyawan ini
-        $pendingExists = $db->table('job_information_changes')
-            ->where('company_id', (int) ($cid ?: $emp['company_id']))
-            ->where('employee_id', (int) $emp['id'])
-            ->whereIn('status', [
-                'DRAFT', 'PENDING_SUPERVISOR', 'PENDING_DEPT_HEAD',
-                'PENDING_HR', 'PENDING_BOD', 'PENDING_EMPLOYEE_CONSENT', 'APPROVED',
-            ])
-            ->where('deleted_at IS NULL')
-            ->countAllResults();
-        if ($pendingExists > 0) {
+        if ($repository->hasActiveRequest((int) $emp['id'], $cid)) {
             return $this->fail(
                 'Sudah ada JIC aktif untuk karyawan ini. Selesaikan/batalkan dulu.',
                 409, 'DUPLICATE_REQUEST'
@@ -205,15 +198,12 @@ class JicController extends ApiController
         }
 
         // Snapshot lama
-        $snapshot = $svc->snapshotEmployee((int) $emp['id']);
+        $snapshot = $svc->snapshotEmployee((int) $emp['id'], $cid);
 
         // Resolve new tier (kalau new_position_id ada)
         $newTier = $snapshot['old_position_tier']; // default sama
         if (! empty($data['new_position_id'])) {
-            $row = $db->table('positions')->select('tier')
-                ->where('company_id', (int) ($cid ?: $emp['company_id']))
-                ->where('id', (int) $data['new_position_id'])->get()->getRowArray();
-            if ($row) $newTier = $row['tier'] ?? 'STAFF';
+            $newTier = $repository->positionTier((int) $data['new_position_id'], $cid) ?? $newTier;
         }
 
         // Klasifikasi change_type
@@ -284,8 +274,7 @@ class JicController extends ApiController
             'updated_at'               => $now,
         ]);
 
-        $db->table('job_information_changes')->insert($insert);
-        $jicId = (int) $db->insertID();
+        $jicId = $repository->create($insert, $cid);
 
         Services::audit()->forModule('JIC')->logCreate(
             'job_information_changes', $jicId, $insert,
@@ -309,7 +298,7 @@ class JicController extends ApiController
         if (! $row) return $this->fail('Tidak ditemukan atau tidak bisa diedit', 404);
 
         $data = $this->getJsonInput();
-        $db   = \Config\Database::connect();
+        $repository = new JicWorkflowRepository();
 
         // Hanya boleh edit field tertentu
         $editable = [
@@ -324,8 +313,7 @@ class JicController extends ApiController
 
         if (! empty($update)) {
             $update['updated_at'] = date('Y-m-d H:i:s');
-            $db->table('job_information_changes')->where('id', (int) $row['id'])
-                ->where('company_id', (int) $row['company_id'])->update($update);
+            $repository->update((int) $row['id'], (int) $row['company_id'], $update);
 
             Services::audit()->forModule('JIC')->logUpdate(
                 'job_information_changes', (int) $row['id'], $row, $update,
@@ -342,12 +330,7 @@ class JicController extends ApiController
         $row = $this->loadJicForEdit((int) $id);
         if (! $row) return $this->fail('Tidak ditemukan atau tidak bisa dihapus', 404);
 
-        \Config\Database::connect()
-            ->table('job_information_changes')->where('id', (int) $row['id'])
-            ->where('company_id', (int) $row['company_id'])->update([
-                'deleted_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
+        (new JicWorkflowRepository())->softDelete((int) $row['id'], (int) $row['company_id']);
 
         Services::audit()->forModule('JIC')->logDelete(
             'job_information_changes', (int) $row['id'], $row,
@@ -365,42 +348,15 @@ class JicController extends ApiController
         $row = $this->loadJicForEdit((int) $id);
         if (! $row) return $this->fail('Tidak ditemukan atau tidak bisa di-submit', 404);
 
-        // Validasi compliance sebelum submit
-        $svc    = $this->svc();
-        $errors = $svc->validateSupportingDocuments($row);
-
-        // UMP check
-        if ($row['ump_check_status'] === 'FAIL' && empty($row['ump_override_reason'])) {
-            $errors[] = sprintf(
-                'Upah baru (%s) di bawah UMP rujukan (%s). Isi `ump_override_reason` atau naikkan upah baru.',
-                number_format((float) $row['new_basic_salary'], 0, ',', '.'),
-                number_format((float) $row['ump_reference'], 0, ',', '.'),
-            );
+        try {
+            $result = (new JicWorkflowService())->submit($row);
+        } catch (JicWorkflowException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode, $exception->details);
         }
-        if (! empty($errors)) {
-            return $this->fail('Validasi gagal', 422, 'COMPLIANCE_FAILED', $errors);
-        }
-
-        $db  = \Config\Database::connect();
-        $now = date('Y-m-d H:i:s');
-
-        $jicNumber = $row['jic_number'] ?: $svc->generateJicNumber((int) $row['company_id']);
-        $update = [
-            'jic_number'   => $jicNumber,
-            'status'       => 'PENDING_SUPERVISOR',
-            'submitted_at' => $now,
-            'updated_at'   => $now,
-        ];
-        // Auto-bypass kalau override UMP
-        if ($row['ump_check_status'] === 'FAIL' && ! empty($row['ump_override_reason'])) {
-            $update['ump_check_status'] = 'OVERRIDE';
-        }
-
-        $db->table('job_information_changes')->where('id', (int) $row['id'])
-            ->where('company_id', (int) $row['company_id'])->update($update);
+        $jicNumber = $result['jic_number'];
 
         // Notify supervisor
-        $this->notifyApprover((int) $row['id'], 'PENDING_SUPERVISOR', (int) $row['company_id']);
+        (new JicNotificationService())->notifyApprover((int) $row['id'], 'PENDING_SUPERVISOR', (int) $row['company_id']);
 
         Services::audit()->forModule('JIC')->log(
             action: 'jic.submit',
@@ -425,125 +381,24 @@ class JicController extends ApiController
 
         $data = $this->getJsonInput();
         $note = trim((string) ($data['note'] ?? '')) ?: null;
-        $now  = date('Y-m-d H:i:s');
-        $db   = \Config\Database::connect();
         $userId = $this->userId();
-        $svc  = $this->svc();
-
-        switch ($row['status']) {
-            case 'PENDING_SUPERVISOR':
-                if (! $this->isSupervisorOf($userId, (int) $row['employee_id'])) {
-                    return $this->fail('Hanya atasan langsung yang dapat menyetujui di tahap ini', 403);
-                }
-                $db->table('job_information_changes')->where('id', (int) $row['id'])
-                    ->where('company_id', (int) $row['company_id'])->update([
-                    'status'              => 'PENDING_DEPT_HEAD',
-                    'supervisor_user_id'  => $userId,
-                    'supervisor_action_at'=> $now,
-                    'supervisor_decision' => 'APPROVED',
-                    'supervisor_note'     => $note,
-                    'updated_at'          => $now,
-                ]);
-                $this->notifyApprover((int) $row['id'], 'PENDING_DEPT_HEAD', (int) $row['company_id']);
-                break;
-
-            case 'PENDING_DEPT_HEAD':
-                if (! $this->isDeptHeadOf($userId, $row)) {
-                    return $this->fail('Hanya kepala departemen terkait yang dapat menyetujui di tahap ini', 403);
-                }
-                $db->table('job_information_changes')->where('id', (int) $row['id'])
-                    ->where('company_id', (int) $row['company_id'])->update([
-                    'status'              => 'PENDING_HR',
-                    'dept_head_user_id'   => $userId,
-                    'dept_head_action_at' => $now,
-                    'dept_head_decision'  => 'APPROVED',
-                    'dept_head_note'      => $note,
-                    'updated_at'          => $now,
-                ]);
-                $this->notifyApprover((int) $row['id'], 'PENDING_HR', (int) $row['company_id']);
-                break;
-
-            case 'PENDING_HR':
-                if (! $this->canActAsHr()) {
-                    return $this->fail('Hanya HR yang dapat menyetujui di tahap ini', 403);
-                }
-
-                // Tentukan next stage berdasar requirement BOD
-                $newTier = null;
-                if (! empty($row['new_position_id'])) {
-                    $r = $db->table('positions')->select('tier')
-                        ->where('id', (int) $row['new_position_id'])->get()->getRowArray();
-                    if ($r) $newTier = $r['tier'] ?? null;
-                }
-                $needsBod = $svc->requiresBodApproval(
-                    $row['change_type'], $newTier, (float) ($row['salary_change_pct'] ?? 0),
-                );
-                $needsConsent = ((int) ($row['employee_consent_required'] ?? 0) === 1)
-                    && ($row['employee_consent_status'] !== 'AGREED');
-
-                $nextStatus = $needsBod
-                    ? 'PENDING_BOD'
-                    : ($needsConsent ? 'PENDING_EMPLOYEE_CONSENT' : 'APPROVED');
-
-                $update = [
-                    'status'       => $nextStatus,
-                    'hr_user_id'   => $userId,
-                    'hr_action_at' => $now,
-                    'hr_decision'  => 'APPROVED',
-                    'hr_note'      => $note,
-                    'updated_at'   => $now,
-                ];
-
-                // Generate SK number kalau langsung APPROVED
-                if ($nextStatus === 'APPROVED' && empty($row['sk_number'])) {
-                    $update['sk_number']       = $this->generateSkNumber((int) $row['company_id']);
-                    $update['sk_generated_at'] = $now;
-                }
-
-                $db->table('job_information_changes')->where('id', (int) $row['id'])
-                    ->where('company_id', (int) $row['company_id'])->update($update);
-
-                if ($nextStatus === 'PENDING_BOD') {
-                    $this->notifyApprover((int) $row['id'], 'PENDING_BOD', (int) $row['company_id']);
-                } elseif ($nextStatus === 'PENDING_EMPLOYEE_CONSENT') {
-                    $this->notifyEmployeeConsent($row);
-                } else {
-                    $this->notifyEmployeeApproved((int) $row['id'], (int) $row['company_id']);
-                }
-                break;
-
-            case 'PENDING_BOD':
-                if (! $this->canActAsBod()) {
-                    return $this->fail('Hanya direksi/super admin yang dapat menyetujui di tahap ini', 403);
-                }
-                $needsConsent = ((int) ($row['employee_consent_required'] ?? 0) === 1)
-                    && ($row['employee_consent_status'] !== 'AGREED');
-                $nextStatus = $needsConsent ? 'PENDING_EMPLOYEE_CONSENT' : 'APPROVED';
-
-                $update = [
-                    'status'        => $nextStatus,
-                    'bod_user_id'   => $userId,
-                    'bod_action_at' => $now,
-                    'bod_decision'  => 'APPROVED',
-                    'bod_note'      => $note,
-                    'updated_at'    => $now,
-                ];
-                if ($nextStatus === 'APPROVED' && empty($row['sk_number'])) {
-                    $update['sk_number']       = $this->generateSkNumber((int) $row['company_id']);
-                    $update['sk_generated_at'] = $now;
-                }
-                $db->table('job_information_changes')->where('id', (int) $row['id'])
-                    ->where('company_id', (int) $row['company_id'])->update($update);
-
-                if ($nextStatus === 'PENDING_EMPLOYEE_CONSENT') {
-                    $this->notifyEmployeeConsent($row);
-                } else {
-                    $this->notifyEmployeeApproved((int) $row['id'], (int) $row['company_id']);
-                }
-                break;
-
-            default:
-                return $this->fail('Status saat ini tidak bisa di-approve: ' . $row['status'], 409, 'INVALID_STATE');
+        try {
+            $result = (new JicWorkflowService())->approve(
+                $row, $userId, $note,
+                $this->isSupervisorOf($userId, (int) $row['employee_id']),
+                $this->isDeptHeadOf($userId, $row),
+                $this->canActAsHr(),
+                $this->canActAsBod(),
+            );
+        } catch (JicWorkflowException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode, $exception->details);
+        }
+        if (str_starts_with($result['notification'], 'PENDING_') && $result['notification'] !== 'PENDING_EMPLOYEE_CONSENT') {
+            (new JicNotificationService())->notifyApprover((int) $row['id'], $result['notification'], (int) $row['company_id']);
+        } elseif ($result['notification'] === 'PENDING_EMPLOYEE_CONSENT') {
+            (new JicNotificationService())->notifyEmployeeConsent($row);
+        } elseif ($result['notification'] === 'APPROVED') {
+            (new JicNotificationService())->notifyEmployeeApproved((int) $row['id'], (int) $row['company_id']);
         }
 
         Services::audit()->forModule('JIC')->log(
@@ -554,9 +409,7 @@ class JicController extends ApiController
             severity: 'NOTICE',
         );
 
-        $newRow = $db->table('job_information_changes')->where('id', (int) $row['id'])
-            ->where('company_id', (int) $row['company_id'])->get()->getRowArray();
-        return $this->ok(['status' => $newRow['status'], 'sk_number' => $newRow['sk_number'] ?? null], 'Persetujuan tercatat');
+        return $this->ok(['status' => $result['status'], 'sk_number' => $result['sk_number']], 'Persetujuan tercatat');
     }
 
     /** POST /api/v1/jic/{id}/reject */
@@ -571,63 +424,22 @@ class JicController extends ApiController
         ]);
         if (! $valid) return null;
 
-        $now    = date('Y-m-d H:i:s');
         $userId = $this->userId();
-        $db     = \Config\Database::connect();
         $stage  = $row['status'];
-
-        $update = ['status' => 'REJECTED', 'updated_at' => $now];
-
-        switch ($stage) {
-            case 'PENDING_SUPERVISOR':
-                if (! $this->isSupervisorOf($userId, (int) $row['employee_id'])) {
-                    return $this->fail('Hanya atasan langsung yang bisa menolak', 403);
-                }
-                $update += [
-                    'supervisor_user_id'  => $userId,
-                    'supervisor_action_at'=> $now,
-                    'supervisor_decision' => 'REJECTED',
-                    'supervisor_note'     => $valid['note'],
-                ];
-                break;
-            case 'PENDING_DEPT_HEAD':
-                if (! $this->isDeptHeadOf($userId, $row)) {
-                    return $this->fail('Hanya kepala departemen yang bisa menolak', 403);
-                }
-                $update += [
-                    'dept_head_user_id'   => $userId,
-                    'dept_head_action_at' => $now,
-                    'dept_head_decision'  => 'REJECTED',
-                    'dept_head_note'      => $valid['note'],
-                ];
-                break;
-            case 'PENDING_HR':
-                if (! $this->canActAsHr()) return $this->fail('Hanya HR yang bisa menolak', 403);
-                $update += [
-                    'hr_user_id'   => $userId,
-                    'hr_action_at' => $now,
-                    'hr_decision'  => 'REJECTED',
-                    'hr_note'      => $valid['note'],
-                ];
-                break;
-            case 'PENDING_BOD':
-                if (! $this->canActAsBod()) return $this->fail('Hanya direksi yang bisa menolak', 403);
-                $update += [
-                    'bod_user_id'   => $userId,
-                    'bod_action_at' => $now,
-                    'bod_decision'  => 'REJECTED',
-                    'bod_note'      => $valid['note'],
-                ];
-                break;
-            default:
-                return $this->fail('Status saat ini tidak bisa di-reject: ' . $stage, 409, 'INVALID_STATE');
+        try {
+            (new JicWorkflowService())->reject(
+                $row, $userId, $valid['note'],
+                $this->isSupervisorOf($userId, (int) $row['employee_id']),
+                $this->isDeptHeadOf($userId, $row),
+                $this->canActAsHr(),
+                $this->canActAsBod(),
+            );
+        } catch (JicWorkflowException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode, $exception->details);
         }
 
-        $db->table('job_information_changes')->where('id', (int) $row['id'])
-            ->where('company_id', (int) $row['company_id'])->update($update);
-
         // Notify initiator + employee
-        $this->notifyRejected($row, $stage, $valid['note']);
+        (new JicNotificationService())->notifyRejected($row, $stage, $valid['note']);
 
         Services::audit()->forModule('JIC')->log(
             action: 'jic.reject',
@@ -653,13 +465,6 @@ class JicController extends ApiController
             return $this->fail('Status saat ini tidak menunggu consent: ' . $row['status'], 409, 'INVALID_STATE');
         }
 
-        // Pastikan caller adalah karyawan ybs
-        $db  = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', (int) $row['employee_id'])->get()->getRowArray();
-        if (! $emp || (int) ($emp['user_id'] ?? 0) !== $this->userId()) {
-            return $this->fail('Hanya karyawan yang bersangkutan yang dapat memberi persetujuan', 403);
-        }
-
         $data  = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'decision'    => 'required|in_list[AGREED,REJECTED]',
@@ -668,33 +473,11 @@ class JicController extends ApiController
         ]);
         if (! $valid) return null;
 
-        $now = date('Y-m-d H:i:s');
-        $update = [
-            'employee_consent_status'      => $valid['decision'],
-            'employee_consent_at'          => $now,
-            'employee_consent_note'        => $valid['note'] ?? null,
-            'employee_consent_signed_path' => $valid['signed_path'] ?? null,
-            'updated_at'                   => $now,
-        ];
-
-        if ($valid['decision'] === 'AGREED') {
-            // Move ke APPROVED
-            $update['status'] = 'APPROVED';
-            if (empty($row['sk_number'])) {
-                $update['sk_number']       = $this->generateSkNumber((int) $row['company_id']);
-                $update['sk_generated_at'] = $now;
-            }
-        } else {
-            // Penolakan karyawan = JIC otomatis ditolak.
-            // Sesuai asas konsensual, perusahaan tidak boleh paksakan demosi
-            // tanpa consent (kecuali disipliner — yang reason-nya beda).
-            $update['status'] = 'REJECTED';
-            $update['hr_decision'] = 'REJECTED';
-            $update['hr_note']     = ($update['hr_note'] ?? '') . "\n[Auto-reject] Karyawan menolak demosi: " . ($valid['note'] ?? '');
+        try {
+            $status = (new JicWorkflowService())->consent($row, $this->userId(), $valid);
+        } catch (JicWorkflowException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode, $exception->details);
         }
-
-        $db->table('job_information_changes')->where('id', (int) $row['id'])
-            ->where('company_id', (int) $row['company_id'])->update($update);
 
         Services::audit()->forModule('JIC')->log(
             action: 'jic.consent',
@@ -706,12 +489,12 @@ class JicController extends ApiController
         );
 
         if ($valid['decision'] === 'AGREED') {
-            $this->notifyEmployeeApproved((int) $row['id'], (int) $row['company_id']);
+            (new JicNotificationService())->notifyEmployeeApproved((int) $row['id'], (int) $row['company_id']);
         } else {
-            $this->notifyRejected($row, 'EMPLOYEE_CONSENT', $valid['note'] ?? 'Karyawan tidak setuju');
+            (new JicNotificationService())->notifyRejected($row, 'EMPLOYEE_CONSENT', $valid['note'] ?? 'Karyawan tidak setuju');
         }
 
-        return $this->ok(['status' => $update['status']], 'Persetujuan tercatat');
+        return $this->ok(['status' => $status], 'Persetujuan tercatat');
     }
 
     /** POST /api/v1/jic/{id}/cancel — initiator atau HR. */
@@ -720,30 +503,15 @@ class JicController extends ApiController
         $row = $this->loadJicForUser((int) $id);
         if (! $row) return $this->fail('Tidak ditemukan atau akses ditolak', 404);
 
-        if (in_array($row['status'], ['IMPLEMENTED', 'CANCELLED', 'REJECTED'], true)) {
-            return $this->fail('Tidak bisa cancel di status ' . $row['status'], 409, 'INVALID_STATE');
-        }
-
         $isHr = $this->canActAsHr();
-        $isInitiator = (int) ($row['created_by'] ?? 0) === $this->userId();
-        if (! ($isHr || $isInitiator)) {
-            return $this->fail('Hanya pembuat atau HR yang dapat membatalkan', 403);
-        }
-        // Setelah APPROVED, hanya HR yang bisa cancel
-        if ($row['status'] === 'APPROVED' && ! $isHr) {
-            return $this->fail('Setelah APPROVED hanya HR yang dapat membatalkan', 403);
-        }
-
         $data = $this->getJsonInput();
-        $now  = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('job_information_changes')
-            ->where('id', (int) $row['id'])->where('company_id', (int) $row['company_id'])->update([
-                'status'              => 'CANCELLED',
-                'cancelled_at'        => $now,
-                'cancelled_by'        => $this->userId(),
-                'cancellation_reason' => trim((string) ($data['note'] ?? '')) ?: null,
-                'updated_at'          => $now,
-            ]);
+        try {
+            (new JicWorkflowService())->cancel(
+                $row, $this->userId(), $isHr, trim((string) ($data['note'] ?? '')) ?: null,
+            );
+        } catch (JicWorkflowException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode, $exception->details);
+        }
 
         Services::audit()->forModule('JIC')->log(
             action: 'jic.cancel',
@@ -856,170 +624,6 @@ class JicController extends ApiController
         return $t->isSuperAdmin() || $t->hasPermission('jic.manage');
     }
 
-    private function generateSkNumber(int $companyId): string
-    {
-        $db    = \Config\Database::connect();
-        $year  = date('Y');
-        $month = date('m');
-        $like  = "SK-JIC/{$year}/{$month}/%";
-        $row   = $db->table('job_information_changes')
-            ->select('sk_number')
-            ->like('sk_number', $like, 'after')
-            ->where('company_id', $companyId)
-            ->orderBy('id', 'DESC')
-            ->limit(1)->get()->getRowArray();
-        $next = 1;
-        if ($row && preg_match('#/(\d+)$#', $row['sk_number'] ?? '', $m)) {
-            $next = (int) $m[1] + 1;
-        }
-        return sprintf('SK-JIC/%s/%s/%04d', $year, $month, $next);
-    }
-
-    private function notifyApprover(int $jicId, string $stage, int $companyId): void
-    {
-        $db  = \Config\Database::connect();
-        $row = $db->table('job_information_changes jic')
-            ->select('jic.*, e.full_name AS employee_name, e.supervisor_id, e.manager_id, e.department_id')
-            ->join('employees e', 'e.id = jic.employee_id AND e.company_id = jic.company_id', 'left')
-            ->where('jic.id', $jicId)->where('jic.company_id', $companyId)->get()->getRowArray();
-        if (! $row) return;
-
-        $title = 'Persetujuan JIC diperlukan';
-        $body  = sprintf(
-            'Pengajuan %s untuk %s, efektif %s.',
-            $this->changeTypeLabel($row['change_type']),
-            $row['employee_name'] ?? 'karyawan',
-            $row['effective_date'],
-        );
-        $payload = [
-            'jic_id'      => $jicId,
-            'jic_number'  => $row['jic_number'],
-            'change_type' => $row['change_type'],
-            'stage'       => $stage,
-        ];
-
-        $targets = [];
-        switch ($stage) {
-            case 'PENDING_SUPERVISOR':
-                $supEmpId = (int) ($row['supervisor_id'] ?? 0) ?: (int) ($row['manager_id'] ?? 0);
-                if ($supEmpId > 0) {
-                    $r = $db->table('employees')->select('user_id')
-                        ->where('id', $supEmpId)->where('company_id', $companyId)->get()->getRowArray();
-                    if ($r && ! empty($r['user_id'])) $targets[] = (int) $r['user_id'];
-                }
-                break;
-            case 'PENDING_DEPT_HEAD':
-                $depts = array_filter([
-                    (int) ($row['old_department_id'] ?? 0),
-                    (int) ($row['new_department_id'] ?? 0),
-                ]);
-                if (! empty($depts)) {
-                    $managers = $db->table('departments d')
-                        ->select('e.user_id')
-                        ->join('employees e', 'e.id = d.manager_employee_id AND e.company_id = d.company_id', 'left')
-                        ->whereIn('d.id', $depts)
-                        ->where('d.company_id', $companyId)
-                        ->get()->getResultArray();
-                    foreach ($managers as $m) {
-                        if (! empty($m['user_id'])) $targets[] = (int) $m['user_id'];
-                    }
-                }
-                break;
-            case 'PENDING_HR':
-            case 'PENDING_BOD':
-                $perm = $stage === 'PENDING_BOD' ? 'jic.manage' : 'jic.approve';
-                $hrUsers = $db->table('users u')
-                    ->select('u.id')
-                    ->join('role_permissions rp', 'rp.role_id = u.role_id', 'left')
-                    ->join('permissions p',       'p.id = rp.permission_id', 'left')
-                    ->where('u.company_id', (int) $row['company_id'])
-                    ->where('u.is_active', 1)
-                    ->where('p.slug', $perm)
-                    ->groupBy('u.id')->get()->getResultArray();
-                foreach ($hrUsers as $u) $targets[] = (int) $u['id'];
-                break;
-        }
-
-        $targets = array_unique(array_filter($targets));
-        foreach ($targets as $uid) {
-            Services::notification()->send(
-                $uid, (int) $row['company_id'],
-                'jic.pending', $title, $body, $payload,
-                null, true,
-            );
-        }
-    }
-
-    private function notifyEmployeeConsent(array $row): void
-    {
-        $db  = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', (int) $row['employee_id'])
-            ->where('company_id', (int) $row['company_id'])->get()->getRowArray();
-        if (! $emp || empty($emp['user_id'])) return;
-
-        Services::notification()->send(
-            (int) $emp['user_id'], (int) $row['company_id'],
-            'jic.consent_required',
-            'Persetujuan Anda dibutuhkan',
-            'HR mengajukan demosi yang menyangkut posisi/upah Anda. '
-            . 'Silakan baca detail dan berikan persetujuan/penolakan.',
-            ['jic_id' => (int) $row['id'], 'jic_number' => $row['jic_number']],
-            null, true,
-        );
-    }
-
-    private function notifyEmployeeApproved(int $jicId, int $companyId): void
-    {
-        $db  = \Config\Database::connect();
-        $row = $db->table('job_information_changes')->where('id', $jicId)
-            ->where('company_id', $companyId)->get()->getRowArray();
-        if (! $row) return;
-        $emp = $db->table('employees')->where('id', (int) $row['employee_id'])
-            ->where('company_id', $companyId)->get()->getRowArray();
-        if (! $emp || empty($emp['user_id'])) return;
-
-        Services::notification()->send(
-            (int) $emp['user_id'], (int) $row['company_id'],
-            'jic.approved',
-            'JIC Anda disetujui',
-            sprintf(
-                'Pengajuan %s untuk Anda telah disetujui (SK %s). Berlaku efektif %s.',
-                $this->changeTypeLabel($row['change_type']),
-                $row['sk_number'] ?? '-',
-                $row['effective_date'],
-            ),
-            [
-                'jic_id'      => $jicId,
-                'jic_number'  => $row['jic_number'],
-                'sk_number'   => $row['sk_number'],
-                'change_type' => $row['change_type'],
-            ],
-            null, true,
-        );
-    }
-
-    private function notifyRejected(array $row, string $stage, string $note): void
-    {
-        $db  = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', (int) $row['employee_id'])
-            ->where('company_id', (int) $row['company_id'])->get()->getRowArray();
-        $targets = [];
-        if ($emp && ! empty($emp['user_id'])) $targets[] = (int) $emp['user_id'];
-        if (! empty($row['created_by'])) $targets[] = (int) $row['created_by'];
-
-        $targets = array_unique(array_filter($targets));
-        foreach ($targets as $uid) {
-            Services::notification()->send(
-                $uid, (int) $row['company_id'],
-                'jic.rejected',
-                'JIC ditolak',
-                "Pengajuan JIC #{$row['id']} ditolak di tahap {$stage}. Alasan: " . mb_substr($note, 0, 200),
-                ['jic_id' => (int) $row['id'], 'stage' => $stage],
-                null, true,
-            );
-        }
-    }
-
     /**
      * Build response payload terstruktur untuk detail JIC.
      * Mengubah hasil flat join menjadi nested object yang rapi:
@@ -1039,32 +643,13 @@ class JicController extends ApiController
      */
     private function buildDetailPayload(array $row): array
     {
-        $db = \Config\Database::connect();
+        $companyId = (int) $row['company_id'];
+        $repository = new JicQueryRepository();
 
         // ─── Employee profile ringkas ──────────────────────────────
         // Hindari muat data sensitif (NIK ciphertext) ke FE; hanya
         // info kepegawaian dasar + masa kerja terhitung.
-        $emp = $db->table('employees e')
-            ->select(
-                'e.id, e.employee_number, e.full_name, e.first_name, e.last_name, '
-                . 'e.gender, e.email, e.phone, e.avatar_path, e.user_id, '
-                . 'e.employment_status, e.employment_type, e.is_active, '
-                . 'e.join_date, e.probation_end_date, e.contract_end_date, '
-                . 'e.resign_date, e.basic_salary, e.tax_method, e.ptkp_status, '
-                . 'e.education_level, e.marital_status, '
-                . 'b.name AS branch_name, '
-                . 'd.name AS department_name, '
-                . 'p.name AS position_name, p.tier AS position_tier, '
-                . 'g.name AS grade_name, '
-                . 'wl.name AS work_location_name, wl.type AS work_location_type'
-            )
-            ->join('branches b',     'b.id = e.branch_id',          'left')
-            ->join('departments d',  'd.id = e.department_id',      'left')
-            ->join('positions p',    'p.id = e.position_id',        'left')
-            ->join('job_grades g',   'g.id = e.job_grade_id',       'left')
-            ->join('work_locations wl', 'wl.id = e.work_location_id', 'left')
-            ->where('e.id', (int) $row['employee_id'])
-            ->get()->getRowArray() ?: [];
+        $emp = $repository->employeeProfile((int) $row['employee_id'], $companyId) ?? [];
 
         // Hitung masa kerja (years.months) dari join_date sampai sekarang
         // atau resign_date kalau sudah resign.
@@ -1087,60 +672,44 @@ class JicController extends ApiController
         }
 
         // ─── Dept head (dari dept lama / baru) ─────────────────────
-        $deptHeadOld = $this->loadDeptHeadDetail($db, (int) ($row['old_department_id'] ?? 0));
-        $deptHeadNew = $this->loadDeptHeadDetail($db, (int) ($row['new_department_id'] ?? 0));
+        $deptHeadOld = $repository->departmentHead((int) ($row['old_department_id'] ?? 0), $companyId);
+        $deptHeadNew = $repository->departmentHead((int) ($row['new_department_id'] ?? 0), $companyId);
 
         // ─── Supervisor & Manager detail ───────────────────────────
-        $supervisorOld = $this->loadEmployeeDetail($db, (int) ($row['old_supervisor_id'] ?? 0));
-        $supervisorNew = $this->loadEmployeeDetail($db, (int) ($row['new_supervisor_id'] ?? 0));
-        $managerOld    = $this->loadEmployeeDetail($db, (int) ($row['old_manager_id'] ?? 0));
-        $managerNew    = $this->loadEmployeeDetail($db, (int) ($row['new_manager_id'] ?? 0));
+        $supervisorOld = $repository->employeeDetail((int) ($row['old_supervisor_id'] ?? 0), $companyId);
+        $supervisorNew = $repository->employeeDetail((int) ($row['new_supervisor_id'] ?? 0), $companyId);
+        $managerOld    = $repository->employeeDetail((int) ($row['old_manager_id'] ?? 0), $companyId);
+        $managerNew    = $repository->employeeDetail((int) ($row['new_manager_id'] ?? 0), $companyId);
 
         // ─── Work location detail ──────────────────────────────────
-        $workLocOld = null;
-        if (! empty($row['old_work_location_id'])) {
-            $workLocOld = $db->table('work_locations')->select('id, code, name, type, address, city, province')
-                ->where('id', (int) $row['old_work_location_id'])->get()->getRowArray();
-        }
-        $workLocNew = null;
-        if (! empty($row['new_work_location_id'])) {
-            $workLocNew = $db->table('work_locations')->select('id, code, name, type, address, city, province')
-                ->where('id', (int) $row['new_work_location_id'])->get()->getRowArray();
-        }
+        $workLocOld = $repository->workLocation((int) ($row['old_work_location_id'] ?? 0), $companyId);
+        $workLocNew = $repository->workLocation((int) ($row['new_work_location_id'] ?? 0), $companyId);
 
         // ─── Initiator user ────────────────────────────────────────
-        $initiator = null;
-        if (! empty($row['created_by'])) {
-            $u = $db->table('users u')
-                ->select('u.id, u.name, u.email, e.full_name AS employee_name, e.employee_number')
-                ->join('employees e', 'e.user_id = u.id', 'left')
-                ->where('u.id', (int) $row['created_by'])
-                ->get()->getRowArray();
-            $initiator = $u ?: null;
-        }
+        $initiator = $repository->initiator((int) ($row['created_by'] ?? 0), $companyId);
 
         // ─── Workflow trail terstruktur ────────────────────────────
         $workflow = [
             'supervisor' => [
-                'user'        => $this->resolveActor($db, $row['supervisor_user_id'] ?? null),
+                'user'        => $repository->actor((int) ($row['supervisor_user_id'] ?? 0), $companyId),
                 'decision'    => $row['supervisor_decision'] ?? null,
                 'action_at'   => $row['supervisor_action_at'] ?? null,
                 'note'        => $row['supervisor_note'] ?? null,
             ],
             'dept_head' => [
-                'user'        => $this->resolveActor($db, $row['dept_head_user_id'] ?? null),
+                'user'        => $repository->actor((int) ($row['dept_head_user_id'] ?? 0), $companyId),
                 'decision'    => $row['dept_head_decision'] ?? null,
                 'action_at'   => $row['dept_head_action_at'] ?? null,
                 'note'        => $row['dept_head_note'] ?? null,
             ],
             'hr' => [
-                'user'        => $this->resolveActor($db, $row['hr_user_id'] ?? null),
+                'user'        => $repository->actor((int) ($row['hr_user_id'] ?? 0), $companyId),
                 'decision'    => $row['hr_decision'] ?? null,
                 'action_at'   => $row['hr_action_at'] ?? null,
                 'note'        => $row['hr_note'] ?? null,
             ],
             'bod' => [
-                'user'        => $this->resolveActor($db, $row['bod_user_id'] ?? null),
+                'user'        => $repository->actor((int) ($row['bod_user_id'] ?? 0), $companyId),
                 'decision'    => $row['bod_decision'] ?? null,
                 'action_at'   => $row['bod_action_at'] ?? null,
                 'note'        => $row['bod_note'] ?? null,
@@ -1154,12 +723,12 @@ class JicController extends ApiController
             ],
             'implementation' => [
                 'implemented_at'  => $row['implemented_at'] ?? null,
-                'implemented_by'  => $this->resolveActor($db, $row['implemented_by'] ?? null),
+                'implemented_by'  => $repository->actor((int) ($row['implemented_by'] ?? 0), $companyId),
                 'note'            => $row['implementation_note'] ?? null,
             ],
             'cancellation' => $row['cancelled_at'] ? [
                 'cancelled_at' => $row['cancelled_at'],
-                'cancelled_by' => $this->resolveActor($db, $row['cancelled_by'] ?? null),
+                'cancelled_by' => $repository->actor((int) ($row['cancelled_by'] ?? 0), $companyId),
                 'reason'       => $row['cancellation_reason'] ?? null,
             ] : null,
         ];
@@ -1266,79 +835,6 @@ class JicController extends ApiController
 
             'workflow'  => $workflow,
             'initiator' => $initiator,
-        ];
-    }
-
-    /**
-     * Lookup detail karyawan ringkas (untuk supervisor/manager/initiator).
-     *
-     * @return array{
-     *   employee_id:int, employee_number:?string, full_name:?string,
-     *   position:?string, department:?string, email:?string, phone:?string
-     * }|null
-     */
-    private function loadEmployeeDetail(\CodeIgniter\Database\BaseConnection $db, int $employeeId): ?array
-    {
-        if ($employeeId <= 0) return null;
-        $row = $db->table('employees e')
-            ->select(
-                'e.id, e.employee_number, e.full_name, e.email, e.phone, e.user_id, '
-                . 'p.name AS position_name, p.tier AS position_tier, '
-                . 'd.name AS department_name'
-            )
-            ->join('positions p',   'p.id = e.position_id',   'left')
-            ->join('departments d', 'd.id = e.department_id', 'left')
-            ->where('e.id', $employeeId)
-            ->get()->getRowArray();
-        if (! $row) return null;
-
-        return [
-            'employee_id'     => (int) $row['id'],
-            'employee_number' => $row['employee_number'],
-            'full_name'       => $row['full_name'],
-            'email'           => $row['email'],
-            'phone'           => $row['phone'],
-            'position'        => $row['position_name'],
-            'position_tier'   => $row['position_tier'],
-            'department'      => $row['department_name'],
-            'user_id'         => $row['user_id'] ? (int) $row['user_id'] : null,
-        ];
-    }
-
-    /** Lookup kepala departemen (manager_employee_id) lengkap dengan jabatan. */
-    private function loadDeptHeadDetail(\CodeIgniter\Database\BaseConnection $db, int $departmentId): ?array
-    {
-        if ($departmentId <= 0) return null;
-        $dept = $db->table('departments')->select('manager_employee_id')
-            ->where('id', $departmentId)->get()->getRowArray();
-        if (! $dept || empty($dept['manager_employee_id'])) return null;
-        return $this->loadEmployeeDetail($db, (int) $dept['manager_employee_id']);
-    }
-
-    /** Resolve user ID jadi { id, name, email, employee_number?, position? }. */
-    private function resolveActor(\CodeIgniter\Database\BaseConnection $db, $userId): ?array
-    {
-        $userId = (int) $userId;
-        if ($userId <= 0) return null;
-        $row = $db->table('users u')
-            ->select(
-                'u.id, u.name, u.email, '
-                . 'e.id AS employee_id, e.employee_number, e.full_name AS employee_name, '
-                . 'p.name AS position_name'
-            )
-            ->join('employees e', 'e.user_id = u.id', 'left')
-            ->join('positions p', 'p.id = e.position_id', 'left')
-            ->where('u.id', $userId)
-            ->get()->getRowArray();
-        if (! $row) return null;
-        return [
-            'user_id'         => (int) $row['id'],
-            'name'            => $row['name'],
-            'email'           => $row['email'],
-            'employee_id'     => $row['employee_id'] ? (int) $row['employee_id'] : null,
-            'employee_number' => $row['employee_number'],
-            'employee_name'   => $row['employee_name'],
-            'position'        => $row['position_name'],
         ];
     }
 

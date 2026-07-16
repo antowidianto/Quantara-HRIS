@@ -61,7 +61,7 @@ final class LifecycleRoutes
         // â”€â”€â”€ Bonus Engine (Sprint 16+) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         // Modul P3 baru untuk handle bonus selain THR & insentif (annual,
         // KPI, milestone, sign-on, retention). Workflow run:
-        //   DRAFT â†’ CALCULATED â†’ APPROVED â†’ PAID. Lihat docs/BONUS_ENGINE.md.
+        //   DRAFT -> CALCULATED -> PENDING_APPROVAL -> APPROVED -> PAID.
         $routes->post('bonus-schemes/preview',                  'Payroll\BonusController::previewScheme', ['filter' => 'permission:bonus.manage']);
         $routes->get('bonus-schemes',                           'Payroll\BonusController::listSchemes', ['filter' => 'permission:bonus.view']);
         $routes->post('bonus-schemes',                          'Payroll\BonusController::createScheme', ['filter' => 'permission:bonus.manage']);
@@ -76,8 +76,8 @@ final class LifecycleRoutes
         $routes->delete('bonus-runs/(:num)',                    'Payroll\BonusController::deleteRun/$1', ['filter' => 'permission:bonus.manage']);
         $routes->post('bonus-runs/(:num)/calculate',            'Payroll\BonusController::calculateRun/$1',
             ['filter' => ['permission:bonus.manage', 'idempotency:required']]);
-        $routes->post('bonus-runs/(:num)/approve',              'Payroll\BonusController::approveRun/$1',
-            ['filter' => ['permission:bonus.approve', 'idempotency:required']]);
+        $routes->post('bonus-runs/(:num)/submit',               'Payroll\BonusController::submitRun/$1',
+            ['filter' => ['permission:bonus.manage', 'idempotency:required']]);
         $routes->post('bonus-runs/(:num)/mark-paid',            'Payroll\BonusController::markRunPaid/$1',
             ['filter' => ['permission:bonus.approve', 'idempotency:required']]);
         $routes->post('bonus-runs/(:num)/cancel',               'Payroll\BonusController::cancelRun/$1',
@@ -256,7 +256,7 @@ final class LifecycleRoutes
         $routes->get('generated-contracts',                  'Lifecycle\GeneratedContractController::index', ['filter' => 'permission:contract.generate']);
         $routes->get('generated-contracts/(:num)',           'Lifecycle\GeneratedContractController::show/$1', ['filter' => 'permission:contract.generate']);
         $routes->get('generated-contracts/(:num)/html',      'Lifecycle\GeneratedContractController::html/$1', ['filter' => 'permission:contract.generate']);
-        $routes->put('generated-contracts/(:num)/status',    'Lifecycle\GeneratedContractController::updateStatus/$1', ['filter' => 'permission:contract.generate']);
+        $routes->put('generated-contracts/(:num)/status',    'Lifecycle\GeneratedContractController::updateStatus/$1', ['filter' => ['permission:contract.generate', 'idempotency:required']]);
         $routes->delete('generated-contracts/(:num)',        'Lifecycle\GeneratedContractController::delete/$1', ['filter' => 'permission:contract.generate']);
         // Tanda tangan digital kontrak oleh karyawan
         $routes->post('generated-contracts/(:num)/sign',     'Lifecycle\GeneratedContractController::sign/$1', ['filter' => ['ownership:employee', 'idempotency:required']]);

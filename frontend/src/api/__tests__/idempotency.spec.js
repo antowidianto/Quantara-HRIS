@@ -14,6 +14,7 @@ describe('web idempotency policy', () => {
     expect(requiresIdempotencyKey('post', '/payroll-periods/7/approve')).toBe(true)
     expect(requiresIdempotencyKey('post', '/loans')).toBe(true)
     expect(requiresIdempotencyKey('post', '/bonus-runs/7/mark-paid')).toBe(true)
+    expect(requiresIdempotencyKey('post', '/bonus-runs/7/submit')).toBe(true)
     expect(requiresIdempotencyKey('post', '/careers/account/offers/7/respond')).toBe(true)
     expect(requiresIdempotencyKey('post', '/compensation-reviews')).toBe(true)
     expect(requiresIdempotencyKey('post', '/compensation-reviews/7/proposals')).toBe(true)

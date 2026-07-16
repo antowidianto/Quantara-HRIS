@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Attendance\AttendanceChangeApprovalException;
 use Config\Services;
 
 /**
@@ -227,8 +228,29 @@ class AttendanceChangeRequestController extends ApiController
         $db->table('attendance_change_requests')->insert($insert);
         $id = (int) $db->insertID();
 
-        // Notifikasi ke approver di company + branch yang sama (atau HR pusat)
-        $this->notifyApprovers($companyId, $branchId, $id, $emp['full_name'], $workDate, $type);
+        try {
+            $approval = Services::approval()->start([
+                'company_id' => $companyId,
+                'module' => 'ATTENDANCE_CHANGE',
+                'entity_table' => 'attendance_change_requests',
+                'entity_id' => $id,
+                'employee_id' => $employeeId,
+                'meta' => [
+                    'work_date' => $workDate,
+                    'change_type' => $type,
+                    'branch_id' => $branchId,
+                ],
+            ]);
+        } catch (\Throwable $exception) {
+            // Jangan tinggalkan transaksi domain tanpa workflow approval.
+            $db->table('attendance_change_requests')->where('id', $id)
+                ->where('company_id', $companyId)->delete();
+            return $this->fail(
+                'Gagal membuat workflow approval: ' . $exception->getMessage(),
+                500,
+                'APPROVAL_START_FAILED'
+            );
+        }
 
         Services::audit()
             ->forModule('ATTENDANCE')
@@ -242,204 +264,83 @@ class AttendanceChangeRequestController extends ApiController
             'id'             => $id,
             'request_number' => $reqNumber,
             'status'         => 'PENDING',
+            'approval'       => $approval,
         ], 'Pengajuan dibuat', 201);
     }
 
     public function approve($id = null)
     {
         $id = (int) $id;
-        $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $cr = $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
-        if (! $cr) return $this->fail('Pengajuan tidak ditemukan', 404);
-        if ($cr['status'] !== 'PENDING') {
-            return $this->fail('Pengajuan tidak dalam status PENDING', 422, 'NOT_PENDING');
-        }
+        if ($companyId === null) return null;
+        $db = \Config\Database::connect();
+        $request = $db->table('attendance_change_requests')->where('id', $id)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $request) return $this->fail('Pengajuan tidak ditemukan', 404);
         if (! $this->tenant()->canAccessBranch(
-            (int) $cr['company_id'],
-            isset($cr['branch_id']) ? (int) $cr['branch_id'] : null
-        )) {
-            return $this->fail('Forbidden: pengajuan di luar scope Anda', 403, 'OUT_OF_SCOPE');
-        }
-        if (! $this->tenant()->hasPermission('attendance.approve_change')) {
-            return $this->fail('Anda tidak punya hak menyetujui pengajuan absensi', 403, 'NO_APPROVE_PERMISSION');
-        }
-        // Defensive: tidak boleh approve pengajuan sendiri.
-        if ((int) $cr['employee_id'] === (int) $this->tenant()->getEmployeeId()) {
-            return $this->fail('Tidak boleh menyetujui pengajuan sendiri', 422, 'SELF_APPROVAL');
-        }
+            (int) $request['company_id'],
+            isset($request['branch_id']) ? (int) $request['branch_id'] : null
+        )) return $this->fail('Forbidden: pengajuan di luar scope Anda', 403, 'OUT_OF_SCOPE');
 
-        $data = $this->getJsonInput();
-        $note = (string) ($data['review_note'] ?? '');
-
-        $db->transStart();
-
-        // Terapkan perubahan ke attendances
-        $att = $db->table('attendances')
-            ->where('company_id', $companyId)
-            ->where('employee_id', $cr['employee_id'])
-            ->where('work_date', $cr['work_date'])
-            ->get()->getRowArray();
-
-        $update = [
-            'updated_at'        => date('Y-m-d H:i:s'),
-            'is_corrected'      => 1,
-            'corrected_by'      => $this->userId(),
-            'correction_reason' => $cr['reason'],
-        ];
-        if (! empty($cr['requested_clock_in']))  $update['clock_in_at']  = $cr['requested_clock_in'];
-        if (! empty($cr['requested_clock_out'])) $update['clock_out_at'] = $cr['requested_clock_out'];
-        if (! empty($cr['requested_status']))    $update['status']       = $cr['requested_status'];
-
-        // Recompute work_minutes / late_minutes kalau in/out berubah.
-        $finalIn  = $update['clock_in_at']  ?? ($att['clock_in_at']  ?? null);
-        $finalOut = $update['clock_out_at'] ?? ($att['clock_out_at'] ?? null);
-        if ($finalIn && $finalOut) {
-            $update['work_minutes'] = max(0, (int) round((strtotime($finalOut) - strtotime($finalIn)) / 60));
-        }
-        if ($finalIn && empty($update['status']) && empty($att['status'])) {
-            $update['status'] = 'PRESENT';
-        }
-
-        if ($att) {
-            $db->table('attendances')->where('id', $att['id'])->where('company_id', $companyId)->update($update);
-            $attId = (int) $att['id'];
-        } else {
-            $insert = array_merge([
-                'company_id'   => $cr['company_id'],
-                'employee_id'  => $cr['employee_id'],
-                'work_date'    => $cr['work_date'],
-                'clock_in_at'  => $cr['requested_clock_in'],
-                'clock_out_at' => $cr['requested_clock_out'],
-                'status'       => $cr['requested_status'] ?: 'PRESENT',
-                'is_corrected' => 1,
-                'corrected_by' => $this->userId(),
-                'correction_reason' => $cr['reason'],
-                'created_at'   => date('Y-m-d H:i:s'),
-                'updated_at'   => date('Y-m-d H:i:s'),
-            ]);
-            if ($insert['clock_in_at'] && $insert['clock_out_at']) {
-                $insert['work_minutes'] = max(0, (int) round(
-                    (strtotime($insert['clock_out_at']) - strtotime($insert['clock_in_at'])) / 60
-                ));
-            }
-            $db->table('attendances')->insert($insert);
-            $attId = (int) $db->insertID();
-        }
-
-        $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->update([
-            'status'        => 'APPROVED',
-            'reviewer_id'   => $this->userId(),
-            'reviewed_at'   => date('Y-m-d H:i:s'),
-            'review_note'   => $note,
-            'attendance_id' => $attId,
-            'updated_at'    => date('Y-m-d H:i:s'),
-        ]);
-
-        $db->transComplete();
-        if ($db->transStatus() === false) {
-            return $this->fail('Gagal menyimpan persetujuan', 500, 'TX_FAILED');
-        }
-
-        // Notifikasi ke karyawan
-        $emp = $db->table('employees')->where('id', $cr['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
-        if ($emp && ! empty($emp['user_id'])) {
-            Services::notification()->send(
-                (int) $emp['user_id'],
-                (int) $cr['company_id'],
-                'attendance.change.approved',
-                'Pengajuan perubahan absen disetujui',
-                "Pengajuan {$cr['request_number']} untuk tanggal {$cr['work_date']} telah disetujui",
-                ['change_request_id' => $id, 'attendance_id' => $attId],
-                '/attendance/my-changes',
-                true
+        $note = trim((string) ($this->getJsonInput()['review_note'] ?? ''));
+        try {
+            $approval = Services::approval()->approveEntity(
+                'ATTENDANCE_CHANGE', 'attendance_change_requests', $id,
+                $companyId, $this->userId(), $note
             );
+        } catch (AttendanceChangeApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+        } catch (\Throwable $exception) {
+            return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
+        }
+        if (! ($approval['final'] ?? false)) {
+            Services::audit()->forModule('ATTENDANCE')->logApprove(
+                'approval_request', (int) $approval['request_id'], $approval,
+                'Menyetujui satu step perubahan absensi'
+            );
+            return $this->ok($approval, 'Approval step recorded');
         }
 
-        Services::audit()
-            ->forModule('ATTENDANCE')
-            ->logApprove(
-                'attendance_change_request',
-                $id,
-                $cr,
-                "Menyetujui pengajuan {$cr['request_number']}: {$note}"
-            );
-
-        // Sprint 15+ — webhook outbound `attendance.change_approved`
-        $this->dispatchWebhook(
-            \App\Constants\WebhookEvent::ATTENDANCE_CHANGE_APPROVED,
-            (int) $cr['company_id'],
-            [
-                'change_request_id' => $id,
-                'request_number'    => $cr['request_number'] ?? null,
-                'attendance_id'     => $attId,
-                'employee_id'       => (int) $cr['employee_id'],
-                'work_date'         => $cr['work_date'],
-                'requested_clock_in'  => $cr['requested_clock_in'] ?? null,
-                'requested_clock_out' => $cr['requested_clock_out'] ?? null,
-                'requested_status'  => $cr['requested_status'] ?? null,
-                'approved_by'       => $this->userId(),
-                'approved_at'       => date('c'),
-            ],
+        $result = $approval['domain_result'];
+        $change = $result['request'];
+        $attendanceId = (int) $result['attendance_id'];
+        Services::audit()->forModule('ATTENDANCE')->logApprove(
+            'attendance_change_request', $id, $change,
+            "Menyetujui pengajuan {$change['request_number']}: {$note}"
         );
-
-        return $this->ok(['attendance_id' => $attId], 'Pengajuan disetujui & absensi diperbarui');
+        return $this->ok(['approval' => $approval, 'attendance_id' => $attendanceId], 'Pengajuan disetujui & absensi diperbarui');
     }
 
     public function reject($id = null)
     {
         $id = (int) $id;
-        $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $cr = $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
-        if (! $cr) return $this->fail('Pengajuan tidak ditemukan', 404);
-        if ($cr['status'] !== 'PENDING') {
-            return $this->fail('Pengajuan tidak dalam status PENDING', 422, 'NOT_PENDING');
-        }
+        if ($companyId === null) return null;
+        $db = \Config\Database::connect();
+        $request = $db->table('attendance_change_requests')->where('id', $id)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $request) return $this->fail('Pengajuan tidak ditemukan', 404);
         if (! $this->tenant()->canAccessBranch(
-            (int) $cr['company_id'],
-            isset($cr['branch_id']) ? (int) $cr['branch_id'] : null
-        )) {
-            return $this->fail('Forbidden: pengajuan di luar scope Anda', 403, 'OUT_OF_SCOPE');
-        }
-        if (! $this->tenant()->hasPermission('attendance.approve_change')) {
-            return $this->fail('Anda tidak punya hak menolak pengajuan absensi', 403, 'NO_APPROVE_PERMISSION');
-        }
-
-        $data = $this->getJsonInput();
-        $note = trim((string) ($data['review_note'] ?? ''));
-        if ($note === '') {
-            return $this->fail('Alasan penolakan wajib diisi', 422, 'REASON_REQUIRED');
-        }
-
-        $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->update([
-            'status'      => 'REJECTED',
-            'reviewer_id' => $this->userId(),
-            'reviewed_at' => date('Y-m-d H:i:s'),
-            'review_note' => $note,
-            'updated_at'  => date('Y-m-d H:i:s'),
-        ]);
-
-        // Notifikasi ke karyawan
-        $emp = $db->table('employees')->where('id', $cr['employee_id'])->where('company_id', $companyId)->get()->getRowArray();
-        if ($emp && ! empty($emp['user_id'])) {
-            Services::notification()->send(
-                (int) $emp['user_id'],
-                (int) $cr['company_id'],
-                'attendance.change.rejected',
-                'Pengajuan perubahan absen ditolak',
-                "Pengajuan {$cr['request_number']} ditolak: {$note}",
-                ['change_request_id' => $id],
-                '/attendance/my-changes',
-                true
+            (int) $request['company_id'],
+            isset($request['branch_id']) ? (int) $request['branch_id'] : null
+        )) return $this->fail('Forbidden: pengajuan di luar scope Anda', 403, 'OUT_OF_SCOPE');
+        $note = trim((string) ($this->getJsonInput()['review_note'] ?? ''));
+        try {
+            $approval = Services::approval()->rejectEntity(
+                'ATTENDANCE_CHANGE', 'attendance_change_requests', $id,
+                $companyId, $this->userId(), $note
             );
+        } catch (AttendanceChangeApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+        } catch (\Throwable $exception) {
+            return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
         }
-
-        Services::audit()
-            ->forModule('ATTENDANCE')
-            ->logReject('attendance_change_request', $id, $cr, $note);
-
-        return $this->ok(null, 'Pengajuan ditolak');
+        $result = $approval['domain_result'];
+        $change = $result['request'];
+        Services::audit()->forModule('ATTENDANCE')->logReject(
+            'attendance_change_request', $id, $change, $note
+        );
+        return $this->ok(['approval' => $approval], 'Pengajuan ditolak');
     }
 
     /**
@@ -458,10 +359,23 @@ class AttendanceChangeRequestController extends ApiController
         if ($cr['status'] !== 'PENDING') {
             return $this->fail('Pengajuan tidak dalam status PENDING', 422, 'NOT_PENDING');
         }
-        $db->table('attendance_change_requests')->where('id', $id)->where('company_id', $companyId)->update([
-            'status'     => 'CANCELLED',
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        $db->transBegin();
+        try {
+            $db->table('attendance_change_requests')->where('id', $id)
+                ->where('company_id', $companyId)->where('status', 'PENDING')->update([
+                    'status' => 'CANCELLED',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            if ($db->affectedRows() !== 1) throw new \RuntimeException('Request berubah; muat ulang data');
+            Services::approval()->cancelEntity(
+                'ATTENDANCE_CHANGE', 'attendance_change_requests', $id, $companyId
+            );
+            if (! $db->transStatus()) throw new \RuntimeException('Gagal membatalkan workflow');
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            return $this->fail($exception->getMessage(), 409, 'CANCEL_CONFLICT');
+        }
         Services::audit()
             ->forModule('ATTENDANCE')
             ->log(

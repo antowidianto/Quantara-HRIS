@@ -127,9 +127,9 @@ class ApprovalAndContractSeeder extends Seeder
             ],
             [
                 'code' => 'OT-LONG',
-                'name' => 'Lembur Panjang (> 4 jam) — tambah HR',
+                'name' => 'Lembur Hari Libur (> 4 jam) — tambah HR',
                 'module' => 'OVERTIME',
-                'description' => 'Lembur lebih dari 4 jam butuh persetujuan HR.',
+                'description' => 'Hari kerja tetap hard stop 4 jam. Step HR ini untuk lembur hari istirahat/libur resmi lebih dari 4 jam.',
                 'is_default' => 0,
                 'steps' => [
                     ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
@@ -149,6 +149,168 @@ class ApprovalAndContractSeeder extends Seeder
                     ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
                 ],
             ],
+            // TRANSAKSI FINANSIAL
+            [
+                'code' => 'REIMBURSE-DEFAULT',
+                'name' => 'Reimbursement (Atasan -> Finance jika > Rp1 juta)',
+                'module' => 'REIMBURSEMENT',
+                'description' => 'Four-eyes untuk klaim; Finance wajib untuk nilai material.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
+                        'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 1000000],
+                ],
+            ],
+            [
+                'code' => 'LOAN-DEFAULT',
+                'name' => 'Pinjaman Karyawan (Atasan -> HR -> Finance)',
+                'module' => 'LOAN',
+                'description' => 'Atasan menilai kebutuhan, HR eligibility, Finance kapasitas dan jadwal potong.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                    ['name' => 'Verifikasi Eligibility HR', 'approver_type' => 'HR'],
+                    ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
+                ],
+            ],
+            [
+                'code' => 'SPPD-DEFAULT',
+                'name' => 'Perjalanan Dinas (Atasan -> Dept Head -> Finance)',
+                'module' => 'BUSINESS_TRIP',
+                'description' => 'Chain konservatif FMCG untuk otorisasi tugas, budget owner, dan uang muka.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                    ['name' => 'Persetujuan Department Head', 'approver_type' => 'DEPARTMENT_HEAD'],
+                    ['name' => 'Verifikasi Advance Finance', 'approver_type' => 'FINANCE'],
+                ],
+            ],
+            [
+                'code' => 'BONUS-DEFAULT',
+                'name' => 'Bonus FMCG (HR -> Finance -> Direksi jika material)',
+                'module' => 'BONUS',
+                'description' => 'Maker-checker bonus: HR memverifikasi populasi, Finance memverifikasi budget, direksi untuk nilai material.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
+                    ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 100000000],
+                ],
+            ],
+            [
+                'code' => 'PAYADJ-DEFAULT',
+                'name' => 'Koreksi Payroll (HR -> Finance -> Direksi jika material)',
+                'module' => 'PAYROLL_ADJUSTMENT',
+                'description' => 'Koreksi payroll historis dan reversal wajib maker-checker serta validasi periode ulang.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR Payroll', 'approver_type' => 'HR'],
+                    ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 10000000],
+                ],
+            ],
+            [
+                'code' => 'COMP-DEFAULT',
+                'name' => 'Perubahan Kompensasi (HR -> Finance -> Direksi jika material)',
+                'module' => 'COMPENSATION_REVIEW',
+                'description' => 'Perubahan upah memakai snapshot proposal, kontrol budget, dan effective-dated history.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR C&B', 'approver_type' => 'HR'],
+                    ['name' => 'Persetujuan Finance', 'approver_type' => 'FINANCE'],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 2000000],
+                ],
+            ],
+            [
+                'code' => 'TRAINING-DEFAULT',
+                'name' => 'Registrasi Training FMCG (Atasan -> Budget Owner -> HR/Finance)',
+                'module' => 'TRAINING_REGISTRATION',
+                'description' => 'Atasan menyetujui kebutuhan; training eksternal dan biaya material mendapat kontrol tambahan.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                    ['name' => 'Persetujuan Department Head', 'approver_type' => 'DEPARTMENT_HEAD',
+                        'condition_field' => 'is_external', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Verifikasi HR L&D', 'approver_type' => 'HR',
+                        'condition_field' => 'is_external', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
+                        'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 5000000],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'amount', 'condition_op' => '>', 'condition_value' => 20000000],
+                ],
+            ],
+            [
+                'code' => 'TIMESHEET-DEFAULT',
+                'name' => 'Timesheet Project (Atasan -> Dept Head jika overtime)',
+                'module' => 'TIMESHEET',
+                'description' => 'Atasan memverifikasi jam dan project; Department Head memeriksa pencatatan overtime.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                    ['name' => 'Verifikasi Department Head', 'approver_type' => 'DEPARTMENT_HEAD',
+                        'condition_field' => 'is_overtime', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'OFFER-DEFAULT',
+                'name' => 'Candidate Offer (Hiring Manager -> HR -> Finance/Director jika exception)',
+                'module' => 'CANDIDATE_OFFER',
+                'description' => 'Offer dalam salary band memerlukan Hiring Manager dan HR; salary/joining bonus exception menambah Finance dan Direksi.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Hiring Manager', 'approver_type' => 'HIRING_MANAGER'],
+                    ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
+                        'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'CONTRACT-DEFAULT',
+                'name' => 'Kontrak Kerja (HR -> Finance jika perubahan gaji -> Direksi jika exception)',
+                'module' => 'GENERATED_CONTRACT',
+                'description' => 'Pelepasan dan pencabutan kontrak memakai snapshot dokumen serta maker-checker berdasarkan dampak gaji.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Verifikasi HR', 'approver_type' => 'HR'],
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
+                        'condition_field' => 'is_salary_change', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'is_policy_exception', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
+            [
+                'code' => 'ASSET-DEFAULT',
+                'name' => 'Assignment/Return Asset (Atasan -> HR/Finance untuk hilang atau rusak)',
+                'module' => 'ASSET_TRANSACTION',
+                'description' => 'Transaksi standar disetujui atasan; kehilangan/kerusakan menambah HR dan Finance, serta Direksi untuk nilai tinggi.',
+                'is_default' => 1,
+                'fallback_strategy' => 'BLOCK',
+                'steps' => [
+                    ['name' => 'Persetujuan Atasan', 'approver_type' => 'SUPERVISOR'],
+                    ['name' => 'Verifikasi HR/Asset Custodian', 'approver_type' => 'HR',
+                        'condition_field' => 'is_loss_or_damage', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Verifikasi Finance', 'approver_type' => 'FINANCE',
+                        'condition_field' => 'is_loss_or_damage', 'condition_op' => '=', 'condition_value' => 1],
+                    ['name' => 'Persetujuan Direksi', 'approver_type' => 'ROLE', 'approver_role_id' => 1,
+                        'condition_field' => 'is_high_value_loss', 'condition_op' => '=', 'condition_value' => 1],
+                ],
+            ],
         ];
         foreach ($chains as $chain) {
             $exists = $this->db->table('approval_chains')
@@ -160,7 +322,7 @@ class ApprovalAndContractSeeder extends Seeder
             $steps = $chain['steps'];
             unset($chain['steps']);
             $chain['company_id']        = $companyId;
-            $chain['fallback_strategy'] = 'HR_FALLBACK';
+            $chain['fallback_strategy'] = $chain['fallback_strategy'] ?? 'HR_FALLBACK';
             $chain['is_active']         = 1;
             $chain['created_at']        = $now;
             $chain['updated_at']        = $now;

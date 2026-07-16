@@ -28,6 +28,15 @@ const moduleOptions = computed(() => [
   { value: 'ATTENDANCE_CHANGE', label: t('delegation.modules.attendance_change') },
   { value: 'REIMBURSEMENT', label: t('delegation.modules.reimbursement') },
   { value: 'LOAN', label: t('delegation.modules.loan') },
+  { value: 'BUSINESS_TRIP', label: 'Perjalanan Dinas / SPPD' },
+  { value: 'BONUS', label: 'Bonus' },
+  { value: 'PAYROLL_ADJUSTMENT', label: 'Koreksi Payroll' },
+  { value: 'COMPENSATION_REVIEW', label: 'Perubahan Kompensasi' },
+  { value: 'TRAINING_REGISTRATION', label: 'Registrasi Training' },
+  { value: 'TIMESHEET', label: 'Timesheet' },
+  { value: 'CANDIDATE_OFFER', label: 'Candidate Offer' },
+  { value: 'GENERATED_CONTRACT', label: 'Kontrak Kerja' },
+  { value: 'ASSET_TRANSACTION', label: 'Transaksi Asset' },
   { value: 'GENERIC', label: 'Generic' },
 ])
 
@@ -37,6 +46,15 @@ const moduleLabel = computed(() => ({
   ATTENDANCE_CHANGE: t('delegation.modules.attendance_change'),
   REIMBURSEMENT: t('delegation.modules.reimbursement'),
   LOAN: t('delegation.modules.loan'),
+  BUSINESS_TRIP: 'Perjalanan Dinas / SPPD',
+  BONUS: 'Bonus',
+  PAYROLL_ADJUSTMENT: 'Koreksi Payroll',
+  COMPENSATION_REVIEW: 'Perubahan Kompensasi',
+  TRAINING_REGISTRATION: 'Registrasi Training',
+  TIMESHEET: 'Timesheet',
+  CANDIDATE_OFFER: 'Candidate Offer',
+  GENERATED_CONTRACT: 'Kontrak Kerja',
+  ASSET_TRANSACTION: 'Transaksi Asset',
   GENERIC: 'Generic',
 }))
 

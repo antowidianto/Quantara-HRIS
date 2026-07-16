@@ -129,7 +129,7 @@ class ApprovalDelegationController extends ApiController
         }
         $module = trim((string) ($data['module'] ?? ''));
         $allowedModules = [
-            'LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN',
+            'LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN', 'BUSINESS_TRIP', 'BONUS', 'PAYROLL_ADJUSTMENT', 'COMPENSATION_REVIEW', 'TRAINING_REGISTRATION', 'TIMESHEET', 'CANDIDATE_OFFER',
             'MPP', 'RESIGNATION', 'TRANSFER', 'JIC', 'GENERIC',
         ];
         if ($module !== '' && ! in_array($module, $allowedModules, true)) {

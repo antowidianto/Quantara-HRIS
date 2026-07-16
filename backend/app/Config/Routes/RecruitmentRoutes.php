@@ -38,7 +38,7 @@ final class RecruitmentRoutes
 
         // ─── Candidate Offers (Sprint 2 / REC-1) ───────────────────
         // Letter-of-offer untuk kandidat di stage OFFER. Workflow:
-        //   DRAFT → SENT → ACCEPTED/REJECTED/EXPIRED/WITHDRAWN.
+        //   DRAFT → PENDING_APPROVAL → SENT → candidate decision/expiry.
         $routes->get('candidates/(:num)/offers',            'Recruitment\OfferController::listForCandidate/$1', ['filter' => 'permission:recruitment.offer.view']);
         $routes->post('candidates/(:num)/offers',           'Recruitment\OfferController::createForCandidate/$1', ['filter' => ['permission:recruitment.offer.manage', 'idempotency:required']]);
         $routes->get('offers',                              'Recruitment\OfferController::index', ['filter' => 'permission:recruitment.offer.view']);

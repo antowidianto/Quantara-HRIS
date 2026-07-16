@@ -2,6 +2,9 @@
 
 namespace App\Libraries\Recruitment;
 
+use CodeIgniter\Database\BaseBuilder;
+use CodeIgniter\Database\BaseConnection;
+
 /**
  * OnlineTestService — domain logic test online untuk recruitment.
  *
@@ -68,12 +71,13 @@ class OnlineTestService
      *
      * @throws \RuntimeException kalau assignment tidak boleh diambil
      */
-    public function startAttempt(int $assignmentId, ?string $ip = null, ?string $userAgent = null): array
+    public function startAttempt(int $assignmentId, int $companyId, ?string $ip = null, ?string $userAgent = null): array
     {
         $db = \Config\Database::connect();
 
         $assignment = $db->table('online_test_assignments')
             ->where('id', $assignmentId)
+            ->where('company_id', $companyId)
             ->get()->getRowArray();
         if (! $assignment) {
             throw new \RuntimeException('Assignment tidak ditemukan');
@@ -87,7 +91,7 @@ class OnlineTestService
         }
         if (! empty($assignment['due_at']) && $assignment['due_at'] < $now) {
             // Tandai expired
-            $db->table('online_test_assignments')->where('id', $assignmentId)->update([
+            $db->table('online_test_assignments')->where('id', $assignmentId)->where('company_id', $companyId)->update([
                 'status' => 'EXPIRED', 'updated_at' => $now,
             ]);
             throw new \RuntimeException('Test sudah lewat batas waktu (expired)');
@@ -98,20 +102,24 @@ class OnlineTestService
 
         // Cek apakah ada attempt IN_PROGRESS yang belum expired — kalau ada,
         // kembalikan attempt itu (resume), bukan bikin baru.
-        $existing = $db->table('online_test_attempts')
-            ->where('assignment_id', $assignmentId)
-            ->where('status', 'IN_PROGRESS')
-            ->orderBy('id', 'DESC')
+        $existing = $db->table('online_test_attempts a')
+            ->select('a.*')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.assignment_id', $assignmentId)
+            ->where('x.company_id', $companyId)
+            ->where('a.status', 'IN_PROGRESS')
+            ->orderBy('a.id', 'DESC')
             ->get()->getRowArray();
         if ($existing) {
             if ($existing['expires_at'] >= $now) {
-                return $this->buildAttemptView((int) $existing['id']);
+                return $this->buildAttemptView((int) $existing['id'], $companyId);
             }
             // Expired in progress — auto-submit dengan jawaban yang ada
-            $this->autoSubmitExpired((int) $existing['id']);
+            $this->autoSubmitExpired((int) $existing['id'], $companyId);
         }
 
-        $test = $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])->get()->getRowArray();
+        $test = $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $test) {
             throw new \RuntimeException('Test definition hilang');
         }
@@ -138,7 +146,9 @@ class OnlineTestService
         }
 
         $db->transStart();
-        $db->table('online_test_attempts')->insert([
+        $attemptInsert = $db->table('online_test_attempts');
+        $this->assertTenantCompanyId($companyId);
+        $attemptInsert->insert([
             'assignment_id'   => $assignmentId,
             'attempt_number'  => $attemptNumber,
             'status'          => 'IN_PROGRESS',
@@ -188,33 +198,33 @@ class OnlineTestService
         }
 
         // Update assignment counters
-        $db->table('online_test_assignments')->where('id', $assignmentId)->update([
+        $db->table('online_test_assignments')->where('id', $assignmentId)->where('company_id', $companyId)->update([
             'status'        => 'IN_PROGRESS',
             'attempts_used' => $attemptNumber,
             'updated_at'    => $now,
         ]);
         $db->transComplete();
 
-        return $this->buildAttemptView($attemptId);
+        return $this->buildAttemptView($attemptId, $companyId);
     }
 
     /**
      * View attempt — dengan correct_answer DI-STRIP supaya kandidat
      * tidak bisa lihat kunci jawaban via dev tools.
      */
-    public function buildAttemptView(int $attemptId): array
+    public function buildAttemptView(int $attemptId, int $companyId): array
     {
         $db = \Config\Database::connect();
-        $attempt = $db->table('online_test_attempts')->where('id', $attemptId)->get()->getRowArray();
+        $attempt = $this->tenantAttempt($db, $attemptId, $companyId);
         if (! $attempt) throw new \RuntimeException('Attempt tidak ditemukan');
 
         $assignment = $db->table('online_test_assignments')
-            ->where('id', (int) $attempt['assignment_id'])->get()->getRowArray();
-        $test = $assignment ? $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])->get()->getRowArray() : null;
+            ->where('id', (int) $attempt['assignment_id'])->where('company_id', $companyId)->get()->getRowArray();
+        $test = $assignment ? $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])
+            ->where('company_id', $companyId)->get()->getRowArray() : null;
 
-        $answers = $db->table('online_test_answers')
-            ->where('attempt_id', $attemptId)
-            ->orderBy('sort_order', 'ASC')
+        $answers = $this->tenantAnswers($db, $attemptId, $companyId)
+            ->orderBy('ans.sort_order', 'ASC')
             ->get()->getResultArray();
 
         $items = [];
@@ -266,10 +276,10 @@ class OnlineTestService
      * @param mixed $response — array (MCQ_MULTI), string (MCQ_SINGLE),
      *                          bool (TF), number (NUMERIC, LIKERT), string (essay)
      */
-    public function saveAnswer(int $attemptId, int $answerId, $response, int $timeSpentSec = 0): void
+    public function saveAnswer(int $attemptId, int $answerId, int $companyId, $response, int $timeSpentSec = 0): void
     {
         $db = \Config\Database::connect();
-        $attempt = $db->table('online_test_attempts')->where('id', $attemptId)->get()->getRowArray();
+        $attempt = $this->tenantAttempt($db, $attemptId, $companyId);
         if (! $attempt) throw new \RuntimeException('Attempt tidak ditemukan');
         if ($attempt['status'] !== 'IN_PROGRESS') {
             throw new \RuntimeException('Attempt sudah disubmit / tidak in progress');
@@ -277,19 +287,17 @@ class OnlineTestService
         $now = date('Y-m-d H:i:s');
         if ($attempt['expires_at'] < $now) {
             // Auto-submit kalau ekspired sebelum saving
-            $this->autoSubmitExpired($attemptId);
+            $this->autoSubmitExpired($attemptId, $companyId);
             throw new \RuntimeException('Waktu test sudah habis');
         }
 
-        $exists = $db->table('online_test_answers')
-            ->where('id', $answerId)
-            ->where('attempt_id', $attemptId)
-            ->countAllResults() > 0;
+        $exists = $this->tenantAnswers($db, $attemptId, $companyId)
+            ->where('ans.id', $answerId)->countAllResults() > 0;
         if (! $exists) {
             throw new \RuntimeException('Answer slot tidak valid');
         }
 
-        $db->table('online_test_answers')->where('id', $answerId)->update([
+        $db->table('online_test_answers')->where('id', $answerId)->where('attempt_id', $attemptId)->update([
             'response'       => json_encode($response, JSON_UNESCAPED_UNICODE),
             'time_spent_sec' => max(0, $timeSpentSec),
             'updated_at'     => $now,
@@ -300,23 +308,22 @@ class OnlineTestService
      * Submit attempt: auto-grade soal yang bisa, lalu update aggregat.
      * Kalau ada SHORT_ANSWER → result = REVIEW, menunggu HR.
      */
-    public function submitAttempt(int $attemptId): array
+    public function submitAttempt(int $attemptId, int $companyId): array
     {
         $db = \Config\Database::connect();
-        $attempt = $db->table('online_test_attempts')->where('id', $attemptId)->get()->getRowArray();
+        $attempt = $this->tenantAttempt($db, $attemptId, $companyId);
         if (! $attempt) throw new \RuntimeException('Attempt tidak ditemukan');
         if ($attempt['status'] !== 'IN_PROGRESS') {
             // Idempotent — kalau sudah submitted, kembalikan saja state-nya
-            return $this->buildResultView($attemptId);
+            return $this->buildResultView($attemptId, $companyId);
         }
 
         $assignment = $db->table('online_test_assignments')
-            ->where('id', (int) $attempt['assignment_id'])->get()->getRowArray();
-        $test = $assignment ? $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])->get()->getRowArray() : null;
+            ->where('id', (int) $attempt['assignment_id'])->where('company_id', $companyId)->get()->getRowArray();
+        $test = $assignment ? $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])
+            ->where('company_id', $companyId)->get()->getRowArray() : null;
 
-        $answers = $db->table('online_test_answers')
-            ->where('attempt_id', $attemptId)
-            ->get()->getResultArray();
+        $answers = $this->tenantAnswers($db, $attemptId, $companyId)->get()->getResultArray();
 
         $autoScore   = 0.0;
         $hasManual   = false;
@@ -368,7 +375,10 @@ class OnlineTestService
                 // Belum di-grade — biarkan is_correct NULL & points_awarded 0
             }
 
-            $db->table('online_test_answers')->where('id', (int) $a['id'])->update($update);
+            $answerUpdate = $db->table('online_test_answers');
+            $this->assertTenantCompanyId($companyId);
+            $answerUpdate->where('id', (int) $a['id'])
+                ->where('attempt_id', $attemptId)->update($update);
         }
 
         $totalScore = $autoScore;
@@ -389,7 +399,10 @@ class OnlineTestService
             $result = $percentage >= $passing ? 'PASS' : 'FAIL';
         }
 
-        $db->table('online_test_attempts')->where('id', $attemptId)->update([
+        $attemptUpdate = $db->table('online_test_attempts');
+        $this->assertTenantCompanyId($companyId);
+        $attemptUpdate->where('id', $attemptId)
+            ->where('assignment_id', (int) $attempt['assignment_id'])->update([
             'status'         => 'SUBMITTED',
             'submitted_at'   => $now,
             'auto_score'     => $autoScore,
@@ -404,11 +417,11 @@ class OnlineTestService
         ]);
 
         // Update assignment best_*
-        $this->updateAssignmentBest((int) $attempt['assignment_id']);
+        $this->updateAssignmentBest((int) $attempt['assignment_id'], $companyId);
 
         $db->transComplete();
 
-        return $this->buildResultView($attemptId);
+        return $this->buildResultView($attemptId, $companyId);
     }
 
     /**
@@ -416,11 +429,11 @@ class OnlineTestService
      * Setelah semua manual answer ter-grade, kalkulasi ulang total_score
      * dan transition status ke GRADED.
      */
-    public function gradeManualAnswer(int $attemptId, int $answerId, float $pointsAwarded, ?string $feedback, int $graderUserId): array
+    public function gradeManualAnswer(int $attemptId, int $answerId, float $pointsAwarded, ?string $feedback, int $graderUserId, int $companyId): array
     {
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_answers')
-            ->where('id', $answerId)->where('attempt_id', $attemptId)->get()->getRowArray();
+        $row = $this->tenantAnswers($db, $attemptId, $companyId)
+            ->where('ans.id', $answerId)->get()->getRowArray();
         if (! $row) throw new \RuntimeException('Answer tidak ditemukan');
 
         $snap = json_decode((string) $row['question_snapshot'], true) ?: [];
@@ -431,7 +444,7 @@ class OnlineTestService
         $awarded = max(0, min($maxPts, $pointsAwarded));
         $now = date('Y-m-d H:i:s');
 
-        $db->table('online_test_answers')->where('id', $answerId)->update([
+        $db->table('online_test_answers')->where('id', $answerId)->where('attempt_id', $attemptId)->update([
             'is_correct'      => $awarded > 0 ? 1 : 0,
             'points_awarded'  => $awarded,
             'manual_feedback' => $feedback,
@@ -439,27 +452,31 @@ class OnlineTestService
         ]);
 
         // Recompute attempt aggregates
-        $this->recomputeAttempt($attemptId, $graderUserId);
-        $this->updateAssignmentBest((int) $db->table('online_test_attempts')
-            ->where('id', $attemptId)->get()->getRowArray()['assignment_id']);
+        $this->recomputeAttempt($attemptId, $companyId, $graderUserId);
+        $attempt = $this->tenantAttempt($db, $attemptId, $companyId);
+        if (! $attempt) throw new \RuntimeException('Attempt tidak ditemukan');
+        $this->updateAssignmentBest((int) $attempt['assignment_id'], $companyId);
 
-        return $this->buildResultView($attemptId);
+        return $this->buildResultView($attemptId, $companyId);
     }
 
     /**
      * Auto-submit attempt yang melewati expires_at. Idempotent.
      */
-    public function autoSubmitExpired(int $attemptId): void
+    public function autoSubmitExpired(int $attemptId, int $companyId): void
     {
         $db = \Config\Database::connect();
-        $row = $db->table('online_test_attempts')->where('id', $attemptId)->get()->getRowArray();
+        $row = $this->tenantAttempt($db, $attemptId, $companyId);
         if (! $row || $row['status'] !== 'IN_PROGRESS') return;
         // Submit dengan response yang sudah ada
         try {
-            $this->submitAttempt($attemptId);
+            $this->submitAttempt($attemptId, $companyId);
         } catch (\Throwable $e) {
             log_message('warning', 'autoSubmitExpired failed: ' . $e->getMessage());
-            $db->table('online_test_attempts')->where('id', $attemptId)->update([
+            $attemptUpdate = $db->table('online_test_attempts');
+            $this->assertTenantCompanyId($companyId);
+            $attemptUpdate->where('id', $attemptId)
+                ->where('assignment_id', (int) $row['assignment_id'])->update([
                 'status'       => 'EXPIRED',
                 'submitted_at' => date('Y-m-d H:i:s'),
                 'updated_at'   => date('Y-m-d H:i:s'),
@@ -470,16 +487,16 @@ class OnlineTestService
     /**
      * Build hasil attempt untuk ditampilkan setelah submit.
      */
-    public function buildResultView(int $attemptId, bool $includeAnswers = true): array
+    public function buildResultView(int $attemptId, int $companyId, bool $includeAnswers = true): array
     {
         $db = \Config\Database::connect();
-        $attempt = $db->table('online_test_attempts')->where('id', $attemptId)->get()->getRowArray();
+        $attempt = $this->tenantAttempt($db, $attemptId, $companyId);
         if (! $attempt) throw new \RuntimeException('Attempt tidak ditemukan');
 
         $assignment = $db->table('online_test_assignments')
-            ->where('id', (int) $attempt['assignment_id'])->get()->getRowArray();
+            ->where('id', (int) $attempt['assignment_id'])->where('company_id', $companyId)->get()->getRowArray();
         $test = $assignment ? $db->table('online_tests')
-            ->where('id', (int) $assignment['online_test_id'])->get()->getRowArray() : null;
+            ->where('id', (int) $assignment['online_test_id'])->where('company_id', $companyId)->get()->getRowArray() : null;
 
         $result = [
             'attempt' => [
@@ -509,9 +526,8 @@ class OnlineTestService
         ];
 
         if ($includeAnswers) {
-            $rows = $db->table('online_test_answers')
-                ->where('attempt_id', $attemptId)
-                ->orderBy('sort_order', 'ASC')
+            $rows = $this->tenantAnswers($db, $attemptId, $companyId)
+                ->orderBy('ans.sort_order', 'ASC')
                 ->get()->getResultArray();
             $items = [];
             foreach ($rows as $a) {
@@ -542,17 +558,20 @@ class OnlineTestService
      * Setelah question manual digrade, recompute total_score, percentage,
      * result. Status pindah ke GRADED kalau tidak ada lagi pending manual.
      */
-    private function recomputeAttempt(int $attemptId, ?int $graderUserId = null): void
+    private function recomputeAttempt(int $attemptId, int $companyId, ?int $graderUserId = null): void
     {
         $db = \Config\Database::connect();
-        $attempt = $db->table('online_test_attempts')->where('id', $attemptId)->get()->getRowArray();
+        $attempt = $this->tenantAttempt($db, $attemptId, $companyId);
         if (! $attempt) return;
 
         $assignment = $db->table('online_test_assignments')
-            ->where('id', (int) $attempt['assignment_id'])->get()->getRowArray();
-        $test = $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])->get()->getRowArray();
+            ->where('id', (int) $attempt['assignment_id'])->where('company_id', $companyId)->get()->getRowArray();
+        if (! $assignment) return;
+        $test = $db->table('online_tests')->where('id', (int) $assignment['online_test_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $test) return;
 
-        $rows = $db->table('online_test_answers')->where('attempt_id', $attemptId)->get()->getResultArray();
+        $rows = $this->tenantAnswers($db, $attemptId, $companyId)->get()->getResultArray();
         $auto = 0.0; $manual = 0.0; $hasPendingManual = false; $catScores = [];
         foreach ($rows as $r) {
             $snap = json_decode((string) $r['question_snapshot'], true) ?: [];
@@ -597,19 +616,23 @@ class OnlineTestService
             $update['graded_at'] = $now;
             $update['graded_by'] = $graderUserId;
         }
-        $db->table('online_test_attempts')->where('id', $attemptId)->update($update);
+        $db->table('online_test_attempts')->where('id', $attemptId)
+            ->where('assignment_id', (int) $attempt['assignment_id'])->update($update);
     }
 
     /**
      * Update best_score / status di assignment berdasar best attempt.
      */
-    private function updateAssignmentBest(int $assignmentId): void
+    private function updateAssignmentBest(int $assignmentId, int $companyId): void
     {
         $db = \Config\Database::connect();
-        $rows = $db->table('online_test_attempts')
-            ->where('assignment_id', $assignmentId)
-            ->whereIn('status', ['SUBMITTED', 'GRADED'])
-            ->orderBy('total_score', 'DESC')
+        $rows = $db->table('online_test_attempts a')
+            ->select('a.*')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.assignment_id', $assignmentId)
+            ->where('x.company_id', $companyId)
+            ->whereIn('a.status', ['SUBMITTED', 'GRADED'])
+            ->orderBy('a.total_score', 'DESC')
             ->get()->getResultArray();
 
         if (! $rows) {
@@ -617,7 +640,9 @@ class OnlineTestService
         }
         $best = $rows[0];
 
-        $assignment = $db->table('online_test_assignments')->where('id', $assignmentId)->get()->getRowArray();
+        $assignment = $db->table('online_test_assignments')->where('id', $assignmentId)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (! $assignment) return;
         $now = date('Y-m-d H:i:s');
 
         $hasReview = false;
@@ -629,7 +654,7 @@ class OnlineTestService
             ? 'COMPLETED'
             : ($best['result'] === 'PASS' ? 'COMPLETED' : 'IN_PROGRESS');
 
-        $db->table('online_test_assignments')->where('id', $assignmentId)->update([
+        $db->table('online_test_assignments')->where('id', $assignmentId)->where('company_id', $companyId)->update([
             'best_score'      => (float) $best['total_score'],
             'best_percentage' => (float) $best['percentage'],
             'best_result'     => $hasReview && $best['result'] !== 'PASS' && $best['result'] !== 'FAIL'
@@ -638,6 +663,41 @@ class OnlineTestService
             'completed_at'    => $newStatus === 'COMPLETED' ? $now : null,
             'updated_at'      => $now,
         ]);
+    }
+
+    /**
+     * Resolve an attempt only through its tenant-owned assignment.
+     */
+    private function tenantAttempt(BaseConnection $db, int $attemptId, int $companyId): ?array
+    {
+        $row = $db->table('online_test_attempts a')
+            ->select('a.*')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('a.id', $attemptId)
+            ->where('x.company_id', $companyId)
+            ->get()->getRowArray();
+
+        return $row ?: null;
+    }
+
+    private function assertTenantCompanyId(int $companyId): void
+    {
+        if ($companyId <= 0) {
+            throw new \RuntimeException('Company context tidak tersedia');
+        }
+    }
+
+    /**
+     * Keep every answer lookup behind attempt -> assignment -> company.
+     */
+    private function tenantAnswers(BaseConnection $db, int $attemptId, int $companyId): BaseBuilder
+    {
+        return $db->table('online_test_answers ans')
+            ->select('ans.*')
+            ->join('online_test_attempts a', 'a.id = ans.attempt_id')
+            ->join('online_test_assignments x', 'x.id = a.assignment_id')
+            ->where('ans.attempt_id', $attemptId)
+            ->where('x.company_id', $companyId);
     }
 
     /**
@@ -733,9 +793,12 @@ class OnlineTestService
         }
 
         // Mode attached questions
-        $rows = $db->table('online_test_questions')
-            ->where('online_test_id', (int) $test['id'])
-            ->orderBy('sort_order', 'ASC')->orderBy('id', 'ASC')
+        $rows = $db->table('online_test_questions q')
+            ->select('q.*')
+            ->join('online_tests t', 't.id = q.online_test_id')
+            ->where('q.online_test_id', (int) $test['id'])
+            ->where('t.company_id', (int) $test['company_id'])
+            ->orderBy('q.sort_order', 'ASC')->orderBy('q.id', 'ASC')
             ->get()->getResultArray();
 
         return array_map(function ($r) {

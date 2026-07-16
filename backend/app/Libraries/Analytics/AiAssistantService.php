@@ -39,9 +39,30 @@ namespace App\Libraries\Analytics;
  */
 class AiAssistantService
 {
-    public const DRIVERS = ['mock', 'openai', 'anthropic', 'gemini', 'groq', 'openrouter', 'local'];
+    public const DRIVERS = ['mock', 'custom', 'openai', 'anthropic', 'gemini', 'groq', 'openrouter', 'local'];
     public const MAX_HISTORY_MESSAGES = 30;
     public const MAX_TOKENS_PER_TURN = 4000;
+
+    /** @var array<string, array{label: string, permissions: list<string>}> */
+    private const ASSISTANT_UI_LINKS = [
+        '/profile'             => ['label' => 'Profil Saya', 'permissions' => []],
+        '/leaves'              => ['label' => 'Cuti Saya', 'permissions' => []],
+        '/leaves/new'          => ['label' => 'Ajukan Cuti', 'permissions' => []],
+        '/leaves/balance'      => ['label' => 'Saldo Cuti', 'permissions' => []],
+        '/payslips/my'         => ['label' => 'Slip Gaji Saya', 'permissions' => []],
+        '/attendance/my'       => ['label' => 'Kehadiran Saya', 'permissions' => []],
+        '/attendance/clock'    => ['label' => 'Clock In/Out', 'permissions' => []],
+        '/attendance/wfh'      => ['label' => 'Pengajuan WFH', 'permissions' => []],
+        '/performance/my'      => ['label' => 'Kinerja Saya', 'permissions' => []],
+        '/hr/my-resignation'  => ['label' => 'Pengajuan Resign', 'permissions' => []],
+        '/helpdesk/tickets'   => ['label' => 'Bantuan HR', 'permissions' => []],
+        '/reimbursements'     => ['label' => 'Reimbursement', 'permissions' => ['reimbursement.view', 'reimbursement.manage']],
+        '/overtimes'          => ['label' => 'Lembur', 'permissions' => ['overtime.view', 'overtime.manage']],
+        '/overtimes/plan'     => ['label' => 'Rencana Lembur', 'permissions' => ['overtime.view', 'overtime.manage']],
+        '/payroll/periods'    => ['label' => 'Periode Payroll', 'permissions' => ['payroll.view', 'payroll.manage']],
+        '/payroll/simulate'   => ['label' => 'Simulasi Payroll', 'permissions' => ['payroll.simulate']],
+        '/recruitment/jobs'   => ['label' => 'Lowongan Recruitment', 'permissions' => ['recruitment.manage']],
+    ];
 
     private string $driver;
 
@@ -104,6 +125,7 @@ class AiAssistantService
         $name = $userContext['full_name'] ?? 'pengguna';
         $role = $userContext['role'] ?? 'employee';
         $permissions = $userContext['permissions'] ?? [];
+        $configuredModel = trim((string) env('AI_ASSISTANT_MODEL', ''));
 
         $base = "Kamu adalah Quantara HR Copilot, asisten HR untuk Indonesian HRIS. "
             . "User aktif: {$name} (role: {$role}).\n\n"
@@ -111,8 +133,16 @@ class AiAssistantService
             . "1. Selalu jawab dalam Bahasa Indonesia kecuali user explicit minta English.\n"
             . "2. Jangan berikan saran legal definitif — sebut 'konsultasikan ke HR/Legal'.\n"
             . "3. Jangan tampilkan data pribadi karyawan lain kecuali user punya permission.\n"
-            . "4. Untuk query data, sarankan endpoint API Quantara — JANGAN expose query SQL.\n"
-            . "5. Tolak jika diminta hal di luar scope HR/payroll/operasional.\n\n";
+            . "4. Jangan pernah tampilkan endpoint API, HTTP method, atau query SQL kepada user. "
+            . "Untuk tindakan di aplikasi, arahkan ke menu UI dan bila sesuai berikan tautan Markdown internal.\n"
+            . "5. Link internal yang boleh dipakai untuk user ini: " . self::allowedLinksPrompt($userContext)
+            . ". Gunakan hanya link tersebut yang relevan; jangan membuat path lain. Jika user meminta "
+            . "endpoint, halaman, atau aksi di luar daftar tersebut, jelaskan bahwa aksesnya tidak tersedia dan "
+            . "jangan memberi cara melewati permission.\n"
+            . "6. Jika ditanya identitas model, jawab bahwa kamu adalah Quantara HR Copilot"
+            . ($configuredModel !== '' ? " yang dikonfigurasi menggunakan {$configuredModel}" : '')
+            . ". Jangan mengaku sebagai Claude, Anthropic, atau provider/model lain.\n"
+            . "7. Tolak jika diminta hal di luar scope HR/payroll/operasional.\n\n";
 
         if (in_array('payroll.view', $permissions, true)
             || in_array('payroll.manage', $permissions, true)) {
@@ -126,6 +156,62 @@ class AiAssistantService
                 . "ajukan reimbursement, update profil. Jangan tampilkan data karyawan lain.\n";
         }
         return $base;
+    }
+
+    /**
+     * Daftar link UI yang boleh direkomendasikan untuk context RBAC ini.
+     * Server API tetap menjadi lapisan otorisasi utama untuk setiap aksi.
+     *
+     * @return array<string, array{label: string, permissions: list<string>}>
+     */
+    public static function allowedAssistantLinks(array $userContext): array
+    {
+        $permissions = $userContext['permissions'] ?? [];
+        $isSuperAdmin = ($userContext['role'] ?? '') === 'super_admin';
+        $allowed = [];
+        foreach (self::ASSISTANT_UI_LINKS as $path => $definition) {
+            if ($isSuperAdmin || $definition['permissions'] === []
+                || array_intersect($definition['permissions'], $permissions) !== []) {
+                $allowed[$path] = $definition;
+            }
+        }
+        return $allowed;
+    }
+
+    /**
+     * Defense-in-depth untuk output LLM: hanya pertahankan tautan UI yang
+     * sudah lolos RBAC dan hilangkan referensi endpoint API mentah.
+     */
+    public static function enforceResponsePolicy(string $reply, array $userContext): string
+    {
+        $allowed = self::allowedAssistantLinks($userContext);
+        $reply = preg_replace_callback(
+            '/\[([^\]\r\n]{1,120})\]\((\/[A-Za-z0-9_\/?#=&.\-]{0,240})\)/',
+            static function (array $match) use ($allowed): string {
+                $path = strtok($match[2], '?#');
+                return isset($allowed[$path]) ? $match[0] : $match[1];
+            },
+            $reply,
+        );
+        $reply = preg_replace(
+            '/\b(?:GET|POST|PUT|PATCH|DELETE)\s+`?\/api\/[A-Za-z0-9_\/?#=&.\-]+`?/i',
+            '[akses API dibatasi]',
+            $reply,
+        );
+        return preg_replace('/`?\/api\/[A-Za-z0-9_\/?#=&.\-]+`?/i', '[akses API dibatasi]', $reply);
+    }
+
+    private static function allowedLinksPrompt(array $userContext): string
+    {
+        $links = self::allowedAssistantLinks($userContext);
+        if ($links === []) {
+            return 'tidak ada';
+        }
+        return implode(', ', array_map(
+            static fn (string $path, array $definition): string => "[{$definition['label']}]({$path})",
+            array_keys($links),
+            array_values($links),
+        ));
     }
 
     /**
@@ -251,6 +337,7 @@ class AiAssistantService
         // Dispatch ke driver
         try {
             $reply = match ($this->driver) {
+                'custom'     => $this->driverCustom($messages),
                 'openai'     => $this->driverOpenAi($messages),
                 'anthropic'  => $this->driverAnthropic($messages),
                 'gemini'     => $this->driverGemini($messages),
@@ -265,6 +352,8 @@ class AiAssistantService
             $reply = "[Driver {$this->driver} error: " . $e->getMessage() . "]\n\n"
                 . $this->driverMock($cleanInput);
         }
+
+        $reply = self::enforceResponsePolicy($reply, $userContext);
 
         $assistantTokens = self::estimateTokens($reply);
         $assistantRow = [
@@ -331,6 +420,7 @@ class AiAssistantService
     private function defaultModel(): string
     {
         return match ($this->driver) {
+            'custom'     => '',
             'openai'     => 'gpt-4o-mini',
             'anthropic'  => 'claude-3-5-sonnet-20241022',
             'gemini'     => 'gemini-1.5-flash',          // gratis, 1500 req/hari
@@ -374,6 +464,51 @@ class AiAssistantService
             . "cuti, payroll, lembur, WFH, reimbursement, performance review, training, dan lainnya. "
             . "Coba tanyakan pertanyaan spesifik.\n\n_Mode: mock — ganti AI_ASSISTANT_DRIVER ke "
             . "openai/anthropic/local di .env untuk LLM real._";
+    }
+
+    /**
+     * Provider pihak ketiga yang mengimplementasikan OpenAI-compatible
+     * Chat Completions API.
+     */
+    private function driverCustom(array $messages): string
+    {
+        $apiKey = trim((string) env('AI_ASSISTANT_API_KEY', ''));
+        if ($apiKey === '') {
+            throw new \RuntimeException('AI_ASSISTANT_API_KEY belum di-set');
+        }
+
+        $model = trim((string) env('AI_ASSISTANT_MODEL', ''));
+        if ($model === '') {
+            throw new \RuntimeException('AI_ASSISTANT_MODEL belum di-set');
+        }
+
+        $baseUrl = rtrim(trim((string) env('AI_ASSISTANT_BASE_URL', '')), '/');
+        if ($baseUrl === '') {
+            throw new \RuntimeException('AI_ASSISTANT_BASE_URL belum di-set');
+        }
+
+        $url = str_ends_with($baseUrl, '/chat/completions')
+            ? $baseUrl
+            : $baseUrl . '/chat/completions';
+        $payload = [
+            'model'       => $model,
+            'messages'    => $messages,
+            'max_tokens'  => self::MAX_TOKENS_PER_TURN,
+            'temperature' => 0.7,
+        ];
+
+        return $this->httpPostJson(
+            $url,
+            $payload,
+            ['Authorization: Bearer ' . $apiKey, 'Content-Type: application/json'],
+            function (array $r): string {
+                $responseModel = preg_replace('/[^A-Za-z0-9._:\/-]/', '', (string) ($r['model'] ?? ''));
+                if ($responseModel !== '') {
+                    log_message('info', 'AI custom provider response model: ' . $responseModel);
+                }
+                return (string) ($r['choices'][0]['message']['content'] ?? '');
+            },
+        );
     }
 
     private function driverOpenAi(array $messages): string
@@ -582,13 +717,28 @@ class AiAssistantService
     private function httpPostJson(string $url, array $payload, array $headers, callable $parser): string
     {
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $options = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => json_encode($payload),
             CURLOPT_HTTPHEADER     => $headers,
             CURLOPT_TIMEOUT        => 60,
-        ]);
+        ];
+
+        // PHP Windows tertentu tidak punya CA bundle bawaan. Gunakan bundle
+        // per-aplikasi bila dikonfigurasi, tanpa menonaktifkan verifikasi TLS.
+        $caBundle = trim((string) env('AI_ASSISTANT_CA_BUNDLE', ''));
+        if ($caBundle !== '') {
+            if (! preg_match('/^(?:[A-Za-z]:[\\\\\\/]|\/)/', $caBundle)) {
+                $caBundle = ROOTPATH . ltrim($caBundle, "\\\\/");
+            }
+            if (! is_readable($caBundle)) {
+                throw new \RuntimeException('AI_ASSISTANT_CA_BUNDLE tidak dapat dibaca: ' . $caBundle);
+            }
+            $options[CURLOPT_CAINFO] = $caBundle;
+        }
+
+        curl_setopt_array($ch, $options);
         $response = curl_exec($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err  = curl_error($ch);

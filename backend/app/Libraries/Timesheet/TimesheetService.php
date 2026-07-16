@@ -2,7 +2,9 @@
 
 namespace App\Libraries\Timesheet;
 
+use CodeIgniter\Database\BaseConnection;
 use Config\Database;
+use Config\Services;
 
 /**
  * Project Timesheet Service.
@@ -27,6 +29,21 @@ class TimesheetService
 
     public const ENTRY_STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED'];
 
+    /** @var callable(array<string,mixed>):array<string,mixed>|null */
+    private $approvalStarter;
+
+    public function __construct(
+        private readonly ?BaseConnection $connection = null,
+        ?callable $approvalStarter = null
+    ) {
+        $this->approvalStarter = $approvalStarter;
+    }
+
+    private function db(): BaseConnection
+    {
+        return $this->connection ?? Database::connect();
+    }
+
     /**
      * Buat / update entry timesheet.
      */
@@ -41,7 +58,7 @@ class TimesheetService
         }
 
         $hours = self::roundHoursPure((float) $payload['hours']);
-        $db = Database::connect();
+        $db = $this->db();
 
         // Cek total jam per hari per employee — jangan melebihi 24.
         $existingTotal = $this->totalHoursOnDate(
@@ -60,7 +77,7 @@ class TimesheetService
         }
 
         // Cek assignment aktif
-        if (! $this->hasActiveAssignment($employeeId, (int) $payload['project_id'], (string) $payload['work_date'])) {
+        if (! $this->hasActiveAssignment($companyId, $employeeId, (int) $payload['project_id'], (string) $payload['work_date'])) {
             throw new \RuntimeException('Karyawan tidak punya assignment aktif pada project ini di tanggal tersebut.');
         }
 
@@ -98,66 +115,93 @@ class TimesheetService
         return (int) $db->insertID();
     }
 
-    public function submit(int $entryId, int $employeeId): void
+    /** @return array<string,mixed> */
+    public function submit(int $entryId, int $companyId, int $employeeId, int $actorUserId): array
     {
-        $db = Database::connect();
-        $entry = $db->table('timesheet_entries')
-            ->where('id', $entryId)->where('employee_id', $employeeId)
-            ->get()->getRowArray();
-        if (! $entry) {
-            throw new \RuntimeException('Entry tidak ditemukan');
-        }
+        $db = $this->db();
+        $entry = $db->table('timesheet_entries')->where('id', $entryId)
+            ->where('company_id', $companyId)->where('employee_id', $employeeId)->get()->getRowArray();
+        if (! $entry) throw new \RuntimeException('Entry tidak ditemukan');
         if (! in_array($entry['status'], ['DRAFT', 'REJECTED'], true)) {
             throw new \RuntimeException('Entry tidak bisa di-submit dari status ' . $entry['status']);
         }
+        $this->assertEntryStillValid($entry, $companyId);
         $now = date('Y-m-d H:i:s');
-        $db->table('timesheet_entries')->where('id', $entryId)->update([
-            'status'       => 'SUBMITTED',
-            'submitted_at' => $now,
-            'updated_at'   => $now,
-        ]);
+        $db->transBegin();
+        try {
+            $db->table('timesheet_entries')->where('id', $entryId)->where('company_id', $companyId)
+                ->whereIn('status', ['DRAFT', 'REJECTED'])->update([
+                    'status' => 'SUBMITTED', 'submitted_at' => $now,
+                    'approver_user_id' => null, 'approved_at' => null,
+                    'rejection_reason' => null, 'updated_at' => $now,
+                ]);
+            if ($db->affectedRows() !== 1) throw new \RuntimeException('Entry berubah; muat ulang data');
+            $params = [
+                'company_id' => $companyId, 'module' => 'TIMESHEET',
+                'entity_table' => 'timesheet_entries', 'entity_id' => $entryId,
+                'employee_id' => $employeeId,
+                'meta' => [
+                    'hours' => (float) $entry['hours'],
+                    'is_overtime' => (int) $entry['is_overtime'],
+                    'is_billable' => (int) $entry['is_billable'],
+                    'project_id' => (int) $entry['project_id'],
+                    'work_date' => $entry['work_date'],
+                    'submitted_by' => $actorUserId,
+                ],
+            ];
+            $approval = $this->approvalStarter !== null
+                ? ($this->approvalStarter)($params)
+                : Services::approval()->start($params);
+            if (! $db->transStatus()) throw new \RuntimeException('Gagal membuat workflow approval timesheet');
+            $db->transCommit();
+            return ['id' => $entryId, 'status' => 'SUBMITTED', 'approval' => $approval];
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            throw $exception;
+        }
     }
 
-    public function approve(int $entryId, int $approverUserId): void
+    /** @return array<string,mixed> */
+    public function approve(int $entryId, int $companyId, int $approverUserId): array
     {
-        $db = Database::connect();
-        $entry = $db->table('timesheet_entries')->where('id', $entryId)->get()->getRowArray();
+        $db = $this->db();
+        $entry = $db->table('timesheet_entries')->where('id', $entryId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $entry) throw new \RuntimeException('Entry tidak ditemukan');
-        if ($entry['status'] !== 'SUBMITTED') {
-            throw new \RuntimeException('Hanya entry SUBMITTED yang bisa di-approve');
-        }
+        if ($entry['status'] !== 'SUBMITTED') throw new \RuntimeException('Hanya entry SUBMITTED yang bisa di-approve');
+        $this->assertEntryStillValid($entry, $companyId);
         $now = date('Y-m-d H:i:s');
-        $db->table('timesheet_entries')->where('id', $entryId)->update([
-            'status'           => 'APPROVED',
-            'approver_user_id' => $approverUserId,
-            'approved_at'      => $now,
-            'updated_at'       => $now,
-        ]);
+        $db->table('timesheet_entries')->where('id', $entryId)->where('company_id', $companyId)
+            ->where('status', 'SUBMITTED')->update([
+                'status' => 'APPROVED', 'approver_user_id' => $approverUserId,
+                'approved_at' => $now, 'updated_at' => $now,
+            ]);
+        if ($db->affectedRows() !== 1) throw new \RuntimeException('Entry berubah; muat ulang data');
+        return ['id' => $entryId, 'status' => 'APPROVED'];
     }
 
-    public function reject(int $entryId, int $approverUserId, string $reason): void
+    /** @return array<string,mixed> */
+    public function reject(int $entryId, int $companyId, int $approverUserId, string $reason): array
     {
-        if (trim($reason) === '') {
-            throw new \InvalidArgumentException('reason wajib diisi saat reject');
-        }
-        $db = Database::connect();
-        $entry = $db->table('timesheet_entries')->where('id', $entryId)->get()->getRowArray();
+        if (mb_strlen(trim($reason)) < 5) throw new \InvalidArgumentException('reason minimal 5 karakter saat reject');
+        $db = $this->db();
+        $entry = $db->table('timesheet_entries')->where('id', $entryId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $entry) throw new \RuntimeException('Entry tidak ditemukan');
-        if ($entry['status'] !== 'SUBMITTED') {
-            throw new \RuntimeException('Hanya entry SUBMITTED yang bisa di-reject');
-        }
+        if ($entry['status'] !== 'SUBMITTED') throw new \RuntimeException('Hanya entry SUBMITTED yang bisa di-reject');
         $now = date('Y-m-d H:i:s');
-        $db->table('timesheet_entries')->where('id', $entryId)->update([
-            'status'           => 'REJECTED',
-            'approver_user_id' => $approverUserId,
-            'rejection_reason' => mb_substr($reason, 0, 500),
-            'updated_at'       => $now,
-        ]);
+        $db->table('timesheet_entries')->where('id', $entryId)->where('company_id', $companyId)
+            ->where('status', 'SUBMITTED')->update([
+                'status' => 'REJECTED', 'approver_user_id' => $approverUserId,
+                'rejection_reason' => mb_substr(trim($reason), 0, 500), 'updated_at' => $now,
+            ]);
+        if ($db->affectedRows() !== 1) throw new \RuntimeException('Entry berubah; muat ulang data');
+        return ['id' => $entryId, 'status' => 'REJECTED', 'reason' => trim($reason)];
     }
 
     public function totalHoursOnDate(int $companyId, int $employeeId, string $date, ?int $excludeEntryId = null): float
     {
-        $b = Database::connect()->table('timesheet_entries')
+        $b = $this->db()->table('timesheet_entries')
             ->selectSum('hours', 'total')
             ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
@@ -170,20 +214,23 @@ class TimesheetService
         return (float) ($row['total'] ?? 0);
     }
 
-    public function hasActiveAssignment(int $employeeId, int $projectId, string $workDate): bool
+    public function hasActiveAssignment(int $companyId, int $employeeId, int $projectId, string $workDate): bool
     {
-        $db = Database::connect();
-        $row = $db->table('project_assignments')
-            ->where('employee_id', $employeeId)
-            ->where('project_id', $projectId)
-            ->where('is_active', 1)
+        $db = $this->db();
+        $row = $db->table('project_assignments pa')
+            ->join('projects p', 'p.id = pa.project_id')
+            ->where('pa.employee_id', $employeeId)
+            ->where('pa.project_id', $projectId)
+            ->where('p.company_id', $companyId)->where('p.deleted_at IS NULL')
+            ->where('p.status', 'ACTIVE')
+            ->where('pa.is_active', 1)
             ->groupStart()
-                ->where('starts_on', null)
-                ->orWhere('starts_on <=', $workDate)
+                ->where('pa.starts_on', null)
+                ->orWhere('pa.starts_on <=', $workDate)
             ->groupEnd()
             ->groupStart()
-                ->where('ends_on', null)
-                ->orWhere('ends_on >=', $workDate)
+                ->where('pa.ends_on', null)
+                ->orWhere('pa.ends_on >=', $workDate)
             ->groupEnd()
             ->get()->getRowArray();
         return $row !== null && $row !== [];
@@ -206,7 +253,7 @@ class TimesheetService
         string $from,
         string $to
     ): array {
-        $db = Database::connect();
+        $db = $this->db();
         $rows = $db->table('timesheet_entries')
             ->select('project_id, SUM(hours) AS total_hours, SUM(CASE WHEN is_billable=1 THEN hours ELSE 0 END) AS billable_hours')
             ->where('company_id', $companyId)
@@ -237,7 +284,7 @@ class TimesheetService
      */
     public function burnRateForProject(int $companyId, int $projectId): array
     {
-        $db = Database::connect();
+        $db = $this->db();
         $project = $db->table('projects')
             ->where('id', $projectId)->where('company_id', $companyId)->where('deleted_at', null)
             ->get()->getRowArray();
@@ -296,6 +343,31 @@ class TimesheetService
     }
 
     // ─── PURE HELPERS ──────────────────────────────────────────────────
+
+    /** @param array<string,mixed> $entry */
+    private function assertEntryStillValid(array $entry, int $companyId): void
+    {
+        $employeeId = (int) $entry['employee_id'];
+        $projectId = (int) $entry['project_id'];
+        $workDate = (string) $entry['work_date'];
+        $employee = $this->db()->table('employees')->where('id', $employeeId)
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $employee) throw new \RuntimeException('Employee tidak ditemukan di perusahaan aktif');
+        if (! $this->hasActiveAssignment($companyId, $employeeId, $projectId, $workDate)) {
+            throw new \RuntimeException('Assignment project tidak lagi aktif pada tanggal timesheet');
+        }
+        $project = $this->db()->table('projects')->where('id', $projectId)
+            ->where('company_id', $companyId)->where('status', 'ACTIVE')
+            ->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $project) throw new \RuntimeException('Project tidak lagi aktif');
+        if ((! empty($project['starts_on']) && $workDate < $project['starts_on'])
+            || (! empty($project['ends_on']) && $workDate > $project['ends_on'])) {
+            throw new \RuntimeException('Tanggal timesheet berada di luar periode project');
+        }
+        if ($this->totalHoursOnDate($companyId, $employeeId, $workDate) > self::MAX_HOURS_PER_DAY + 0.001) {
+            throw new \RuntimeException('Total timesheet harian melebihi 24 jam');
+        }
+    }
 
     /**
      * Round hours ke kelipatan 0.25 ke atas (ceil ke 15 menit terdekat).

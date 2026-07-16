@@ -66,122 +66,63 @@ class BusinessTripService
      * Submit untuk approval. Pindahkan status DRAFT → PENDING dan trigger
      * approval chain modul BUSINESS_TRIP.
      */
-    public function submit(int $tripId, ?int $submittedBy = null): array
+    public function submit(int $tripId, int $companyId, ?int $submittedBy = null): array
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
+        $row = $db->table('business_trips')->where('id', $tripId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) throw new \InvalidArgumentException("Trip #{$tripId} tidak ditemukan");
         if ($row['status'] !== 'DRAFT') {
             throw new \RuntimeException("Hanya status DRAFT yang bisa di-submit, sekarang {$row['status']}");
         }
 
         $now = date('Y-m-d H:i:s');
-        $db->table('business_trips')->where('id', $tripId)->update([
+        $db->table('business_trips')->where('id', $tripId)->where('company_id', $companyId)
+            ->where('status', 'DRAFT')->update([
             'status'       => 'PENDING',
             'submitted_at' => $now,
             'updated_at'   => $now,
         ]);
 
-        // Trigger approval chain (kalau ada chain BUSINESS_TRIP)
-        $approvalRequestId = null;
         try {
-            $approvalRequestId = Services::approval()->submit('BUSINESS_TRIP', $tripId, [
-                'employee_id'    => (int) $row['employee_id'],
-                'company_id'     => (int) $row['company_id'],
-                'amount'         => (float) $row['advance_amount'],
-                'submitted_by'   => $submittedBy,
+            $approval = Services::approval()->start([
+                'company_id' => $companyId,
+                'module' => 'BUSINESS_TRIP',
+                'entity_table' => 'business_trips',
+                'entity_id' => $tripId,
+                'employee_id' => (int) $row['employee_id'],
+                'meta' => [
+                    'amount' => (float) $row['advance_amount'],
+                    'days' => (int) $row['duration_days'],
+                    'is_overseas' => ($row['destination_type'] ?? 'DOMESTIC') === 'INTERNATIONAL',
+                    'submitted_by' => $submittedBy,
+                    'cost_center_id' => $row['cost_center_id'] ?? null,
+                ],
             ]);
-        } catch (\Throwable $e) {
-            // Kalau modul approval belum dikonfigurasi, lanjut tanpa approval chain.
-            // HR bisa langsung approve via endpoint khusus.
-            log_message('info', 'BusinessTrip submit without approval chain: ' . $e->getMessage());
+        } catch (\Throwable $exception) {
+            $db->table('business_trips')->where('id', $tripId)->where('company_id', $companyId)
+                ->where('status', 'PENDING')->update([
+                    'status' => 'DRAFT', 'submitted_at' => null, 'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            throw new \RuntimeException('Gagal membuat workflow approval SPPD: ' . $exception->getMessage(), 0, $exception);
         }
 
-        return ['status' => 'PENDING', 'approval_request_id' => $approvalRequestId];
-    }
-
-    /**
-     * Approve trip langsung (untuk admin/HR yang punya business_trip.approve).
-     */
-    public function approve(int $tripId, ?int $approvedBy = null, ?string $note = null): void
-    {
-        $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
-        if (! $row) throw new \InvalidArgumentException("Trip #{$tripId} tidak ditemukan");
-        if (! in_array($row['status'], ['PENDING', 'DRAFT'], true)) {
-            throw new \RuntimeException("Hanya status PENDING/DRAFT yang bisa di-approve, sekarang {$row['status']}");
-        }
-        $now = date('Y-m-d H:i:s');
-        $db->table('business_trips')->where('id', $tripId)->update([
-            'status'      => 'APPROVED',
-            'approved_at' => $now,
-            'updated_at'  => $now,
-        ]);
-
-        // Render snapshot SPPD
-        $sppd = $this->renderSppdHtml($tripId);
-        $db->table('business_trips')->where('id', $tripId)->update([
-            'sppd_html'  => $sppd,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-
-        // Notifikasi karyawan
-        $emp = $db->table('employees')->where('id', $row['employee_id'])->get()->getRowArray();
-        if ($emp && ! empty($emp['user_id'])) {
-            Services::notification()->send(
-                (int) $emp['user_id'],
-                (int) $row['company_id'],
-                'business_trip.approved',
-                "SPPD {$row['reference_number']} disetujui",
-                "Perjalanan dinas ke {$row['destination']} ({$row['start_date']} → {$row['end_date']}) telah disetujui. Advance: " . number_format((float) $row['advance_amount']),
-                ['business_trip_id' => $tripId],
-                null, true
-            );
-        }
-    }
-
-    public function reject(int $tripId, string $reason, ?int $rejectedBy = null): void
-    {
-        $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
-        if (! $row) throw new \InvalidArgumentException("Trip not found");
-        if (! in_array($row['status'], ['PENDING', 'DRAFT'], true)) {
-            throw new \RuntimeException("Hanya status PENDING/DRAFT yang bisa di-reject");
-        }
-        $now = date('Y-m-d H:i:s');
-        $db->table('business_trips')->where('id', $tripId)->update([
-            'status'           => 'REJECTED',
-            'rejected_at'      => $now,
-            'rejection_reason' => $reason,
-            'updated_at'       => $now,
-        ]);
-
-        $emp = $db->table('employees')->where('id', $row['employee_id'])->get()->getRowArray();
-        if ($emp && ! empty($emp['user_id'])) {
-            Services::notification()->send(
-                (int) $emp['user_id'],
-                (int) $row['company_id'],
-                'business_trip.rejected',
-                "SPPD {$row['reference_number']} ditolak",
-                "Alasan: {$reason}",
-                ['business_trip_id' => $tripId],
-                null, true
-            );
-        }
+        return ['status' => 'PENDING', 'approval' => $approval];
     }
 
     /**
      * Recompute actual_amount dari sum line items (billable only).
      */
-    public function recomputeActual(int $tripId): float
+    public function recomputeActual(int $tripId, int $companyId): float
     {
         $db = \Config\Database::connect();
         $sum = (float) $db->table('business_trip_expenses')
             ->selectSum('amount', 'total')
             ->where('business_trip_id', $tripId)
+            ->where('company_id', $companyId)
             ->where('is_billable', 1)
             ->get()->getRowArray()['total'];
-        $db->table('business_trips')->where('id', $tripId)->update([
+        $db->table('business_trips')->where('id', $tripId)->where('company_id', $companyId)->update([
             'actual_amount' => $sum,
             'updated_at'    => date('Y-m-d H:i:s'),
         ]);
@@ -191,16 +132,17 @@ class BusinessTripService
     /**
      * Karyawan tandai trip COMPLETED setelah upload semua bukti.
      */
-    public function markCompleted(int $tripId): void
+    public function markCompleted(int $tripId, int $companyId): void
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
+        $row = $db->table('business_trips')->where('id', $tripId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) throw new \InvalidArgumentException("Trip not found");
         if (! in_array($row['status'], ['APPROVED', 'IN_PROGRESS'], true)) {
             throw new \RuntimeException("Hanya APPROVED/IN_PROGRESS yang bisa COMPLETED");
         }
-        $this->recomputeActual($tripId);
-        $db->table('business_trips')->where('id', $tripId)->update([
+        $this->recomputeActual($tripId, $companyId);
+        $db->table('business_trips')->where('id', $tripId)->where('company_id', $companyId)->update([
             'status'       => 'COMPLETED',
             'completed_at' => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
@@ -211,10 +153,11 @@ class BusinessTripService
      * Settlement: hitung selisih actual vs advance dan buat reimbursement
      * otomatis kalau actual > advance.
      */
-    public function settle(int $tripId, ?int $settledBy = null): array
+    public function settle(int $tripId, int $companyId, ?int $settledBy = null): array
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
+        $row = $db->table('business_trips')->where('id', $tripId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) throw new \InvalidArgumentException("Trip not found");
         if ($row['status'] !== 'COMPLETED') {
             throw new \RuntimeException("Trip harus COMPLETED dulu sebelum di-settle, sekarang {$row['status']}");
@@ -225,9 +168,11 @@ class BusinessTripService
         $diff = round($actual - $advance, 2);
 
         $reimbursementId = null;
+        $reimbursementApproval = null;
         $now = date('Y-m-d H:i:s');
-
-        if ($diff > 0) {
+        $db->transBegin();
+        try {
+            if ($diff > 0) {
             // Karyawan tombok → buat reimbursement
             $reqNumber = 'RB-SPPD-' . $row['id'] . '-' . date('Ymd');
             $db->table('reimbursements')->insert([
@@ -243,58 +188,99 @@ class BusinessTripService
                 'updated_at'     => $now,
             ]);
             $reimbursementId = (int) $db->insertID();
-        }
+                $reimbursementApproval = Services::approval()->start([
+                    'company_id' => $companyId,
+                    'module' => 'REIMBURSEMENT',
+                    'entity_table' => 'reimbursements',
+                    'entity_id' => $reimbursementId,
+                    'employee_id' => (int) $row['employee_id'],
+                    'meta' => [
+                        'amount' => $diff,
+                        'category' => 'BUSINESS_TRIP',
+                        'expense_date' => (string) $row['end_date'],
+                        'source_business_trip_id' => $tripId,
+                    ],
+                ]);
+            }
         // Kalau diff < 0: karyawan kelebihan advance → finance manually catat potongan;
         // settlement_amount tetap negatif sebagai indikator.
 
-        $db->table('business_trips')->where('id', $tripId)->update([
+            $db->table('business_trips')->where('id', $tripId)->where('company_id', $companyId)
+                ->where('status', 'COMPLETED')->update([
             'status'           => 'SETTLED',
             'settlement_amount'=> $diff,
             'reimbursement_id' => $reimbursementId,
             'settled_at'       => $now,
             'updated_at'       => $now,
-        ]);
+                ]);
+            if ($db->affectedRows() !== 1) throw new \RuntimeException('SPPD berubah; muat ulang data');
+            if (! $db->transStatus()) throw new \RuntimeException('Settlement transaction failed');
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            throw $exception;
+        }
 
         return [
             'settlement_amount' => $diff,
             'reimbursement_id'  => $reimbursementId,
+            'reimbursement_approval' => $reimbursementApproval,
             'overpay_to_return' => $diff < 0 ? abs($diff) : 0,
             'underpay_to_reimburse' => $diff > 0 ? $diff : 0,
         ];
     }
 
-    public function cancel(int $tripId, ?string $reason = null): void
+    public function cancel(int $tripId, int $companyId, ?string $reason = null): void
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
+        $row = $db->table('business_trips')->where('id', $tripId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $row) throw new \InvalidArgumentException("Trip not found");
         if (in_array($row['status'], ['SETTLED', 'CANCELLED', 'REJECTED'], true)) {
             throw new \RuntimeException("Trip status {$row['status']} tidak bisa di-cancel");
         }
-        $db->table('business_trips')->where('id', $tripId)->update([
-            'status'           => 'CANCELLED',
-            'rejection_reason' => $reason,
-            'updated_at'       => date('Y-m-d H:i:s'),
-        ]);
+        $db->transBegin();
+        try {
+            $db->table('business_trips')->where('id', $tripId)->where('company_id', $companyId)
+                ->where('status', (string) $row['status'])->update([
+                    'status' => 'CANCELLED', 'rejection_reason' => $reason,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            if ($db->affectedRows() !== 1) throw new \RuntimeException('SPPD berubah; muat ulang data');
+            if ($row['status'] === 'PENDING') {
+                Services::approval()->cancelEntity('BUSINESS_TRIP', 'business_trips', $tripId, $companyId);
+            }
+            if (! $db->transStatus()) throw new \RuntimeException('Gagal membatalkan SPPD');
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            throw $exception;
+        }
     }
 
     /**
      * Render SPPD HTML untuk dicetak.
      */
-    public function renderSppdHtml(int $tripId): string
+    public function renderSppdHtml(int $tripId, ?int $companyId = null): string
     {
         $db = \Config\Database::connect();
-        $row = $db->table('business_trips')->where('id', $tripId)->get()->getRowArray();
+        $tripBuilder = $db->table('business_trips')->where('id', $tripId);
+        if ($companyId !== null) $tripBuilder->where('company_id', $companyId);
+        $row = $tripBuilder->get()->getRowArray();
         if (! $row) return '';
 
-        $emp = $db->table('employees')->where('id', $row['employee_id'])->get()->getRowArray() ?: [];
+        $emp = $db->table('employees')->where('id', $row['employee_id'])
+            ->where('company_id', (int) $row['company_id'])->get()->getRowArray() ?: [];
         $position = ! empty($emp['position_id'])
-            ? ($db->table('positions')->where('id', (int) $emp['position_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('positions')->where('id', (int) $emp['position_id'])
+                ->where('company_id', (int) $row['company_id'])->get()->getRowArray() ?: [])
             : [];
         $department = ! empty($emp['department_id'])
-            ? ($db->table('departments')->where('id', (int) $emp['department_id'])->get()->getRowArray() ?: [])
+            ? ($db->table('departments')->where('id', (int) $emp['department_id'])
+                ->where('company_id', (int) $row['company_id'])->get()->getRowArray() ?: [])
             : [];
-        $company = $db->table('companies')->where('id', $row['company_id'])->get()->getRowArray() ?: [];
+        $company = $db->table('companies')->where('id', $row['company_id'])
+            ->where('id', (int) $row['company_id'])->get()->getRowArray() ?: [];
 
         $months = ['', 'Januari','Februari','Maret','April','Mei','Juni',
                    'Juli','Agustus','September','Oktober','November','Desember'];
