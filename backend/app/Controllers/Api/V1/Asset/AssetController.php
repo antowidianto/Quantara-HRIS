@@ -49,6 +49,7 @@ class AssetController extends ApiController
         // resolve via Config\Database::connect().
         $emp = \Config\Database::connect()->table('employees')
             ->where('user_id', $userId)
+            ->where('company_id', (int) $this->tenant()->getCompanyId())
             ->where('deleted_at IS NULL')->limit(1)->get()->getRowArray();
         return $emp ? (int) $emp['id'] : null;
     }
@@ -182,11 +183,6 @@ class AssetController extends ApiController
         if (isset($update['condition']) && ! in_array(strtoupper((string) $update['condition']), self::VALID_CONDITIONS, true)) {
             return $this->fail('Condition tidak valid', 422);
         }
-        // Status hanya boleh diubah lewat aksi khusus (assign/return) atau retire
-        if (isset($data['status']) && in_array($data['status'], ['RETIRED', 'AVAILABLE'], true)
-            && in_array($row['status'], ['AVAILABLE','RETIRED'], true)) {
-            $update['status'] = $data['status'];
-        }
         $update['updated_at'] = date('Y-m-d H:i:s');
         \Config\Database::connect()->table('assets')->where('id', (int) $id)->update($update);
         Services::audit()->forModule('ASSET')->logUpdate('asset', (int) $id, $row, $update);
@@ -201,8 +197,8 @@ class AssetController extends ApiController
         if (! empty($row['approval_action'])) {
             return $this->fail('Asset sedang menunggu approval dan tidak dapat dihapus', 409);
         }
-        if (! in_array($row['status'], ['AVAILABLE','RETIRED'], true)) {
-            return $this->fail('Asset masih ASSIGNED/REPAIR/LOST. Return atau retire dulu sebelum delete.', 422);
+        if ($row['status'] !== 'RETIRED') {
+            return $this->fail('Asset harus melalui approval retirement sebelum dapat dihapus.', 422);
         }
         \Config\Database::connect()->table('assets')->where('id', (int) $id)->update([
             'deleted_at' => date('Y-m-d H:i:s'),
@@ -280,6 +276,38 @@ class AssetController extends ApiController
             severity: 'NOTICE'
         );
         return $this->ok($result, 'Return asset diajukan untuk approval');
+    }
+
+    public function retire($id = null)
+    {
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $row = $this->loadAssetOrFail((int) $id);
+        if (! $row) return $this->response;
+        $data = $this->getJsonInput();
+        try {
+            $result = (new \App\Libraries\Asset\AssetApprovalWorkflowService())->submitRetire(
+                (int) $id,
+                (int) $row['company_id'],
+                $this->userId(),
+                [
+                    'retirement_date' => $data['retirement_date'] ?? null,
+                    'retirement_reason' => $data['retirement_reason'] ?? null,
+                    'disposal_method' => $data['disposal_method'] ?? null,
+                    'disposal_proceeds' => $data['disposal_proceeds'] ?? 0,
+                    'disposal_reference' => $data['disposal_reference'] ?? null,
+                    'book_value' => $data['book_value'] ?? null,
+                ]
+            );
+        } catch (\App\Libraries\Asset\AssetApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode);
+        }
+        Services::audit()->forModule('ASSET')->log(
+            action: 'asset.retire.submit', entity: 'asset', entityId: (int) $id,
+            after: ['status' => 'PENDING_APPROVAL', 'disposal_method' => $data['disposal_method'] ?? null,
+                'book_value' => $data['book_value'] ?? null],
+            description: "Ajukan retirement/write-off asset {$row['asset_number']}", severity: 'WARNING'
+        );
+        return $this->ok($result, 'Retirement asset diajukan untuk approval', 202);
     }
 
     /**

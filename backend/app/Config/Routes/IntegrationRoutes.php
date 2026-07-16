@@ -13,11 +13,11 @@ final class IntegrationRoutes
         // path /event-types tidak nyangkut sebagai resource id.
         $routes->get('webhooks/event-types',                 'Webhook\WebhookController::eventTypes', ['filter' => 'permission:webhook.view']);
         $routes->get('webhooks',                             'Webhook\WebhookController::index', ['filter' => 'permission:webhook.view']);
-        $routes->post('webhooks',                            'Webhook\WebhookController::create', ['filter' => 'permission:webhook.manage']);
+        $routes->post('webhooks',                            'Webhook\WebhookController::create', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
         $routes->get('webhooks/(:num)',                      'Webhook\WebhookController::show/$1', ['filter' => 'permission:webhook.view']);
-        $routes->put('webhooks/(:num)',                      'Webhook\WebhookController::update/$1', ['filter' => 'permission:webhook.manage']);
-        $routes->delete('webhooks/(:num)',                   'Webhook\WebhookController::delete/$1', ['filter' => 'permission:webhook.manage']);
-        $routes->post('webhooks/(:num)/rotate-secret',       'Webhook\WebhookController::rotateSecret/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required']]);
+        $routes->put('webhooks/(:num)',                      'Webhook\WebhookController::update/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
+        $routes->delete('webhooks/(:num)',                   'Webhook\WebhookController::delete/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
+        $routes->post('webhooks/(:num)/rotate-secret',       'Webhook\WebhookController::rotateSecret/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
         $routes->get('webhooks/(:num)/deliveries',           'Webhook\WebhookController::deliveries/$1', ['filter' => 'permission:webhook.view']);
 
         // Sprint 14+ — Inbound Webhook admin CRUD (counterpart untuk
@@ -25,11 +25,11 @@ final class IntegrationRoutes
         // /api/v1/inbound/{slug}). Pattern routing sama: endpoint khusus
         // (events) di atas pattern /(:num).
         $routes->get('inbound-webhooks',                     'Webhook\InboundWebhookController::index', ['filter' => 'permission:webhook.view']);
-        $routes->post('inbound-webhooks',                    'Webhook\InboundWebhookController::create', ['filter' => 'permission:webhook.manage']);
+        $routes->post('inbound-webhooks',                    'Webhook\InboundWebhookController::create', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
         $routes->get('inbound-webhooks/(:num)',              'Webhook\InboundWebhookController::show/$1', ['filter' => 'permission:webhook.view']);
-        $routes->put('inbound-webhooks/(:num)',              'Webhook\InboundWebhookController::update/$1', ['filter' => 'permission:webhook.manage']);
-        $routes->delete('inbound-webhooks/(:num)',           'Webhook\InboundWebhookController::delete/$1', ['filter' => 'permission:webhook.manage']);
-        $routes->post('inbound-webhooks/(:num)/rotate-secret','Webhook\InboundWebhookController::rotateSecret/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required']]);
+        $routes->put('inbound-webhooks/(:num)',              'Webhook\InboundWebhookController::update/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
+        $routes->delete('inbound-webhooks/(:num)',           'Webhook\InboundWebhookController::delete/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
+        $routes->post('inbound-webhooks/(:num)/rotate-secret','Webhook\InboundWebhookController::rotateSecret/$1', ['filter' => ['permission:webhook.manage', 'idempotency:required', 'privilegedapproval:INTEGRATION']]);
         $routes->get('inbound-webhooks/(:num)/events',       'Webhook\InboundWebhookController::events/$1', ['filter' => 'permission:webhook.view']);
     }
 }

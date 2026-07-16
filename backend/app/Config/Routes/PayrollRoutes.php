@@ -8,7 +8,10 @@ final class PayrollRoutes
 {
     public static function register(RouteCollection $routes): void
     {
-        $routes->resource('payroll-components', ['controller' => 'Payroll\PayrollComponentController', 'filter' => 'permission:payroll.manage']);
+        $routes->resource('payroll-components', ['controller' => 'Payroll\PayrollComponentController', 'only' => ['index', 'show'], 'filter' => 'permission:payroll.manage']);
+        $routes->post('payroll-components', 'Payroll\MasterRateChangeController::createPayrollComponent', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
+        $routes->put('payroll-components/(:num)', 'Payroll\MasterRateChangeController::updatePayrollComponent/$1', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
+        $routes->delete('payroll-components/(:num)', 'Payroll\MasterRateChangeController::deletePayrollComponent/$1', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
         $routes->resource('benefit-policies', ['controller' => 'Payroll\BenefitPolicyController', 'filter' => 'permission:payroll.manage']);
 
         // Specific period actions must remain before the generic resource.
@@ -22,9 +25,9 @@ final class PayrollRoutes
         $routes->get('payroll-periods/(:num)/disburse-status', 'Payroll\DisbursementController::checkStatus/$1', ['filter' => 'permission:payroll.view']);
         $routes->get('payroll-periods/(:num)/pending-approvals', 'Payroll\PayrollPeriodController::pendingApprovals/$1', ['filter' => 'permission:payroll.view']);
         $routes->get('payroll-periods/(:num)/export-summary', 'Payroll\PayrollPeriodController::exportSummary/$1', ['filter' => 'permission:payroll.view']);
-        $routes->get('payroll-periods/(:num)/bank-export', 'Payroll\PayrollPeriodController::bankExport/$1', ['filter' => ['permission:payroll.view', 'throttle:export']]);
-        $routes->get('payroll-periods/(:num)/pph21-export', 'Payroll\PayrollPeriodController::pph21Export/$1', ['filter' => ['permission:payroll.view', 'throttle:export']]);
-        $routes->get('payroll-periods/(:num)/bpjs-export', 'Payroll\PayrollPeriodController::bpjsExport/$1', ['filter' => ['permission:payroll.view', 'throttle:export']]);
+        $routes->get('payroll-periods/(:num)/bank-export', 'Payroll\PayrollPeriodController::bankExport/$1', ['filter' => ['permission:payroll.view', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);
+        $routes->get('payroll-periods/(:num)/pph21-export', 'Payroll\PayrollPeriodController::pph21Export/$1', ['filter' => ['permission:payroll.view', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);
+        $routes->get('payroll-periods/(:num)/bpjs-export', 'Payroll\PayrollPeriodController::bpjsExport/$1', ['filter' => ['permission:payroll.view', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);
         $routes->resource('payroll-periods', ['controller' => 'Payroll\PayrollPeriodController', 'only' => ['index', 'show'], 'filter' => 'permission:payroll.view']);
         $routes->resource('payroll-periods', ['controller' => 'Payroll\PayrollPeriodController', 'only' => ['new', 'create', 'edit', 'update', 'delete'], 'filter' => 'permission:payroll.manage']);
 

@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Employee;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Employee\EmployeeSensitiveChangeApprovalService;
 use Config\Services;
 
 class EmployeeController extends ApiController
@@ -570,16 +571,28 @@ class EmployeeController extends ApiController
         }
 
         $data = $this->getJsonInput();
-        $enc = \Config\Services::encryption();
+        $sensitiveFields = [
+            'employee_number', 'nik', 'npwp', 'bank_name', 'bank_account', 'bank_account_holder',
+            'bpjs_kesehatan_no', 'bpjs_tk_no', 'basic_salary', 'tax_method', 'ptkp_status', 'pph21_method',
+        ];
+        $attemptedSensitive = array_values(array_intersect($sensitiveFields, array_keys($data)));
+        if ($attemptedSensitive !== []) {
+            return $this->fail(
+                'Data sensitif wajib melalui sensitive-change; basic_salary wajib melalui Compensation Review.',
+                409,
+                'SENSITIVE_APPROVAL_REQUIRED',
+                ['fields' => $attemptedSensitive]
+            );
+        }
 
         $updatable = ['branch_id','department_id','position_id','job_grade_id','job_title_id','manager_id',
             'supervisor_id','work_location_id',
             'first_name','last_name','gender','religion','marital_status','place_of_birth','date_of_birth',
-            'blood_type','bpjs_kesehatan_no','bpjs_tk_no','bank_name','bank_account_holder',
+            'blood_type',
             'email','phone','address','province','city','postal_code','home_lat','home_lng',
             'emergency_contact_name','emergency_contact_phone','emergency_contact_rel',
             'employment_status','employment_type','join_date','probation_end_date','contract_end_date',
-            'resign_date','resign_reason','basic_salary','tax_method','ptkp_status','pph21_method',
+            'resign_date','resign_reason',
             'is_active','avatar_path',
             // Field khas Indonesia
             'kk_number','mother_name','father_name','citizenship','ethnicity','education_level',
@@ -589,45 +602,6 @@ class EmployeeController extends ApiController
             'approval_chain_leave_id','approval_chain_overtime_id','approval_chain_attendance_id'];
         $update = array_intersect_key($data, array_flip($updatable));
 
-        // NIK (employee_number) hanya boleh di-rename oleh super admin.
-        // NIK ini dipakai sebagai login identifier (lihat AuthController::login),
-        // jadi perubahan harus diaudit & dijamin unik per perusahaan.
-        if (array_key_exists('employee_number', $data)) {
-            if (! $this->tenant()->isSuperAdmin()) {
-                return $this->fail(
-                    'Hanya Super Admin yang dapat mengubah NIK karyawan',
-                    403,
-                    'NIK_CHANGE_FORBIDDEN'
-                );
-            }
-            $newNik = trim((string) $data['employee_number']);
-            if ($newNik === '') {
-                return $this->fail('NIK tidak boleh kosong', 422, 'INVALID_NIK');
-            }
-            if (! preg_match('/^[A-Za-z0-9_\-]{1,32}$/', $newNik)) {
-                return $this->fail(
-                    'Format NIK tidak valid (huruf, angka, "-" atau "_", maks 32 karakter)',
-                    422,
-                    'INVALID_NIK_FORMAT'
-                );
-            }
-            if ($newNik !== $existing['employee_number']) {
-                $dup = $db->table('employees')
-                    ->where('company_id', (int) $existing['company_id'])
-                    ->where('employee_number', $newNik)
-                    ->where('id !=', $id)
-                    ->where('deleted_at IS NULL')
-                    ->countAllResults();
-                if ($dup > 0) {
-                    return $this->fail(
-                        "NIK \"{$newNik}\" sudah dipakai karyawan lain",
-                        422,
-                        'DUPLICATE_EMPLOYEE_NUMBER'
-                    );
-                }
-                $update['employee_number'] = $newNik;
-            }
-        }
         // Normalize coords
         foreach (['home_lat','home_lng'] as $k) {
             if (array_key_exists($k, $update) && ($update[$k] === '' || $update[$k] === null)) {
@@ -637,16 +611,6 @@ class EmployeeController extends ApiController
             }
         }
 
-        if (isset($data['nik'])) {
-            $update['nik_encrypted'] = $enc->encrypt($data['nik']);
-            $update['nik_hash']      = $enc->hash($data['nik']);
-        }
-        if (isset($data['npwp'])) {
-            $update['npwp_encrypted'] = $enc->encrypt($data['npwp']);
-        }
-        if (isset($data['bank_account'])) {
-            $update['bank_account_encrypted'] = $enc->encrypt($data['bank_account']);
-        }
         if (isset($update['first_name']) || isset($update['last_name'])) {
             $first = $update['first_name'] ?? $existing['first_name'];
             $last  = $update['last_name'] ?? $existing['last_name'];
@@ -726,6 +690,29 @@ class EmployeeController extends ApiController
             }
         }
         return $this->ok(['id' => $id], 'Employee updated');
+    }
+
+    public function submitSensitiveChange($id = null)
+    {
+        try {
+            $result = (new EmployeeSensitiveChangeApprovalService())->submit(
+                (int) $id,
+                $this->companyId(),
+                (int) $this->tenant()->getUserId(),
+                $this->getJsonInput()
+            );
+            Services::audit()->forModule('EMPLOYEE')->log(
+                action: 'sensitive_change.submit',
+                entity: 'employee_sensitive_change_requests',
+                entityId: (int) ($result['request']['id'] ?? 0),
+                description: 'Perubahan data sensitif employee diajukan untuk maker-checker approval',
+            );
+            return $this->ok($result, 'Perubahan data sensitif diajukan untuk approval', 202);
+        } catch (\InvalidArgumentException $e) {
+            return $this->fail($e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 409);
+        }
     }
 
     public function delete($id = null)

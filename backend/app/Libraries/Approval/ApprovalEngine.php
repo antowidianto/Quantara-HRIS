@@ -10,7 +10,8 @@ use Config\Services;
  * Mesin approval generic untuk modul LEAVE / OVERTIME / ATTENDANCE_CHANGE /
  * REIMBURSEMENT / LOAN / BUSINESS_TRIP / BONUS / PAYROLL_ADJUSTMENT /
  * COMPENSATION_REVIEW / TRAINING_REGISTRATION / TIMESHEET / CANDIDATE_OFFER /
- * GENERATED_CONTRACT / ASSET_TRANSACTION.
+ * GENERATED_CONTRACT / ASSET_TRANSACTION / HIRE_CONVERSION / PERFORMANCE_GOAL /
+ * IDP_ACTIVATION / EMPLOYEE_SENSITIVE_CHANGE / MASTER_RATE_CHANGE / PRIVILEGED_ACTION.
  * Modul caller cukup memanggil:
  *
  *   $eng = Services::approval();
@@ -266,7 +267,12 @@ class ApprovalEngine
         $req = $builder->get()->getRowArray();
         if (! $req || $req['status'] !== 'PENDING') return false;
 
-        // Super admin / HR fallback selalu bisa approve.
+        // Authorization preview must match decide(): even a super-admin may
+        // never see their own transaction as actionable.
+        if ($this->isSelfApproval($userId, (int) $req['employee_id'], $req)) return false;
+
+        // Super admin dapat bertindak sebagai emergency approver untuk
+        // transaksi milik orang lain; keputusan tetap tercatat di audit trail.
         $tenant = Services::tenant();
         if ($tenant->isSuperAdmin() && (int) $tenant->getUserId() === $userId) return true;
 
@@ -829,17 +835,30 @@ class ApprovalEngine
                 foreach ($rows as $r) $candidates[] = (int) $r['id'];
             }
         } elseif ($type === 'HR') {
+            $roleSlugs = ['hr_admin', 'hr_director', 'hr_business_partner'];
+            $stepName = strtolower((string) ($step['name'] ?? ''));
+            $module = strtoupper((string) ($request['module'] ?? ''));
+            if (str_contains($stepName, 'l&d') || str_contains($stepName, 'talent')) {
+                $roleSlugs[] = 'learning_development';
+            }
+            if (str_contains($stepName, 'c&b')) $roleSlugs[] = 'compensation_benefits';
+            if (str_contains($stepName, 'payroll')) $roleSlugs[] = 'payroll_admin';
+            if (in_array($module, ['CANDIDATE_OFFER', 'HIRE_CONVERSION'], true)) {
+                $roleSlugs[] = 'recruiter';
+            }
+            $roleIds = $this->roleIdsForSlugs($roleSlugs, [2]);
             $rows = $db->table('users')
                 ->where('is_active', 1)
                 ->where('company_id', $companyId)
-                ->where('role_id', 2) // hr_admin
+                ->whereIn('role_id', $roleIds)
                 ->get()->getResultArray();
             foreach ($rows as $r) $candidates[] = (int) $r['id'];
         } elseif ($type === 'FINANCE') {
+            $roleIds = $this->roleIdsForSlugs(['finance', 'cfo'], [5]);
             $rows = $db->table('users')
                 ->where('is_active', 1)
                 ->where('company_id', $companyId)
-                ->where('role_id', 5) // finance
+                ->whereIn('role_id', $roleIds)
                 ->get()->getResultArray();
             foreach ($rows as $r) $candidates[] = (int) $r['id'];
         } elseif ($type === 'ROLE' && ! empty($step['approver_role_id'])) {
@@ -874,6 +893,21 @@ class ApprovalEngine
                 (string) $request['module']
             )
             : $candidates;
+    }
+
+    /** @param list<string> $slugs @param list<int> $fallbackIds @return list<int> */
+    private function roleIdsForSlugs(array $slugs, array $fallbackIds): array
+    {
+        $db = \Config\Database::connect();
+        if (! $db->tableExists('roles')) return $fallbackIds;
+        $rows = $db->table('roles')->select('id')
+            ->whereIn('slug', array_values(array_unique($slugs)))
+            ->get()->getResultArray();
+        $ids = array_values(array_unique(array_map(
+            static fn (array $row): int => (int) $row['id'],
+            $rows
+        )));
+        return $ids !== [] ? $ids : $fallbackIds;
     }
 
     /**
@@ -996,10 +1030,11 @@ class ApprovalEngine
     private function fallbackHrApprovers(int $companyId): array
     {
         $db = \Config\Database::connect();
+        $roleIds = $this->roleIdsForSlugs(['hr_admin', 'hr_director', 'hr_business_partner'], [2]);
         $rows = $db->table('users')
             ->where('is_active', 1)
             ->where('company_id', $companyId)
-            ->where('role_id', 2)
+            ->whereIn('role_id', $roleIds)
             ->get()->getResultArray();
         return array_map(fn ($r) => (int) $r['id'], $rows);
     }

@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Performance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Performance\IdpApprovalWorkflowService;
 use Config\Services;
 
 /**
@@ -30,8 +31,10 @@ class IdpController extends ApiController
     public function index()
     {
         if (! $this->canViewAll()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         $filters = [
-            'company_id'  => $this->tenant()->getCompanyId() ?: null,
+            'company_id'  => $companyId,
             'employee_id' => (int) ($this->request->getGet('employee_id') ?? 0) ?: null,
             'cycle_id'    => (int) ($this->request->getGet('cycle_id') ?? 0) ?: null,
             'status'      => trim((string) ($this->request->getGet('status') ?? '')) ?: null,
@@ -45,12 +48,14 @@ class IdpController extends ApiController
      */
     public function my()
     {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         $myEmpId = (int) $this->tenant()->getEmployeeId();
         if ($myEmpId <= 0) {
             return $this->fail('Akun ini tidak terhubung ke record karyawan', 422, 'NO_EMPLOYEE_LINK');
         }
         $rows = Services::idp()->listIdps([
-            'company_id'  => $this->tenant()->getCompanyId() ?: null,
+            'company_id'  => $companyId,
             'employee_id' => $myEmpId,
         ]);
         return $this->ok($rows);
@@ -58,8 +63,10 @@ class IdpController extends ApiController
 
     public function show($id = null)
     {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         try {
-            $idp = Services::idp()->load((int) $id);
+            $idp = Services::idp()->load((int) $id, $companyId);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 404);
         }
@@ -71,10 +78,12 @@ class IdpController extends ApiController
 
     public function create()
     {
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         if (! $this->canManage()) return $this->fail('Forbidden — butuh idp.manage', 403);
         $data = $this->getJsonInput();
         try {
-            $idp = Services::idp()->create($data, $this->userId());
+            $idp = Services::idp()->create($data, $this->userId(), $companyId);
             return $this->ok($idp, 'IDP DRAFT dibuat', 201);
         } catch (\InvalidArgumentException $e) {
             return $this->fail($e->getMessage(), 422);
@@ -88,8 +97,10 @@ class IdpController extends ApiController
     public function createFromReview($reviewId = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         try {
-            $idp = Services::idp()->createFromReview((int) $reviewId, $this->userId());
+            $idp = Services::idp()->createFromReview((int) $reviewId, $this->userId(), $companyId);
             $msg = $idp['created_at'] === $idp['updated_at']
                 ? "IDP DRAFT dibuat dari review #{$reviewId}"
                 : "IDP existing dari review #{$reviewId} dikembalikan";
@@ -104,8 +115,10 @@ class IdpController extends ApiController
     public function update($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         try {
-            $idp = Services::idp()->load($id);
+            $idp = Services::idp()->load($id, $companyId);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 404);
         }
@@ -115,7 +128,7 @@ class IdpController extends ApiController
             return $this->fail('Forbidden', 403);
         }
         try {
-            $updated = Services::idp()->update($id, $this->getJsonInput(), $this->userId());
+            $updated = Services::idp()->update($id, $this->getJsonInput(), $this->userId(), $companyId);
             return $this->ok($updated, 'IDP updated');
         } catch (\InvalidArgumentException $e) {
             return $this->fail($e->getMessage(), 422);
@@ -128,16 +141,19 @@ class IdpController extends ApiController
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         try {
-            $idp = Services::idp()->load($id);
+            $idp = Services::idp()->load($id, $companyId);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 404);
         }
-        if (! $this->tenant()->isSuperAdmin() && (int) $idp['company_id'] !== $this->tenant()->getCompanyId()) {
-            return $this->fail('Forbidden', 403);
+        if (! in_array((string) $idp['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
+            return $this->fail('IDP pending, aktif, atau selesai tidak dapat dihapus', 409);
         }
         $now = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('individual_development_plans')->where('id', $id)->update([
+        \Config\Database::connect()->table('individual_development_plans')->where('id', $id)
+            ->where('company_id', $companyId)->whereIn('status', ['DRAFT', 'APPROVAL_REJECTED'])->update([
             'deleted_at' => $now,
             'updated_at' => $now,
         ]);
@@ -148,9 +164,11 @@ class IdpController extends ApiController
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         try {
-            $result = Services::idp()->finalize($id, $this->userId());
-            return $this->ok($result, 'IDP DRAFT → ACTIVE');
+            $result = (new IdpApprovalWorkflowService())->submitActivation($id, $companyId, $this->userId());
+            return $this->ok($result, 'Aktivasi IDP diajukan untuk approval', 202);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -160,10 +178,12 @@ class IdpController extends ApiController
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         $data = $this->getJsonInput();
         $note = isset($data['manager_notes']) ? trim((string) $data['manager_notes']) : null;
         try {
-            $result = Services::idp()->complete($id, $this->userId(), $note ?: null);
+            $result = Services::idp()->complete($id, $this->userId(), $companyId, $note ?: null);
             return $this->ok($result, 'IDP ACTIVE → COMPLETED');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
@@ -174,13 +194,15 @@ class IdpController extends ApiController
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return $this->response;
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'reason' => 'required|min_length[5]|max_length[1000]',
         ]);
         if (! $valid) return null;
         try {
-            $result = Services::idp()->cancel($id, $this->userId(), $valid['reason']);
+            $result = Services::idp()->cancel($id, $this->userId(), $companyId, $valid['reason']);
             return $this->ok($result, 'IDP cancelled');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);

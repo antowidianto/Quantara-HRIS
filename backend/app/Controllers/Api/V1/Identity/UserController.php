@@ -36,6 +36,7 @@ class UserController extends ApiController
         $db = \Config\Database::connect();
         $row = $db->table('users')->where('id', (int) $id)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
+        if (! $this->tenant()->isSuperAdmin() && (int) $row['company_id'] !== $this->companyId()) return $this->fail('Forbidden', 403);
         unset($row['password_hash'], $row['twofa_secret']);
         return $this->ok($row);
     }
@@ -52,8 +53,11 @@ class UserController extends ApiController
         if (! $valid) return null;
 
         $db = \Config\Database::connect();
+        $companyId = $this->requireCompanyId(); if ($companyId === null) return null;
+        if (! $this->validRole($db, (int) $data['role_id'], $companyId)) return $this->fail('Role tidak valid untuk tenant target', 422, 'INVALID_ROLE');
+        if (! empty($data['employee_id']) && $db->table('employees')->where('id', (int) $data['employee_id'])->where('company_id', $companyId)->where('deleted_at IS NULL')->countAllResults() === 0) return $this->fail('Employee tidak valid untuk tenant target', 422, 'INVALID_EMPLOYEE');
         $db->table('users')->insert([
-            'company_id'    => $this->companyId() ?: null,
+            'company_id'    => $companyId,
             'role_id'       => $data['role_id'],
             'employee_id'   => $data['employee_id'] ?? null,
             'email'         => strtolower($data['email']),
@@ -76,8 +80,12 @@ class UserController extends ApiController
         $db = \Config\Database::connect();
         $existing = $db->table('users')->where('id', $id)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
+        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) return $this->fail('Forbidden', 403);
 
         $data = $this->getJsonInput();
+        $companyId = (int) $existing['company_id'];
+        if (isset($data['role_id']) && ! $this->validRole($db, (int) $data['role_id'], $companyId)) return $this->fail('Role tidak valid untuk tenant target', 422, 'INVALID_ROLE');
+        if (! empty($data['employee_id']) && $db->table('employees')->where('id', (int) $data['employee_id'])->where('company_id', $companyId)->where('deleted_at IS NULL')->countAllResults() === 0) return $this->fail('Employee tidak valid untuk tenant target', 422, 'INVALID_EMPLOYEE');
         $update = array_intersect_key($data, array_flip(['name','role_id','is_active','employee_id']));
         if (! empty($data['password']) && strlen($data['password']) >= 10) {
             $update['password_hash'] = password_hash($data['password'], PASSWORD_ARGON2ID);
@@ -96,9 +104,19 @@ class UserController extends ApiController
         $id = (int) $id;
         if ($id === $this->userId()) return $this->fail('Cannot delete yourself', 422);
         $db = \Config\Database::connect();
+        $existing = $db->table('users')->where('id', $id)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $existing) return $this->fail('Not found', 404);
+        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) return $this->fail('Forbidden', 403);
         $db->table('users')->where('id', $id)->update(['is_active' => 0, 'deleted_at' => date('Y-m-d H:i:s')]);
         Services::jwt()->revokeAllForUser($id);
         Services::audit()->log('user.delete', 'user', $id);
         return $this->ok(null, 'Deleted');
+    }
+
+    private function validRole($db, int $roleId, int $companyId): bool
+    {
+        $role = $db->table('roles')->where('id', $roleId)->groupStart()->where('company_id', $companyId)->orWhere('company_id IS NULL')->groupEnd()->get()->getRowArray();
+        if (! $role) return false;
+        return strtolower((string) $role['slug']) !== 'super_admin' || $this->tenant()->isSuperAdmin();
     }
 }

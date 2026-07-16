@@ -474,6 +474,9 @@ class RecruitmentController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $row = $this->loadCandidateOrFail((int) $id);
         if (! $row) return $this->response;
+        if (($row['hire_approval_status'] ?? null) === 'PENDING') {
+            return $this->fail('Candidate sedang menunggu approval hire dan tidak dapat diedit', 409);
+        }
         $data = $this->getJsonInput();
         $update = array_intersect_key($data, array_flip([
             'full_name','email','phone','birth_date','gender','address',
@@ -491,6 +494,9 @@ class RecruitmentController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $row = $this->loadCandidateOrFail((int) $id);
         if (! $row) return $this->response;
+        if (($row['hire_approval_status'] ?? null) === 'PENDING') {
+            return $this->fail('Candidate sedang menunggu approval hire dan tidak dapat dihapus', 409);
+        }
         if (! empty($row['converted_employee_id'])) {
             return $this->fail('Candidate sudah jadi employee, tidak bisa dihapus', 422);
         }
@@ -507,6 +513,9 @@ class RecruitmentController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $row = $this->loadCandidateOrFail((int) $id);
         if (! $row) return $this->response;
+        if (($row['hire_approval_status'] ?? null) === 'PENDING') {
+            return $this->fail('Candidate sedang menunggu approval hire dan tidak dapat dipindahkan', 409);
+        }
         $data = $this->getJsonInput();
         $stage = strtoupper((string) ($data['stage'] ?? ''));
         if (! in_array($stage, self::STAGES, true)) {
@@ -542,6 +551,9 @@ class RecruitmentController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $row = $this->loadCandidateOrFail((int) $id);
         if (! $row) return $this->response;
+        if (($row['hire_approval_status'] ?? null) === 'PENDING') {
+            return $this->fail('Candidate sedang menunggu approval hire dan tidak dapat ditolak', 409);
+        }
         $data = $this->getJsonInput();
         $reason = trim((string) ($data['reason'] ?? ''));
         if (strlen($reason) < 5) return $this->fail('Alasan minimal 5 karakter', 422);
@@ -603,63 +615,18 @@ class RecruitmentController extends ApiController
             return $this->fail('bpjs_kesehatan_class harus 1, 2, atau 3.', 422);
         }
         try {
-            $result = Services::recruitment()->convertToEmployee(
-                (int) $id,
-                (int) $row['company_id'],
-                $overrides,
-            );
-        } catch (\Throwable $e) {
-            return $this->fail($e->getMessage(), 422);
+            $result = (new \App\Libraries\Recruitment\HireApprovalWorkflowService())
+                ->submit((int) $id, (int) $row['company_id'], $this->userId(), $overrides);
+        } catch (\App\Libraries\Recruitment\HireApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode);
         }
-        $employeeId = $result['employee_id'];
         Services::audit()->forModule('RECRUITMENT')->log(
-            action: 'candidate.hire', entity: 'candidate', entityId: (int) $id,
-            after: ['employee_id' => $employeeId, 'user_id' => $result['user_id']],
-            description: "Convert {$row['full_name']} → employee #{$employeeId} + auto-trigger onboarding"
-                . ($result['user_id'] ? " + auto-create user account #{$result['user_id']}" : ''),
+            action: 'candidate.hire.submit', entity: 'candidate', entityId: (int) $id,
+            after: ['hire_approval_status' => 'PENDING'],
+            description: "Ajukan konversi {$row['full_name']} menjadi employee",
             severity: 'CRITICAL'
         );
-
-        // Sprint 14+ — webhook outbound `recruitment.candidate_hired`.
-        // Sengaja TIDAK kirim temp_password / email account ke external —
-        // hanya identifier supaya consumer (mis. background-check tool,
-        // analytics, accounting integration) bisa link ke employee baru.
-        $this->dispatchWebhook(
-            \App\Constants\WebhookEvent::CANDIDATE_HIRED,
-            (int) $row['company_id'],
-            [
-                'candidate_id'      => (int) $id,
-                'employee_id'       => $employeeId,
-                'job_posting_id'    => isset($row['job_posting_id']) ? (int) $row['job_posting_id'] : null,
-                'candidate_name'    => $row['full_name'] ?? null,
-                'employment_status' => $overrides['employment_status'] ?? null,
-                'join_date'         => $overrides['join_date'] ?? null,
-                'department_id'     => isset($overrides['department_id']) ? (int) $overrides['department_id'] : null,
-                'position_id'       => isset($overrides['position_id']) ? (int) $overrides['position_id'] : null,
-                'branch_id'         => isset($overrides['branch_id']) ? (int) $overrides['branch_id'] : null,
-                'hired_by'          => $this->userId(),
-                'hired_at'          => date('c'),
-            ],
-        );
-
-        // Sync MPP hired_count: kalau posting kandidat ini ditarik dari
-        // sebuah MPP, increment hired_count + auto-set FILLED bila qty
-        // terpenuhi. Best-effort, tidak blocking response hire.
-        try {
-            Services::manpower()->syncForJobPosting((int) $row['job_posting_id']);
-        } catch (\Throwable $e) {
-            log_message('warning', 'MPP sync after hire failed: ' . $e->getMessage());
-        }
-        // Response berisi credential ONE-TIME — frontend hire modal akan
-        // tampilkan sekali ke HR yang melakukan hire. Tidak disimpan
-        // plain text di DB; kalau hilang HR harus reset password manual.
-        return $this->ok([
-            'employee_id'          => $employeeId,
-            'user_id'              => $result['user_id'],
-            'user_email'           => $result['user_email'],
-            'temp_password'        => $result['temp_password'],
-            'auto_completed_tasks' => $result['auto_completed_tasks'],
-        ], 'Converted to employee', 201);
+        return $this->ok($result, 'Konversi kandidat diajukan untuk approval', 202);
     }
 
     public function pipelineStats()

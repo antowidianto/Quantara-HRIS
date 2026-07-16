@@ -21,10 +21,11 @@ final class AssetApprovalBusinessFlowTest extends CIUnitTestCase
         $this->db->query('CREATE TABLE db_positions (id INTEGER PRIMARY KEY, name TEXT)');
         $this->db->query('CREATE TABLE db_departments (id INTEGER PRIMARY KEY, name TEXT)');
         $this->db->query('CREATE TABLE db_employees (id INTEGER PRIMARY KEY, company_id INTEGER, user_id INTEGER, full_name TEXT, employee_number TEXT, position_id INTEGER, department_id INTEGER, deleted_at TEXT)');
-        $this->db->query('CREATE TABLE db_assets (id INTEGER PRIMARY KEY, company_id INTEGER, asset_number TEXT, category TEXT, name TEXT, brand TEXT, model TEXT, serial_number TEXT, purchase_price REAL, condition TEXT, status TEXT, current_assignment_id INTEGER, current_employee_id INTEGER, branch_id INTEGER, approval_action TEXT, approval_employee_id INTEGER, approval_assignment_id INTEGER, approval_payload TEXT, approval_rejected_by INTEGER, approval_rejected_at TEXT, approval_rejection_reason TEXT, updated_at TEXT, deleted_at TEXT)');
+        $this->db->query('CREATE TABLE db_assets (id INTEGER PRIMARY KEY, company_id INTEGER, asset_number TEXT, category TEXT, name TEXT, brand TEXT, model TEXT, serial_number TEXT, purchase_price REAL, condition TEXT, status TEXT, current_assignment_id INTEGER, current_employee_id INTEGER, branch_id INTEGER, approval_action TEXT, approval_employee_id INTEGER, approval_assignment_id INTEGER, approval_payload TEXT, approval_rejected_by INTEGER, approval_rejected_at TEXT, approval_rejection_reason TEXT, retired_at TEXT, retired_by INTEGER, retirement_approved_by INTEGER, retirement_reason TEXT, disposal_method TEXT, disposal_proceeds REAL, disposal_reference TEXT, book_value_at_retirement REAL, write_off_amount REAL, updated_at TEXT, deleted_at TEXT)');
         $this->db->query('CREATE TABLE db_asset_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, asset_id INTEGER, employee_id INTEGER, assigned_at TEXT, returned_at TEXT, expected_return TEXT, purpose TEXT, condition_when_assigned TEXT, condition_when_returned TEXT, damage_note TEXT, bast_html TEXT, bast_return_html TEXT, employee_acknowledged_at TEXT, returned_acknowledged_at TEXT, assigned_by INTEGER, returned_by INTEGER, created_at TEXT, updated_at TEXT)');
         $this->db->table('companies')->insert(['id' => 1, 'name' => 'FMCG Test', 'address' => 'Jakarta']);
         $this->db->table('employees')->insert(['id' => 10, 'company_id' => 1, 'user_id' => 110, 'full_name' => 'Pemegang Asset', 'employee_number' => 'EMP-10', 'deleted_at' => null]);
+        $this->db->table('employees')->insert(['id' => 20, 'company_id' => 1, 'user_id' => 20, 'full_name' => 'Asset Custodian', 'employee_number' => 'EMP-20', 'deleted_at' => null]);
         $this->db->table('users')->insert(['id' => 20, 'company_id' => 1, 'employee_id' => 20, 'is_active' => 1]);
         $this->db->table('assets')->insert(['id' => 40, 'company_id' => 1, 'asset_number' => 'AST-40', 'category' => 'LAPTOP', 'name' => 'Laptop Sales', 'purchase_price' => 60000000, 'condition' => 'GOOD', 'status' => 'AVAILABLE', 'updated_at' => '2026-07-16 10:00:00', 'deleted_at' => null]);
     }
@@ -72,6 +73,35 @@ final class AssetApprovalBusinessFlowTest extends CIUnitTestCase
         $this->assertSame('AVAILABLE', $asset['status']);
         $this->assertNull($asset['approval_action']);
         $this->assertSame(0, $this->db->table('asset_assignments')->countAllResults());
+    }
+
+    public function testRetirementWaitsForFinanceApprovalAndRecordsWriteOffEvidence(): void
+    {
+        $service = $this->service();
+        $submitted = $service->submitRetire(40, 1, 20, [
+            'retirement_date' => '2026-07-16',
+            'retirement_reason' => 'Laptop end of life dan tidak ekonomis diperbaiki',
+            'disposal_method' => 'SALE',
+            'book_value' => 58000000,
+            'disposal_proceeds' => 3000000,
+            'disposal_reference' => 'BA-DISPOSAL-2026-001',
+        ]);
+        $this->assertSame('RETIRE', $submitted['asset']['approval_action']);
+        $this->assertSame('AVAILABLE', $submitted['asset']['status']);
+        $this->assertSame(1, $this->started['meta']['is_asset_retirement']);
+        $this->assertSame(1, $this->started['meta']['is_loss_or_damage']);
+        $this->assertSame(1, $this->started['meta']['is_high_value_loss']);
+        $this->assertNotEmpty($this->started['meta']['asset_payload_hash']);
+
+        $result = $service->approve($this->request(), 99);
+        $this->assertSame('RETIRED', $result['status']);
+        $this->assertSame(55000000.0, $result['write_off_amount']);
+        $asset = $this->db->table('assets')->where('id', 40)->get()->getRowArray();
+        $this->assertSame('RETIRED', $asset['status']);
+        $this->assertSame('SALE', $asset['disposal_method']);
+        $this->assertSame('BA-DISPOSAL-2026-001', $asset['disposal_reference']);
+        $this->assertSame(55000000.0, (float) $asset['write_off_amount']);
+        $this->assertNull($asset['approval_action']);
     }
 
     public function testStaleOrCrossTenantAssetIsRejected(): void

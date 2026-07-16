@@ -59,6 +59,7 @@ class RoleController extends ApiController
         $db = \Config\Database::connect();
         $row = $db->table('roles')->where('id', (int) $id)->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
+        if ($row['company_id'] !== null && (int) $row['company_id'] !== $this->companyId() && ! $this->tenant()->isSuperAdmin()) return $this->fail('Forbidden', 403);
         $perms = $db->table('role_permissions rp')
             ->select('p.id, p.slug, p.name, p.group')
             ->join('permissions p', 'p.id = rp.permission_id')
@@ -118,6 +119,7 @@ class RoleController extends ApiController
         $db = \Config\Database::connect();
         $existing = $db->table('roles')->where('id', $id)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
+        if ($existing['company_id'] !== null && (int) $existing['company_id'] !== $this->companyId()) return $this->fail('Role bukan milik tenant target', 403);
 
         // Super admin BOLEH edit role apa pun, termasuk yang `is_system=1`
         // (hr_admin, manager, finance, employee, bahkan super_admin sendiri).
@@ -165,6 +167,7 @@ class RoleController extends ApiController
         $db = \Config\Database::connect();
         $existing = $db->table('roles')->where('id', $id)->get()->getRowArray();
         if (! $existing) return $this->fail('Not found', 404);
+        if ($existing['company_id'] !== null && (int) $existing['company_id'] !== $this->companyId()) return $this->fail('Role bukan milik tenant target', 403);
         if ((int) $existing['is_system'] === 1) return $this->fail('Cannot delete system role', 403);
 
         // Cegah penghapusan role yang masih aktif dipakai user — kalau

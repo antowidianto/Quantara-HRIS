@@ -27,6 +27,12 @@ final class ApprovalModuleCatalog
         'CANDIDATE_OFFER'    => 'candidate_offers',
         'GENERATED_CONTRACT' => 'generated_contracts',
         'ASSET_TRANSACTION'   => 'assets',
+        'HIRE_CONVERSION'     => 'candidates',
+        'PERFORMANCE_GOAL'    => 'goals',
+        'IDP_ACTIVATION'      => 'individual_development_plans',
+        'EMPLOYEE_SENSITIVE_CHANGE' => 'employee_sensitive_change_requests',
+        'MASTER_RATE_CHANGE' => 'master_rate_change_requests',
+        'PRIVILEGED_ACTION' => 'privileged_action_requests',
         'GENERIC'           => '',
     ];
 

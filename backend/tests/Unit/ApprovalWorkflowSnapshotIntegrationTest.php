@@ -8,7 +8,7 @@ use CodeIgniter\Test\CIUnitTestCase;
 final class ApprovalWorkflowSnapshotIntegrationTest extends CIUnitTestCase
 {
     /** @var list<string> */
-    private array $tables = ['job_postings', 'approval_delegations', 'approval_chain_steps', 'users', 'employees'];
+    private array $tables = ['approval_requests', 'job_postings', 'approval_delegations', 'approval_chain_steps', 'users', 'employees'];
 
     protected function setUp(): void
     {
@@ -20,7 +20,9 @@ final class ApprovalWorkflowSnapshotIntegrationTest extends CIUnitTestCase
         $db->query('CREATE TABLE db_approval_chain_steps (id INTEGER PRIMARY KEY, company_id INTEGER, chain_id INTEGER, step_order INTEGER, name TEXT, approver_type TEXT, approver_role_id INTEGER, approver_user_id INTEGER, approver_employee_id INTEGER, condition_field TEXT, condition_op TEXT, condition_value REAL, condition_type TEXT, condition_value_json TEXT, allow_skip_if_self INTEGER)');
         $db->query('CREATE TABLE db_approval_delegations (id INTEGER PRIMARY KEY, company_id INTEGER, user_id INTEGER, delegate_to_user_id INTEGER, module TEXT, is_active INTEGER, date_from TEXT, date_to TEXT)');
         $db->query('CREATE TABLE db_job_postings (id INTEGER PRIMARY KEY, company_id INTEGER, hiring_manager_id INTEGER, deleted_at TEXT)');
+        $db->query('CREATE TABLE db_approval_requests (id INTEGER PRIMARY KEY, company_id INTEGER, module TEXT, employee_id INTEGER, chain_id INTEGER, current_step_id INTEGER, current_step_order INTEGER, status TEXT, workflow_snapshot TEXT)');
         $db->table('employees')->insert(['id' => 1001, 'company_id' => 1001, 'user_id' => 1001]);
+        $db->table('users')->insert(['id' => 1001, 'company_id' => 1001, 'employee_id' => 1001, 'role_id' => 1, 'is_active' => 1, 'name' => 'Requester']);
         $db->table('users')->insert(['id' => 2001, 'company_id' => 1001, 'employee_id' => null, 'role_id' => 5, 'is_active' => 1, 'name' => 'Finance A']);
         $db->table('users')->insert(['id' => 2002, 'company_id' => 1001, 'employee_id' => null, 'role_id' => 5, 'is_active' => 1, 'name' => 'Finance B']);
         $db->table('users')->insert(['id' => 2003, 'company_id' => 1001, 'employee_id' => null, 'role_id' => 3, 'is_active' => 1, 'name' => 'Hiring Manager']);
@@ -119,6 +121,31 @@ final class ApprovalWorkflowSnapshotIntegrationTest extends CIUnitTestCase
 
         $db->table('job_postings')->where('id', 6001)->update(['hiring_manager_id' => 2002]);
         $this->assertSame([2003], $snapshot['steps'][0]['expected_approver_user_ids']);
+    }
+
+    public function testCanApproveHidesSelfApprovalBeforeSuperAdminOverride(): void
+    {
+        $snapshot = [
+            'fallback_strategy' => 'BLOCK',
+            'steps' => [[
+                'id' => 3001,
+                'step_order' => 1,
+                'expected_approver_user_ids' => [1001],
+            ]],
+        ];
+        \Config\Database::connect()->table('approval_requests')->insert([
+            'id' => 7001,
+            'company_id' => 1001,
+            'module' => 'REIMBURSEMENT',
+            'employee_id' => 1001,
+            'chain_id' => 4001,
+            'current_step_id' => 3001,
+            'current_step_order' => 1,
+            'status' => 'PENDING',
+            'workflow_snapshot' => json_encode($snapshot),
+        ]);
+
+        $this->assertFalse((new ApprovalEngine())->canApprove(7001, 1001));
     }
 
     protected function tearDown(): void

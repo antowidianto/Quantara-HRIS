@@ -17,6 +17,7 @@ final class EmployeeRoutes
         $routes->get('employees/(:num)/effective-history', 'Employee\EmployeeEffectiveHistoryController::index/$1', ['filter' => 'permission:employee.view']);
         $routes->get('employees/(:num)/as-of', 'Employee\EmployeeEffectiveHistoryController::showAsOf/$1', ['filter' => 'permission:employee.view']);
         $routes->post('employees/(:num)/effective-history', 'Employee\EmployeeEffectiveHistoryController::create/$1', ['filter' => ['permission:employee.manage', 'idempotency:required']]);
+        $routes->post('employees/(:num)/sensitive-change', 'Employee\EmployeeController::submitSensitiveChange/$1', ['filter' => ['permission:employee.manage', 'idempotency:required']]);
         // Pakai placeholder `(:num)` supaya `employees/(:any)` versi default
         // dari resource() (yang regex-nya `(.*)` — greedy, match juga slash)
         // tidak menelan sub-route seperti `/employees/1/bonus-history`,
