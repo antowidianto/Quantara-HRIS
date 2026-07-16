@@ -56,7 +56,8 @@ class RecruitmentController extends ApiController
             return $this->fail('Format since: YYYY-MM-DD', 422);
         }
         $companyId = $this->companyId();
-        $rows = Services::recruitment()->funnelMetrics($jobPostingId, $companyId ?: null, $since);
+        if (! $companyId) return $this->fail('Company context tidak terdeteksi', 400);
+        $rows = Services::recruitment()->funnelMetrics($jobPostingId, $companyId, $since);
         return $this->ok([
             'job_posting_id' => $jobPostingId,
             'since'          => $since ?? date('Y-m-d', strtotime('-90 days')),
@@ -389,7 +390,7 @@ class RecruitmentController extends ApiController
         // hanya UX hint supaya HR tidak nge-klik & dapat error.
         try {
             $row['online_test_status'] = Services::recruitment()
-                ->onlineTestCompletionStatus((int) $row['id']);
+                ->onlineTestCompletionStatus((int) $row['id'], (int) $row['company_id']);
         } catch (\Throwable $e) {
             $row['online_test_status'] = null;
         }
@@ -518,7 +519,7 @@ class RecruitmentController extends ApiController
             );
         }
         try {
-            $stageId = Services::recruitment()->moveStage((int) $id, $stage, [
+            $stageId = Services::recruitment()->moveStage((int) $id, (int) $row['company_id'], $stage, [
                 'scheduled_at'  => $data['scheduled_at'] ?? null,
                 'interviewer_id'=> $data['interviewer_id'] ?? null,
                 'feedback'      => $data['feedback'] ?? null,
@@ -545,7 +546,7 @@ class RecruitmentController extends ApiController
         $reason = trim((string) ($data['reason'] ?? ''));
         if (strlen($reason) < 5) return $this->fail('Alasan minimal 5 karakter', 422);
         try {
-            Services::recruitment()->reject((int) $id, $reason, $this->userId());
+            Services::recruitment()->reject((int) $id, (int) $row['company_id'], $reason, $this->userId());
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }
@@ -602,7 +603,11 @@ class RecruitmentController extends ApiController
             return $this->fail('bpjs_kesehatan_class harus 1, 2, atau 3.', 422);
         }
         try {
-            $result = Services::recruitment()->convertToEmployee((int) $id, $overrides);
+            $result = Services::recruitment()->convertToEmployee(
+                (int) $id,
+                (int) $row['company_id'],
+                $overrides,
+            );
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }

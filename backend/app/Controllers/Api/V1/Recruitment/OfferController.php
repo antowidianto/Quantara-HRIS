@@ -15,9 +15,9 @@ use Config\Services;
  *   GET    /offers/(:num)                   — detail offer
  *   PUT    /offers/(:num)                   — update DRAFT offer
  *   DELETE /offers/(:num)                   — soft-delete (DRAFT only)
- *   POST   /offers/(:num)/send              — DRAFT → SENT
+ *   POST   /offers/(:num)/send              — submit approval
  *   POST   /offers/(:num)/respond           — record response (ACCEPTED/REJECTED) — HR proxy
- *   POST   /offers/(:num)/withdraw          — withdraw (DRAFT/SENT only)
+ *   POST   /offers/(:num)/withdraw          — withdraw/cancel active offer
  *
  * Authorization:
  *   - View:    `recruitment.offer.view` ATAU `recruitment.view`
@@ -122,8 +122,16 @@ class OfferController extends ApiController
     public function createForCandidate($candidateId = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden — butuh recruitment.offer.manage', 403);
+        $candidateId = (int) $candidateId;
+        $candidate = \Config\Database::connect()->table('candidates')->where('id', $candidateId)
+            ->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $candidate) return $this->fail('Candidate not found', 404);
+        if (! $this->tenant()->isSuperAdmin()
+            && (int) $candidate['company_id'] !== $this->tenant()->getCompanyId()) {
+            return $this->fail('Forbidden', 403);
+        }
         $data = $this->getJsonInput();
-        $data['candidate_id'] = (int) $candidateId;
+        $data['candidate_id'] = $candidateId;
 
         try {
             $offer = Services::offer()->create($data, $this->userId());
@@ -206,8 +214,8 @@ class OfferController extends ApiController
             }
             $data = $this->getJsonInput();
             $note = isset($data['note']) ? trim((string) $data['note']) : null;
-            $sent = Services::offer()->send($id, $this->userId(), $note ?: null);
-            return $this->ok($sent, "Offer {$sent['offer_number']} sent ke kandidat");
+            $submitted = Services::offer()->send($id, $this->userId(), $note ?: null);
+            return $this->ok($submitted, "Offer {$submitted['offer_number']} diajukan untuk approval");
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
         }

@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Payroll;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Payroll\ReimbursementApprovalException;
 use Config\Services;
 
 class ReimbursementController extends ApiController
@@ -127,8 +128,36 @@ class ReimbursementController extends ApiController
 
         $db->table('reimbursements')->insert($insert);
         $id = (int) $db->insertID();
+        try {
+            $approval = Services::approval()->start([
+                'company_id' => $companyId,
+                'module' => 'REIMBURSEMENT',
+                'entity_table' => 'reimbursements',
+                'entity_id' => $id,
+                'employee_id' => $employeeId,
+                'meta' => [
+                    'amount' => (float) $data['amount'],
+                    'category' => (string) $data['category'],
+                    'expense_date' => (string) $data['expense_date'],
+                    'cost_center_id' => $insert['cost_center_id'] ?? null,
+                ],
+            ]);
+        } catch (\Throwable $exception) {
+            $db->table('reimbursements')->where('id', $id)
+                ->where('company_id', $companyId)->delete();
+            return $this->fail(
+                'Gagal membuat workflow approval: ' . $exception->getMessage(),
+                500,
+                'APPROVAL_START_FAILED'
+            );
+        }
         Services::audit()->log('reimbursement.create', 'reimbursement', $id);
-        return $this->ok(['id' => $id, 'request_number' => $reqNumber], 'Reimbursement requested', 201);
+        return $this->ok([
+            'id' => $id,
+            'request_number' => $reqNumber,
+            'status' => 'PENDING',
+            'approval' => $approval,
+        ], 'Reimbursement requested', 201);
     }
 
     public function update($id = null)
@@ -147,94 +176,67 @@ class ReimbursementController extends ApiController
         if (! $row) return $this->fail('Not found', 404);
         if (! $this->privacy()->canAccessRow($row, 'reimbursement')) return $this->fail('Forbidden', 403);
         if ($row['status'] !== 'PENDING') return $this->fail('Cannot cancel', 422);
-        $db->table('reimbursements')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
-            ->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
+        $db->transBegin();
+        try {
+            $db->table('reimbursements')
+                ->where('id', (int) $id)
+                ->where('company_id', $companyId)
+                ->where('status', 'PENDING')
+                ->update(['status' => 'CANCELLED', 'updated_at' => date('Y-m-d H:i:s')]);
+            if ($db->affectedRows() !== 1) throw new \RuntimeException('Request berubah; muat ulang data');
+            Services::approval()->cancelEntity(
+                'REIMBURSEMENT', 'reimbursements', (int) $id, $companyId
+            );
+            if (! $db->transStatus()) throw new \RuntimeException('Gagal membatalkan workflow');
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            return $this->fail($exception->getMessage(), 409, 'CANCEL_CONFLICT');
+        }
+        Services::audit()->log('reimbursement.cancel', 'reimbursement', (int) $id);
         return $this->ok(null, 'Cancelled');
     }
 
     public function approve($id)
     {
-        $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $row = $db->table('reimbursements')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
-            ->get()->getRowArray();
-        if (! $row) return $this->fail('Not found', 404);
-        if ($row['status'] !== 'PENDING') return $this->fail('Cannot approve non-pending request', 422);
-
-        // Phase 3: Deduct from benefit balance if it has a policy
-        $policy = $db->table('benefit_policies')->where('company_id', $row['company_id'])
-                     ->where('name', $row['category'])->get()->getRowArray();
-
-        if ($policy) {
-            $year = date('Y', strtotime($row['expense_date']));
-            $balance = $db->table('employee_benefit_balances')
-                          ->where('company_id', $companyId)
-                          ->where('employee_id', $row['employee_id'])
-                          ->where('policy_id', $policy['id'])
-                          ->where('year', $year)
-                          ->get()->getRowArray();
-
-            if ($balance) {
-                $db->table('employee_benefit_balances')
-                   ->where('id', $balance['id'])
-                   ->where('company_id', $companyId)
-                   ->update([
-                       'used_amount' => $balance['used_amount'] + $row['amount'],
-                       'updated_at' => date('Y-m-d H:i:s')
-                   ]);
-            } else {
-                $db->table('employee_benefit_balances')->insert([
-                    'company_id' => $companyId,
-                    'employee_id' => $row['employee_id'],
-                    'policy_id' => $policy['id'],
-                    'year' => $year,
-                    'allocated_amount' => $policy['limit_amount'],
-                    'used_amount' => $row['amount'],
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
-            }
+        if ($companyId === null) return null;
+        $note = trim((string) ($this->getJsonInput()['note'] ?? ''));
+        try {
+            $approval = Services::approval()->approveEntity(
+                'REIMBURSEMENT', 'reimbursements', (int) $id,
+                $companyId, $this->userId(), $note
+            );
+        } catch (ReimbursementApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+        } catch (\Throwable $exception) {
+            return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
         }
-
-        $db->table('reimbursements')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
-            ->update([
-            'status' => 'APPROVED',
-            'approved_by' => $this->userId(),
-            'approved_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s')
-        ]);
-
-        Services::audit()->log('reimbursement.approve', 'reimbursement', $id);
-        return $this->ok(null, 'Reimbursement approved');
+        if (! ($approval['final'] ?? false)) {
+            Services::audit()->log('reimbursement.approval_step', 'approval_request', (int) $approval['request_id']);
+            return $this->ok($approval, 'Approval step recorded');
+        }
+        Services::audit()->log('reimbursement.approve', 'reimbursement', (int) $id);
+        return $this->ok(['approval' => $approval], 'Reimbursement approved');
     }
 
     public function reject($id)
     {
-        $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $row = $db->table('reimbursements')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
-            ->get()->getRowArray();
-        if (! $row) return $this->fail('Not found', 404);
-        if ($row['status'] !== 'PENDING') return $this->fail('Cannot reject non-pending request', 422);
-        $db->table('reimbursements')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
-            ->update([
-            'status' => 'REJECTED',
-            'approved_by' => $this->userId(),
-            'approved_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s')
-        ]);
-        Services::audit()->log('reimbursement.reject', 'reimbursement', $id);
-        return $this->ok(null, 'Reimbursement rejected');
+        if ($companyId === null) return null;
+        $reason = trim((string) ($this->getJsonInput()['reason'] ?? ''));
+        try {
+            $approval = Services::approval()->rejectEntity(
+                'REIMBURSEMENT', 'reimbursements', (int) $id,
+                $companyId, $this->userId(), $reason
+            );
+        } catch (ReimbursementApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->status, $exception->errorCode);
+        } catch (\Throwable $exception) {
+            return $this->fail($exception->getMessage(), 422, 'APPROVAL_WORKFLOW_ERROR');
+        }
+        Services::audit()->log('reimbursement.reject', 'reimbursement', (int) $id);
+        return $this->ok(['approval' => $approval], 'Reimbursement rejected');
     }
 
     public function myBalances()

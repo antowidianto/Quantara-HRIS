@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Security;
 
 use App\Repositories\Employee\JicQueryRepository;
+use App\Repositories\Employee\JicWorkflowRepository;
 use CodeIgniter\Database\BaseConnection;
 use PHPUnit\Framework\TestCase;
 
@@ -48,12 +49,43 @@ final class JicQueryRepositoryPolicyTest extends TestCase
 
     public function testJicIdMutationsCarryCompanyBoundary(): void
     {
-        $source = file_get_contents(APPPATH . 'Controllers/Api/V1/Employee/JicController.php');
-        self::assertIsString($source);
-        preg_match_all("/table\('job_information_changes'\).{0,180}?where\('id',.{0,220}?(?:update|delete)\(/s", $source, $matches);
-        self::assertNotEmpty($matches[0]);
-        foreach ($matches[0] as $mutation) {
-            self::assertStringContainsString("where('company_id'", $mutation, 'JIC mutation must retain the tenant key.');
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Employee/JicController.php');
+        $repository = file_get_contents(APPPATH . 'Repositories/Employee/JicWorkflowRepository.php');
+        self::assertIsString($controller);
+        self::assertIsString($repository);
+        self::assertStringNotContainsString('Database::connect', $controller);
+        self::assertStringNotContainsString('->table(', $controller);
+        self::assertStringContainsString('new JicWorkflowService()', $controller);
+        self::assertStringContainsString("table('job_information_changes')->where('id', \$id)", $repository);
+        self::assertStringContainsString("where('company_id', \$companyId)->update(\$payload)", $repository);
+    }
+
+    public function testDraftMutationsDelegateToFailClosedTenantRepository(): void
+    {
+        $db = $this->createMock(BaseConnection::class);
+        $repository = new JicWorkflowRepository($db);
+        foreach ([
+            fn () => $repository->employee(1, 0),
+            fn () => $repository->hasActiveRequest(1, 0),
+            fn () => $repository->create(['company_id' => 0], 0),
+            fn () => $repository->update(1, 0, []),
+        ] as $operation) {
+            try {
+                $operation();
+                self::fail('JIC draft mutation accepted a missing tenant context');
+            } catch (\DomainException $exception) {
+                self::assertStringContainsString('company context', $exception->getMessage());
+            }
         }
+
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Employee/JicController.php');
+        self::assertIsString($controller);
+        $draftBlock = substr(
+            $controller,
+            strpos($controller, 'public function create()'),
+            strpos($controller, '// ─── WORKFLOW ACTIONS') - strpos($controller, 'public function create()'),
+        );
+        self::assertStringContainsString('new JicWorkflowRepository()', $draftBlock);
+        self::assertStringNotContainsString('Database::connect', $draftBlock);
     }
 }

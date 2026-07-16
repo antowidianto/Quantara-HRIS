@@ -17,7 +17,7 @@ import ExcelImporter from '@/components/ExcelImporter.vue'
  *
  * Tampilkan run + recipients table. Aksi:
  *   - Calculate / Re-calculate (DRAFT/CALCULATED)
- *   - Approve (CALCULATED → APPROVED, perlu permission bonus.approve)
+ *   - Submit approval (CALCULATED → PENDING_APPROVAL, perlu permission bonus.manage)
  *   - Mark Paid (APPROVED → PAID, perlu permission bonus.approve)
  *   - Override / exclude recipient individual (DRAFT/CALCULATED only)
  */
@@ -98,21 +98,21 @@ async function calculate() {
   }
 }
 
-async function approve() {
+async function submitApproval() {
   const ok = await confirmDialog({
-    title: 'Approve bonus run?',
-    message: `Setelah APPROVED, total ${fmtCurrency(run.value?.total_amount || 0)} untuk ${run.value?.recipient_count} karyawan akan masuk ke payroll period (kalau di-link). Lanjut?`,
-    okText: 'Approve',
+    title: 'Ajukan approval bonus?',
+    message: `Total ${fmtCurrency(run.value?.total_amount || 0)} untuk ${run.value?.recipient_count} karyawan akan dikunci dan masuk approval HR, Finance, serta Direksi sesuai threshold. Lanjut?`,
+    okText: 'Ajukan',
     variant: 'warning',
   })
   if (! ok) return
   loadingAction.value = true
   try {
-    await api.post(`/bonus-runs/${runId.value}/approve`)
-    toast.success('Bonus run di-APPROVE')
+    await api.post(`/bonus-runs/${runId.value}/submit`)
+    toast.success('Bonus run masuk antrean approval')
     await loadRun()
   } catch (e) {
-    toast.error(e.response?.data?.message || 'Gagal approve')
+    toast.error(e.response?.data?.message || 'Gagal mengajukan approval')
   } finally {
     loadingAction.value = false
   }
@@ -220,15 +220,17 @@ async function toggleExclude(row) {
 const STATUS_BADGE = {
   DRAFT:      'badge-gray',
   CALCULATED: 'badge-blue',
+  PENDING_APPROVAL: 'badge-purple',
   APPROVED:   'badge-yellow',
+  REJECTED:   'badge-red',
   PAID:       'badge-green',
   CANCELLED:  'badge-red',
 }
 
-const canCalculate    = computed(() => run.value && ['DRAFT', 'CALCULATED'].includes(run.value.status))
-const canApprove      = computed(() => run.value?.status === 'CALCULATED')
+const canCalculate    = computed(() => run.value && ['DRAFT', 'CALCULATED', 'REJECTED'].includes(run.value.status))
+const canSubmit       = computed(() => run.value?.status === 'CALCULATED')
 const canMarkPaid     = computed(() => run.value?.status === 'APPROVED')
-const canEditRecipient= computed(() => run.value && ['DRAFT', 'CALCULATED'].includes(run.value.status))
+const canEditRecipient= computed(() => run.value && ['DRAFT', 'CALCULATED', 'REJECTED'].includes(run.value.status))
 
 // Stats
 const includedCount = computed(() => recipients.value.filter(r => ! r.is_excluded).length)
@@ -285,8 +287,17 @@ const overridesCount = computed(() => recipients.value.filter(r => r.amount_over
              class="mx-6 mt-3 p-3 rounded-md bg-blue-50 border border-blue-200 text-xs text-blue-800">
           <strong>Status: CALCULATED.</strong> Recipient sudah dihitung tapi
           <span class="font-semibold">belum terlihat oleh karyawan</span>. Review
-          recipient list (override / exclude bila perlu), lalu klik <em>Approve</em>
-          supaya muncul di menu "Riwayat Bonus" karyawan dan ikut ke payroll.
+          recipient list (override / exclude bila perlu), lalu ajukan approval bertingkat.
+        </div>
+        <div v-else-if="run.status === 'PENDING_APPROVAL'"
+             class="mx-6 mt-3 p-3 rounded-md bg-purple-50 border border-purple-200 text-xs text-purple-800">
+          <strong>Status: PENDING APPROVAL.</strong> Nominal dan recipient dikunci.
+          Keputusan dilakukan melalui Inbox Approval sesuai chain yang tersnapshot.
+        </div>
+        <div v-else-if="run.status === 'REJECTED'"
+             class="mx-6 mt-3 p-3 rounded-md bg-red-50 border border-red-200 text-xs text-red-800">
+          <strong>Status: REJECTED.</strong> {{ run.rejection_reason || 'Periksa audit keputusan.' }}
+          Hitung ulang untuk memperbaiki data sebelum diajukan kembali.
         </div>
         <div v-else-if="run.status === 'APPROVED'"
              class="mx-6 mt-3 p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
@@ -311,8 +322,8 @@ const overridesCount = computed(() => recipients.value.filter(r => r.amount_over
             <CalculatorIcon class="w-4 h-4" />
             {{ run.status === 'DRAFT' ? 'Calculate' : 'Re-calculate' }}
           </button>
-          <button v-if="canApprove" @click="approve" :disabled="loadingAction" class="btn-warning">
-            <CheckBadgeIcon class="w-4 h-4" /> Approve & Publish ke Karyawan
+          <button v-if="canSubmit" @click="submitApproval" :disabled="loadingAction" class="btn-warning">
+            <CheckBadgeIcon class="w-4 h-4" /> Ajukan Approval
           </button>
           <button v-if="canMarkPaid" @click="markPaid" :disabled="loadingAction" class="btn-success">
             <CurrencyDollarIcon class="w-4 h-4" /> Mark Paid

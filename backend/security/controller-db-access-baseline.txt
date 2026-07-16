@@ -30,7 +30,6 @@ app/Controllers/Api/V1/Employee/AnniversaryController.php|1
 app/Controllers/Api/V1/Employee/Employee360Controller.php|1
 app/Controllers/Api/V1/Employee/EmployeeController.php|11
 app/Controllers/Api/V1/Employee/EmployeeTransferController.php|4
-app/Controllers/Api/V1/Employee/JicController.php|14
 app/Controllers/Api/V1/Employee/ProbationController.php|1
 app/Controllers/Api/V1/Erp/ErpJournalController.php|14
 app/Controllers/Api/V1/Helpdesk/HelpdeskController.php|1
@@ -41,7 +40,6 @@ app/Controllers/Api/V1/Identity/MenuController.php|1
 app/Controllers/Api/V1/Identity/PermissionController.php|2
 app/Controllers/Api/V1/Identity/RoleController.php|5
 app/Controllers/Api/V1/Identity/UserController.php|5
-app/Controllers/Api/V1/Leave/LeaveController.php|11
 app/Controllers/Api/V1/License/LicenseController.php|12
 app/Controllers/Api/V1/Lifecycle/ContractTemplateController.php|7
 app/Controllers/Api/V1/Lifecycle/DisciplinaryController.php|12
@@ -69,7 +67,6 @@ app/Controllers/Api/V1/Notification/NotificationPreferenceController.php|2
 app/Controllers/Api/V1/Notification/WebPushController.php|2
 app/Controllers/Api/V1/Payroll/AllowanceController.php|11
 app/Controllers/Api/V1/Payroll/BenefitPolicyController.php|5
-app/Controllers/Api/V1/Payroll/BonusController.php|22
 app/Controllers/Api/V1/Payroll/DisbursementController.php|2
 app/Controllers/Api/V1/Payroll/LoanController.php|5
 app/Controllers/Api/V1/Payroll/PayrollAdjustmentController.php|1
@@ -79,12 +76,11 @@ app/Controllers/Api/V1/Payroll/PayslipController.php|5
 app/Controllers/Api/V1/Payroll/ReimbursementController.php|7
 app/Controllers/Api/V1/Performance/IdpController.php|1
 app/Controllers/Api/V1/Performance/PerformanceController.php|1
-app/Controllers/Api/V1/Recruitment/CandidateOnlineTestController.php|7
+app/Controllers/Api/V1/Recruitment/CandidateOnlineTestController.php|6
 app/Controllers/Api/V1/Recruitment/CareerController.php|7
 app/Controllers/Api/V1/Recruitment/CareerPublicController.php|4
 app/Controllers/Api/V1/Recruitment/OfferController.php|3
 app/Controllers/Api/V1/Recruitment/OnlineTestCategoryController.php|6
-app/Controllers/Api/V1/Recruitment/OnlineTestController.php|24
 app/Controllers/Api/V1/Recruitment/RecruitmentController.php|14
 app/Controllers/Api/V1/Recruitment/RecruitmentPipelineController.php|7
 app/Controllers/Api/V1/Signing/SigningController.php|12

@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Approval;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Approval\ApprovalModuleCatalog;
 use Config\Services;
 
 /**
@@ -77,12 +78,16 @@ class ApprovalChainController extends ApiController
         $valid = $this->validateOrFail($data, [
             'code'   => 'required|max_length[64]',
             'name'   => 'required|max_length[200]',
-            'module' => 'required|in_list[LEAVE,OVERTIME,ATTENDANCE_CHANGE,REIMBURSEMENT,LOAN,GENERIC]',
+            'module' => 'required|max_length[40]',
             'fallback_strategy' => 'permit_empty|in_list[SKIP,BLOCK,HR_FALLBACK]',
             'is_default' => 'permit_empty|in_list[0,1]',
             'is_active'  => 'permit_empty|in_list[0,1]',
         ]);
         if (! $valid) return null;
+        $data['module'] = strtoupper(trim((string) $data['module']));
+        if (! ApprovalModuleCatalog::isSupported($data['module'])) {
+            return $this->fail('Modul approval tidak didukung', 422, 'UNSUPPORTED_APPROVAL_MODULE');
+        }
 
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return null;
@@ -141,8 +146,24 @@ class ApprovalChainController extends ApiController
             return $this->fail('Forbidden', 403);
         }
         $data = $this->getJsonInput();
+        if (array_key_exists('module', $data)) {
+            $data['module'] = strtoupper(trim((string) $data['module']));
+            if (! ApprovalModuleCatalog::isSupported($data['module'])) {
+                return $this->fail('Modul approval tidak didukung', 422, 'UNSUPPORTED_APPROVAL_MODULE');
+            }
+        }
 
         $update = array_intersect_key($data, array_flip(['name','description','module','is_default','fallback_strategy','is_active']));
+        if ((array_key_exists('steps', $data)
+                || array_key_exists('module', $update)
+                || array_key_exists('fallback_strategy', $update))
+            && $this->hasPendingRequests($db, $id, (int) $existing['company_id'])) {
+            return $this->fail(
+                'Chain masih dipakai request PENDING. Buat versi chain baru untuk mengubah modul/step.',
+                409,
+                'CHAIN_HAS_PENDING_REQUESTS'
+            );
+        }
         $update['updated_at'] = date('Y-m-d H:i:s');
         if (isset($update['is_default']) && (int) $update['is_default'] === 1) {
             $db->table('approval_chains')
@@ -172,6 +193,13 @@ class ApprovalChainController extends ApiController
         if (! $existing) return $this->fail('Not found', 404);
         if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
+        }
+        if ($this->hasPendingRequests($db, $id, (int) $existing['company_id'])) {
+            return $this->fail(
+                'Chain masih dipakai request PENDING dan tidak boleh dihapus',
+                409,
+                'CHAIN_HAS_PENDING_REQUESTS'
+            );
         }
         $db->table('approval_chains')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update([
             'deleted_at' => date('Y-m-d H:i:s'),
@@ -207,10 +235,14 @@ class ApprovalChainController extends ApiController
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'chain_id' => 'required|integer',
-            'module'   => 'required|in_list[LEAVE,OVERTIME,ATTENDANCE_CHANGE,REIMBURSEMENT,LOAN,GENERIC]',
+            'module'   => 'required|max_length[40]',
             'priority' => 'permit_empty|integer',
         ]);
         if (! $valid) return null;
+        $data['module'] = strtoupper(trim((string) $data['module']));
+        if (! ApprovalModuleCatalog::isSupported($data['module'])) {
+            return $this->fail('Modul approval tidak didukung', 422, 'UNSUPPORTED_APPROVAL_MODULE');
+        }
         $companyId = $this->requireCompanyId();
         if ($companyId === null) return null;
         $now = date('Y-m-d H:i:s');
@@ -218,6 +250,13 @@ class ApprovalChainController extends ApiController
         $chain = $this->findChainForTenant($db, (int) $data['chain_id']);
         if (! $chain || (int) $chain['company_id'] !== $companyId) {
             return $this->fail('Approval chain tidak ditemukan di perusahaan aktif', 422, 'CROSS_TENANT_CHAIN');
+        }
+        if ((string) $chain['module'] !== $data['module']) {
+            return $this->fail(
+                'Modul assignment harus sama dengan modul chain',
+                422,
+                'CHAIN_MODULE_MISMATCH'
+            );
         }
         $insert = [
             'company_id'    => $companyId,
@@ -442,6 +481,12 @@ class ApprovalChainController extends ApiController
     private function replaceSteps(int $chainId, int $companyId, array $steps): void
     {
         $db = \Config\Database::connect();
+        if ($this->hasPendingRequests($db, $chainId, $companyId)) {
+            throw new \RuntimeException(
+                'Step chain tidak boleh diubah selama masih ada request PENDING. '
+                . 'Nonaktifkan chain dan buat versi baru.'
+            );
+        }
         $db->table('approval_chain_steps')->where('chain_id', $chainId)->where('company_id', $companyId)->delete();
         $now = date('Y-m-d H:i:s');
         // Sprint 9 / H1.3 — terima condition_type + condition_value_json baru.
@@ -504,5 +549,17 @@ class ApprovalChainController extends ApiController
             ->where('id', $id)
             ->where('company_id', $companyId)
             ->countAllResults() === 1;
+    }
+
+    private function hasPendingRequests(
+        \CodeIgniter\Database\BaseConnection $db,
+        int $chainId,
+        int $companyId
+    ): bool {
+        return $db->table('approval_requests')
+            ->where('chain_id', $chainId)
+            ->where('company_id', $companyId)
+            ->where('status', 'PENDING')
+            ->countAllResults() > 0;
     }
 }

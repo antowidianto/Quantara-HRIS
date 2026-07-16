@@ -39,7 +39,7 @@ final class PayrollControlPolicyTest extends TestCase
             'Approved or finalized payroll cannot be recalculated',
             $service
         );
-        self::assertStringContainsString("period['status'] !== 'APPROVED'", $service);
+        self::assertStringContainsString("in_array(\$period['status'], ['DRAFT', 'CALCULATED'], true)", $service);
     }
 
     public function testSubmitApproveAndFinalizeRoutesHaveExplicitPolicies(): void
@@ -81,7 +81,7 @@ final class PayrollControlPolicyTest extends TestCase
     public function testEveryFinancialTransitionVerifiesTheSnapshot(): void
     {
         foreach ([
-            APPPATH . 'Libraries/Payroll/PayrollService.php',
+            APPPATH . 'Libraries/Payroll/PayrollFinalizationService.php',
             APPPATH . 'Controllers/Api/V1/Payroll/DisbursementController.php',
             APPPATH . 'Libraries/Payroll/PayrollPaymentSettlementService.php',
         ] as $path) {

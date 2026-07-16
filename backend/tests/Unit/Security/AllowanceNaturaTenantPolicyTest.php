@@ -39,7 +39,7 @@ final class AllowanceNaturaTenantPolicyTest extends TestCase
 
     public function testPayrollPassesTenantContextIntoAllowanceHandoff(): void
     {
-        $source = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $source = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
         self::assertNotFalse($source);
         self::assertStringContainsString("recomputeEmployee((int) \$emp['id'], \$companyId)", $source);
         self::assertStringContainsString("earningsForPayroll((int) \$emp['id'], \$companyId)", $source);

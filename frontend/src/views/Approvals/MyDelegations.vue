@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
@@ -48,6 +48,15 @@ const moduleOptions = computed(() => [
   { value: 'ATTENDANCE_CHANGE', label: t('delegation.modules.attendance_change') },
   { value: 'REIMBURSEMENT', label: t('delegation.modules.reimbursement') },
   { value: 'LOAN', label: t('delegation.modules.loan') },
+  { value: 'BUSINESS_TRIP', label: 'Perjalanan Dinas / SPPD' },
+  { value: 'BONUS', label: 'Bonus' },
+  { value: 'PAYROLL_ADJUSTMENT', label: 'Koreksi Payroll' },
+  { value: 'COMPENSATION_REVIEW', label: 'Perubahan Kompensasi' },
+  { value: 'TRAINING_REGISTRATION', label: 'Registrasi Training' },
+  { value: 'TIMESHEET', label: 'Timesheet' },
+  { value: 'CANDIDATE_OFFER', label: 'Candidate Offer' },
+  { value: 'GENERATED_CONTRACT', label: 'Kontrak Kerja' },
+  { value: 'ASSET_TRANSACTION', label: 'Transaksi Asset' },
 ])
 
 function emptyForm() {

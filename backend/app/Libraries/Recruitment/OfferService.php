@@ -11,8 +11,8 @@ use Config\Services;
  * Workflow:
  *   1. HR create DRAFT offer di stage OFFER candidate (lewat `create()`)
  *   2. HR review breakdown gaji + tunjangan + probation period, render preview
- *   3. HR `send()` → status SENT, response_deadline = +7 hari, kandidat dapat
- *      notifikasi (email + in-app)
+ *   3. HR `send()` mengajukan approval. Offer baru menjadi SENT dan kandidat
+ *      menerima notifikasi setelah keputusan final
  *   4. Kandidat respond via UI portal candidate (`recordResponse()`):
  *      - ACCEPTED → auto-progress candidate ke stage HIRED + kirim notifikasi
  *        ke HR untuk lanjut hire convertion
@@ -32,7 +32,10 @@ use Config\Services;
  */
 class OfferService
 {
-    public const STATUSES = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'WITHDRAWN'];
+    public const STATUSES = [
+        'DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED',
+        'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'WITHDRAWN',
+    ];
     public const DEFAULT_RESPONSE_WINDOW_DAYS = 7;
 
     /**
@@ -65,7 +68,7 @@ class OfferService
      * Buat offer DRAFT untuk kandidat. Validasi:
      *   - Candidate harus stage OFFER (atau di atas — kalau HR create offer
      *     setelah lewat OFFER, return error supaya tidak bingung audit trail)
-     *   - Tidak ada offer aktif (DRAFT/SENT) lain untuk kandidat ini
+     *   - Tidak ada offer aktif lain untuk kandidat ini
      *   - basic_salary > 0
      *
      * @param array $data ['candidate_id', 'basic_salary', 'employment_status',
@@ -101,12 +104,12 @@ class OfferService
         // Tidak boleh duplikasi offer aktif untuk candidate yang sama
         $activeExists = $db->table('candidate_offers')
             ->where('candidate_id', $candidateId)
-            ->whereIn('status', ['DRAFT', 'SENT'])
+            ->whereIn('status', ['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'SENT'])
             ->where('deleted_at IS NULL')
             ->countAllResults();
         if ($activeExists > 0) {
             throw new \RuntimeException(
-                'Sudah ada offer aktif (DRAFT/SENT) untuk kandidat ini. '
+                'Sudah ada offer aktif untuk kandidat ini. '
                 . 'Withdraw offer lama sebelum buat baru.'
             );
         }
@@ -205,17 +208,16 @@ class OfferService
     }
 
     /**
-     * Update offer DRAFT. Kalau status sudah SENT, tidak boleh edit
-     * komponen utama (salary/proposed_join_date) — HR harus withdraw &
-     * buat offer baru supaya audit trail jelas.
+     * Update offer DRAFT atau revisi yang ditolak approval. Offer yang sudah
+     * diajukan/terkirim tidak boleh diedit agar audit trail tetap jelas.
      */
     public function update(int $offerId, array $data, int $userId): array
     {
         $db = Database::connect();
         $offer = $this->loadOffer($offerId);
-        if ($offer['status'] !== 'DRAFT') {
+        if (! in_array($offer['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
             throw new \RuntimeException(
-                "Offer tidak bisa diedit di status {$offer['status']}. Hanya DRAFT yang bisa diedit. "
+                "Offer tidak bisa diedit di status {$offer['status']}. Hanya DRAFT/APPROVAL_REJECTED yang bisa diedit. "
                 . "Untuk perubahan setelah SENT, withdraw offer & buat baru."
             );
         }
@@ -270,6 +272,12 @@ class OfferService
         if (empty($update)) {
             throw new \InvalidArgumentException('Tidak ada perubahan');
         }
+        if ($offer['status'] === 'APPROVAL_REJECTED') {
+            $update += [
+                'status' => 'DRAFT', 'approval_rejected_by' => null,
+                'approval_rejected_at' => null, 'approval_rejection_reason' => null,
+            ];
+        }
         $update['updated_at'] = date('Y-m-d H:i:s');
         $db->table('candidate_offers')->where('id', $offerId)->update($update);
 
@@ -283,51 +291,18 @@ class OfferService
     }
 
     /**
-     * Send offer ke kandidat: status DRAFT → SENT.
-     * Kirim notifikasi via email & in-app dengan link ke portal candidate.
+     * Ajukan offer untuk approval. Pengiriman ke kandidat dilakukan domain
+     * adapter hanya setelah seluruh step approval selesai.
      */
     public function send(int $offerId, int $userId, ?string $note = null): array
     {
-        $db = Database::connect();
         $offer = $this->loadOffer($offerId);
-        if ($offer['status'] !== 'DRAFT') {
-            throw new \RuntimeException("Hanya offer DRAFT yang bisa di-send (current: {$offer['status']})");
-        }
-        if ((float) $offer['basic_salary'] <= 0) {
-            throw new \RuntimeException('basic_salary harus > 0');
-        }
-
-        $now = date('Y-m-d H:i:s');
-        $deadline = $offer['response_deadline']
-            ?? date('Y-m-d', strtotime("+" . self::DEFAULT_RESPONSE_WINDOW_DAYS . " days"));
-
-        $db->table('candidate_offers')->where('id', $offerId)->update([
-            'status'            => 'SENT',
-            'sent_at'           => $now,
-            'sent_by'           => $userId,
-            'response_deadline' => $deadline,
-            'updated_at'        => $now,
-        ]);
-
-        // Notifikasi ke kandidat (kalau ada candidate_account)
-        $this->notifyCandidate($offer['candidate_id'], $offerId, 'offer.sent',
-            'Penawaran kerja untuk Anda',
-            "Anda menerima penawaran kerja {$offer['offer_number']}. "
-            . "Silakan review & respond sebelum {$deadline}."
-            . ($note ? "\n\nCatatan dari HR: {$note}" : '')
+        $result = (new CandidateOfferApprovalWorkflowService())->submit(
+            $offerId, (int) $offer['company_id'], $userId, $note
         );
-
-        try {
-            Services::audit()->forModule('RECRUITMENT')->log(
-                action: 'offer.send',
-                entity: 'candidate_offer',
-                entityId: $offerId,
-                description: "Send offer {$offer['offer_number']} ke kandidat (deadline {$deadline})",
-                severity: 'NOTICE',
-            );
-        } catch (\Throwable $e) {}
-
-        return $this->loadOffer($offerId);
+        $submitted = $result['offer'];
+        $submitted['approval'] = $result['approval'];
+        return $submitted;
     }
 
     /**
@@ -391,6 +366,7 @@ class OfferService
                 try {
                     Services::recruitment()->moveStage(
                         (int) $offer['candidate_id'],
+                        (int) $offer['company_id'],
                         'HIRED',
                         ['feedback' => "Offer {$offer['offer_number']} diterima kandidat. " . ($responseNote ?: '')],
                     );
@@ -486,6 +462,7 @@ class OfferService
                 try {
                     Services::recruitment()->moveStage(
                         (int) $offer['candidate_id'],
+                        (int) $offer['company_id'],
                         'HIRED',
                         ['feedback' => "Offer {$offer['offer_number']} diterima kandidat (self-service via portal). " . ($responseNote ?: '')],
                     );
@@ -538,7 +515,8 @@ class OfferService
     }
 
     /**
-     * HR withdraw offer (mis. salah salary). Hanya allowed dari DRAFT/SENT.
+     * HR withdraw offer (mis. salah salary) dari status aktif sebelum kandidat
+     * memberi keputusan. Workflow pending ikut dibatalkan.
      */
     public function withdraw(int $offerId, int $userId, string $reason): array
     {
@@ -547,17 +525,31 @@ class OfferService
         }
         $db = Database::connect();
         $offer = $this->loadOffer($offerId);
-        if (! in_array($offer['status'], ['DRAFT', 'SENT'], true)) {
+        if (! in_array($offer['status'], ['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'SENT'], true)) {
             throw new \RuntimeException("Offer tidak bisa di-withdraw di status {$offer['status']}");
         }
 
         $now = date('Y-m-d H:i:s');
-        $db->table('candidate_offers')->where('id', $offerId)->update([
-            'status'         => 'WITHDRAWN',
-            'response_note'  => '[WITHDRAWN by HR] ' . $reason,
-            'responded_at'   => $now,
-            'updated_at'     => $now,
-        ]);
+        $db->transBegin();
+        try {
+            if ($offer['status'] === 'PENDING_APPROVAL') {
+                Services::approval()->cancelEntity(
+                    'CANDIDATE_OFFER', 'candidate_offers', $offerId, (int) $offer['company_id']
+                );
+            }
+            $db->table('candidate_offers')->where('id', $offerId)
+                ->where('company_id', (int) $offer['company_id'])->where('status', $offer['status'])->update([
+                    'status' => 'WITHDRAWN', 'response_note' => '[WITHDRAWN by HR] ' . $reason,
+                    'responded_at' => $now, 'updated_at' => $now,
+                ]);
+            if ($db->affectedRows() !== 1 || ! $db->transStatus()) {
+                throw new \RuntimeException('Offer berubah; muat ulang data');
+            }
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+            throw $exception;
+        }
 
         try {
             Services::audit()->forModule('RECRUITMENT')->log(

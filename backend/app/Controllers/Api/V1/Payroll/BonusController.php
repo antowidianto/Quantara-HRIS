@@ -6,7 +6,11 @@ use App\Controllers\Api\V1\ApiController;
 use App\Constants\ErrorCode;
 use App\Constants\WebhookEvent;
 use App\Libraries\Payroll\BonusCalculator;
+use App\Libraries\Payroll\BonusApprovalException;
+use App\Libraries\Payroll\BonusApprovalWorkflowService;
 use App\Libraries\Payroll\BonusService;
+use App\Libraries\Payroll\BonusWorkflowService;
+use App\Repositories\Payroll\BonusRepository;
 use Config\Services;
 
 /**
@@ -28,9 +32,9 @@ use Config\Services;
  *     PUT    /bonus-runs/{id}                  — update name/notes/pay_date (DRAFT)
  *     DELETE /bonus-runs/{id}                  — hard-delete (DRAFT only)
  *     POST   /bonus-runs/{id}/calculate        — eligibility + amount (DRAFT/CALCULATED)
- *     POST   /bonus-runs/{id}/approve          — CALCULATED → APPROVED
+ *     POST   /bonus-runs/{id}/submit           — CALCULATED → PENDING_APPROVAL
  *     POST   /bonus-runs/{id}/mark-paid        — APPROVED → PAID
- *     POST   /bonus-runs/{id}/cancel           — DRAFT/CALCULATED/APPROVED → CANCELLED
+ *     POST   /bonus-runs/{id}/cancel           — non-PAID → CANCELLED; pending workflow ikut ditutup
  *     GET    /bonus-runs/{id}/recipients       — list line items per karyawan
  *     PUT    /bonus-recipients/{id}            — override amount (DRAFT/CALCULATED)
  *
@@ -55,22 +59,16 @@ class BonusController extends ApiController
     public function listSchemes()
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
-        $db = \Config\Database::connect();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
-
-        $b = $db->table('bonus_schemes')->where('deleted_at IS NULL');
-        $this->tenant()->applyScope($b);
-        if ($kind = (string) $this->request->getGet('kind')) {
-            if (in_array($kind, self::VALID_KINDS, true)) $b->where('kind', $kind);
-        }
-        if ($q = trim((string) $this->request->getGet('q'))) {
-            $b->groupStart()->like('code', $q)->orLike('name', $q)->groupEnd();
-        }
-        $total = $b->countAllResults(false);
-        $rows = $b->orderBy('id', 'DESC')
-            ->limit($perPage, ($page - 1) * $perPage)
-            ->get()->getResultArray();
+        $kind = strtoupper((string) $this->request->getGet('kind'));
+        $kind = in_array($kind, self::VALID_KINDS, true) ? $kind : null;
+        $result = $this->bonusRepository()->paginateSchemes(
+            $companyId, $page, $perPage, $kind, trim((string) $this->request->getGet('q')),
+        );
+        $rows = $result['rows'];
 
         // Decode eligibility JSON untuk client
         foreach ($rows as &$r) {
@@ -79,7 +77,7 @@ class BonusController extends ApiController
         }
         unset($r);
 
-        return $this->paginated($rows, $total, $page, $perPage);
+        return $this->paginated($rows, $result['total'], $page, $perPage);
     }
 
     public function createScheme()
@@ -97,19 +95,7 @@ class BonusController extends ApiController
         ]);
         if (! $valid) return null;
 
-        $db = \Config\Database::connect();
         $code = strtoupper(trim((string) $data['code']));
-
-        // Cek duplikat code per company
-        $exists = $db->table('bonus_schemes')
-            ->where('company_id', $companyId)
-            ->where('code', $code)
-            ->where('deleted_at IS NULL')
-            ->countAllResults();
-        if ($exists > 0) {
-            return $this->fail("Code '{$code}' sudah dipakai di company ini",
-                422, ErrorCode::RESOURCE_CONFLICT);
-        }
 
         $taxTreatment = strtoupper((string) ($data['tax_treatment'] ?? 'GROSS'));
         if (! in_array($taxTreatment, self::VALID_TAX, true)) $taxTreatment = 'GROSS';
@@ -134,8 +120,11 @@ class BonusController extends ApiController
             'created_at'       => $now,
             'updated_at'       => $now,
         ];
-        $db->table('bonus_schemes')->insert($insert);
-        $id = (int) $db->insertID();
+        try {
+            $id = $this->bonusWorkflow()->createScheme($companyId, $insert);
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422, ErrorCode::RESOURCE_CONFLICT);
+        }
 
         Services::audit()->forModule('PAYROLL')->logCreate(
             'bonus_scheme', $id, $insert,
@@ -148,7 +137,9 @@ class BonusController extends ApiController
     public function showScheme($id = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
-        $row = $this->loadSchemeOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadSchemeOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
         $row['eligibility'] = $this->decodeJson($row['eligibility_json'] ?? null);
         unset($row['eligibility_json']);
@@ -159,7 +150,9 @@ class BonusController extends ApiController
     public function updateScheme($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $row = $this->loadSchemeOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadSchemeOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
 
         $data = $this->getJsonInput();
@@ -194,8 +187,7 @@ class BonusController extends ApiController
         }
 
         $update['updated_at'] = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('bonus_schemes')
-            ->where('id', (int) $row['id'])->update($update);
+        $this->bonusWorkflow()->updateScheme((int) $row['id'], $companyId, $update);
 
         Services::audit()->forModule('PAYROLL')->logUpdate(
             'bonus_scheme', (int) $row['id'], $row, $update,
@@ -208,28 +200,15 @@ class BonusController extends ApiController
     public function deleteScheme($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $row = $this->loadSchemeOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadSchemeOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
-
-        $db = \Config\Database::connect();
-        // Cek ada run aktif yang refer scheme ini?
-        $hasActiveRun = $db->table('bonus_runs')
-            ->where('bonus_scheme_id', (int) $row['id'])
-            ->whereIn('status', ['DRAFT', 'CALCULATED', 'APPROVED'])
-            ->where('deleted_at IS NULL')
-            ->countAllResults();
-        if ($hasActiveRun > 0) {
-            return $this->fail(
-                'Skema masih dipakai di bonus run aktif. Cancel run dulu.',
-                422, ErrorCode::RESOURCE_CONFLICT,
-            );
+        try {
+            $this->bonusWorkflow()->deleteScheme((int) $row['id'], $companyId);
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422, ErrorCode::RESOURCE_CONFLICT);
         }
-
-        $db->table('bonus_schemes')->where('id', (int) $row['id'])->update([
-            'deleted_at' => date('Y-m-d H:i:s'),
-            'is_active'  => 0,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
 
         Services::audit()->forModule('PAYROLL')->logDelete(
             'bonus_scheme', (int) $row['id'], $row,
@@ -282,6 +261,8 @@ class BonusController extends ApiController
     private function doPreviewScheme()
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $data = $this->getJsonInput();
         $ref  = (string) ($data['reference_date'] ?? date('Y-m-d'));
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $ref)) {
@@ -291,11 +272,9 @@ class BonusController extends ApiController
         $scheme = is_array($data['scheme'] ?? null) ? $data['scheme'] : [];
         $emp    = is_array($data['employee'] ?? null) ? $data['employee'] : [];
 
-        $db = \Config\Database::connect();
-
         // Mode 1: lookup berdasarkan ID
         if (empty($scheme) && isset($data['bonus_scheme_id'])) {
-            $schemeRow = $this->loadSchemeOrFail((int) $data['bonus_scheme_id']);
+            $schemeRow = $this->loadSchemeOrFail((int) $data['bonus_scheme_id'], $companyId);
             if (! $schemeRow) return $this->response;
             $schemeRow['eligibility'] = $this->decodeJson($schemeRow['eligibility_json'] ?? null);
             unset($schemeRow['eligibility_json']);
@@ -304,21 +283,14 @@ class BonusController extends ApiController
 
         if (empty($emp) && isset($data['employee_id'])) {
             $empId = (int) $data['employee_id'];
-            $tenant = $this->tenant();
             // SELECT * defensif — schema bisa beda antar tier (mis. kolom
             // `fixed_allowance` belum tentu ada di base employees migration;
             // ada deployment yang menyimpan fixed allowance via tabel
             // `employee_allowances` terpisah). Filter di PHP di bawah.
-            $empRow = $db->table('employees')
-                ->where('id', $empId)
-                ->where('deleted_at IS NULL')
-                ->get()->getRowArray();
+            $empRow = $this->bonusRepository()->findEmployee($empId, $companyId);
             if (! $empRow) {
                 return $this->fail("Employee #{$empId} tidak ditemukan", 404,
                     ErrorCode::RESOURCE_NOT_FOUND);
-            }
-            if (! $tenant->isSuperAdmin() && (int) $empRow['company_id'] !== $tenant->getCompanyId()) {
-                return $this->fail('Employee lintas company', 403);
             }
             // Fallback kalau kolom fixed_allowance belum ada di schema.
             if (! array_key_exists('fixed_allowance', $empRow)
@@ -327,7 +299,7 @@ class BonusController extends ApiController
             }
             // KPI score opsional — kalau ada tabel kpi_scores aktif, ambil
             // score terbaru ≤ reference_date. Kalau tidak ada, default 1.0.
-            $empRow['kpi_score'] = $this->lookupKpiScore($empId, $ref);
+            $empRow['kpi_score'] = $this->bonusRepository()->latestKpiScore($empId, $companyId, $ref);
             $emp = $empRow;
         }
 
@@ -373,24 +345,6 @@ class BonusController extends ApiController
      * Defensive: kalau tabel `kpi_scores` belum ada di schema (multi-tenant
      * tier rendah), fallback ke 1.0 supaya formula KPI_SCORE tetap jalan.
      */
-    private function lookupKpiScore(int $employeeId, string $referenceDate): float
-    {
-        try {
-            $db = \Config\Database::connect();
-            if (! $db->tableExists('kpi_scores')) return 1.0;
-            $row = $db->table('kpi_scores')
-                ->where('employee_id', $employeeId)
-                ->where('period_end <=', $referenceDate)
-                ->orderBy('period_end', 'DESC')
-                ->limit(1)
-                ->get()->getRowArray();
-            if (! $row || ! isset($row['score'])) return 1.0;
-            return max(0.0, min(2.0, (float) $row['score']));
-        } catch (\Throwable $e) {
-            return 1.0;
-        }
-    }
-
     /* ──────────────────────────────────────────────────────────────────
      * RUNS
      * ──────────────────────────────────────────────────────────────── */
@@ -398,32 +352,17 @@ class BonusController extends ApiController
     public function listRuns()
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
-        $db = \Config\Database::connect();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
-
-        $b = $db->table('bonus_runs r')
-            ->select('r.*, s.code AS scheme_code, s.name AS scheme_name, s.kind AS scheme_kind')
-            ->join('bonus_schemes s', 's.id = r.bonus_scheme_id', 'left')
-            ->where('r.deleted_at IS NULL');
-        $this->tenant()->applyScope($b, 'r.company_id');
-
-        if ($status = (string) $this->request->getGet('status')) {
-            $b->where('r.status', $status);
-        }
-        if ($schemeId = (int) $this->request->getGet('bonus_scheme_id')) {
-            $b->where('r.bonus_scheme_id', $schemeId);
-        }
-        if ($year = (int) $this->request->getGet('period_year')) {
-            $b->where('r.period_year', $year);
-        }
-
-        $total = $b->countAllResults(false);
-        $rows = $b->orderBy('r.id', 'DESC')
-            ->limit($perPage, ($page - 1) * $perPage)
-            ->get()->getResultArray();
-
-        return $this->paginated($rows, $total, $page, $perPage);
+        $schemeId = (int) $this->request->getGet('bonus_scheme_id');
+        $year = (int) $this->request->getGet('period_year');
+        $result = $this->bonusRepository()->paginateRuns(
+            $companyId, $page, $perPage, (string) $this->request->getGet('status'),
+            $schemeId > 0 ? $schemeId : null, $year > 0 ? $year : null,
+        );
+        return $this->paginated($result['rows'], $result['total'], $page, $perPage);
     }
 
     public function createRun()
@@ -441,12 +380,8 @@ class BonusController extends ApiController
         ]);
         if (! $valid) return null;
 
-        $db = \Config\Database::connect();
-        $scheme = $db->table('bonus_schemes')
-            ->where('id', (int) $data['bonus_scheme_id'])
-            ->where('deleted_at IS NULL')
-            ->get()->getRowArray();
-        if (! $scheme || (int) $scheme['company_id'] !== $companyId) {
+        $scheme = $this->bonusRepository()->findScheme((int) $data['bonus_scheme_id'], $companyId);
+        if (! $scheme) {
             return $this->fail('Skema tidak ditemukan / lintas company', 404);
         }
         if ((int) $scheme['is_active'] !== 1) {
@@ -476,7 +411,7 @@ class BonusController extends ApiController
         // Validate kalau eksplisit di-set; kalau tidak, biarkan null —
         // recipient-level resolve ke cost_center_id masing-masing karyawan
         // saat calculate (pattern di BonusService::calculateRun).
-        if (in_array('cost_center_id', $db->getFieldNames('bonus_runs'), true)) {
+        if (array_key_exists('cost_center_id', $data)) {
             $explicitCc = ! empty($data['cost_center_id']) ? (int) $data['cost_center_id'] : null;
             if ($explicitCc) {
                 try {
@@ -488,8 +423,11 @@ class BonusController extends ApiController
             }
         }
 
-        $db->table('bonus_runs')->insert($insert);
-        $id = (int) $db->insertID();
+        try {
+            $id = $this->bonusWorkflow()->createRun($companyId, (int) $scheme['id'], $insert);
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422);
+        }
 
         Services::audit()->forModule('PAYROLL')->logCreate(
             'bonus_run', $id, $insert,
@@ -503,14 +441,11 @@ class BonusController extends ApiController
     public function showRun($id = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
-
-        // Tambahkan info scheme + payroll_period
-        $db = \Config\Database::connect();
-        $scheme = $db->table('bonus_schemes')->where('id', (int) $row['bonus_scheme_id'])
-            ->get()->getRowArray();
-        $row['scheme'] = $scheme;
+        $row['scheme'] = $this->bonusRepository()->findScheme((int) $row['bonus_scheme_id'], $companyId);
 
         return $this->ok($row);
     }
@@ -518,7 +453,9 @@ class BonusController extends ApiController
     public function updateRun($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
         if ($row['status'] !== 'DRAFT') {
             return $this->fail('Hanya DRAFT yang bisa diedit', 422,
@@ -534,8 +471,7 @@ class BonusController extends ApiController
         }
         $update['updated_at'] = date('Y-m-d H:i:s');
 
-        \Config\Database::connect()->table('bonus_runs')
-            ->where('id', (int) $row['id'])->update($update);
+        $this->bonusWorkflow()->updateRun((int) $row['id'], $companyId, $update);
 
         return $this->ok(null, 'Updated');
     }
@@ -543,15 +479,15 @@ class BonusController extends ApiController
     public function deleteRun($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
         if ($row['status'] !== 'DRAFT') {
             return $this->fail('Hanya DRAFT yang bisa dihapus permanen', 422);
         }
 
-        $db = \Config\Database::connect();
-        $db->table('bonus_recipients')->where('bonus_run_id', (int) $row['id'])->delete();
-        $db->table('bonus_runs')->where('id', (int) $row['id'])->delete();
+        $this->bonusWorkflow()->deleteRun((int) $row['id'], $companyId);
 
         Services::audit()->forModule('PAYROLL')->logDelete(
             'bonus_run', (int) $row['id'], $row,
@@ -564,15 +500,15 @@ class BonusController extends ApiController
     public function calculateRun($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
 
-        // Set calculator user_id sebelum service jalan supaya audit trail masuk
-        \Config\Database::connect()->table('bonus_runs')->where('id', (int) $row['id'])
-            ->update(['calculated_by' => $this->userId()]);
+        $this->bonusWorkflow()->markCalculator((int) $row['id'], $companyId, $this->userId());
 
         try {
-            $result = (new BonusService())->calculateRun((int) $row['id']);
+            $result = (new BonusService())->calculateRun((int) $row['id'], $companyId);
         } catch (\InvalidArgumentException $e) {
             return $this->fail($e->getMessage(), 422,
                 ErrorCode::APPROVAL_INVALID_STATE);
@@ -608,86 +544,51 @@ class BonusController extends ApiController
         return $this->ok($result, 'Run dihitung');
     }
 
-    public function approveRun($id = null)
+    public function submitRun($id = null)
     {
-        if (! $this->canApprove()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
-        if ($row['status'] !== 'CALCULATED') {
-            return $this->fail('Hanya CALCULATED yang bisa di-approve', 422,
-                ErrorCode::APPROVAL_INVALID_STATE);
+        try {
+            $result = (new BonusApprovalWorkflowService())->submit(
+                (int) $row['id'], $companyId, $this->userId()
+            );
+        } catch (BonusApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode);
         }
 
         // Cek recipient_count > 0. Kalau 0 berarti calculate sebelumnya
         // gagal (mis. SQL error) atau eligibility filter tidak match
         // siapapun. Approve run kosong tidak masuk akal — bonus tidak
         // akan muncul ke karyawan dan total amount = 0.
-        $db = \Config\Database::connect();
-        $actualCount = $db->table('bonus_recipients')
-            ->where('bonus_run_id', (int) $row['id'])
-            ->where('is_excluded', 0)
-            ->countAllResults();
-        if ($actualCount === 0) {
-            return $this->fail(
-                'Run ini belum punya recipient (0 karyawan eligible). '
-                    . 'Klik "Re-calculate" dulu, atau cek scheme.eligibility '
-                    . '(employment_status, min_tenure_months, dll). Kalau setelah '
-                    . 'calculate masih 0, kemungkinan tidak ada karyawan yang lolos filter.',
-                422,
-                ErrorCode::APPROVAL_INVALID_STATE,
-            );
-        }
-
-        $now = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('bonus_runs')->where('id', (int) $row['id'])->update([
-            'status'      => 'APPROVED',
-            'approved_by' => $this->userId(),
-            'approved_at' => $now,
-            'updated_at'  => $now,
-        ]);
-
         Services::audit()->forModule('PAYROLL')->log(
-            action: 'bonus.approve',
+            action: 'bonus.submit_approval',
             entity: 'bonus_run',
             entityId: (int) $row['id'],
-            description: "Approve bonus run #{$row['id']} (total Rp "
+            after: ['approval_request_id' => $result['approval']['request_id'] ?? null],
+            description: "Ajukan approval bonus run #{$row['id']} (total Rp "
                 . number_format((float) $row['total_amount'], 0, ',', '.') . ')',
             severity: 'CRITICAL',
         );
 
-        $this->dispatchWebhook(
-            WebhookEvent::BONUS_RUN_APPROVED,
-            (int) $row['company_id'],
-            [
-                'bonus_run_id'    => (int) $row['id'],
-                'name'            => $row['name'] ?? null,
-                'recipient_count' => (int) $row['recipient_count'],
-                'total_amount'    => (float) $row['total_amount'],
-                'approved_by'     => $this->userId(),
-                'approved_at'     => $now,
-            ],
-        );
-
-        return $this->ok(null, 'Bonus run disetujui');
+        return $this->ok($result, 'Bonus run diajukan ke approval bertingkat');
     }
 
     public function markRunPaid($id = null)
     {
         if (! $this->canApprove()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
-        if ($row['status'] !== 'APPROVED') {
-            return $this->fail('Hanya APPROVED yang bisa di-mark PAID', 422,
-                ErrorCode::APPROVAL_INVALID_STATE);
+        try {
+            $transition = $this->bonusWorkflow()->markPaid((int) $row['id'], $companyId, $this->userId());
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422, ErrorCode::APPROVAL_INVALID_STATE);
         }
-
-        $now = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('bonus_runs')->where('id', (int) $row['id'])->update([
-            'status'     => 'PAID',
-            'paid_by'    => $this->userId(),
-            'paid_at'    => $now,
-            'updated_at' => $now,
-        ]);
+        $now = (string) $transition['transitioned_at'];
 
         Services::audit()->forModule('PAYROLL')->log(
             action: 'bonus.mark_paid',
@@ -716,29 +617,18 @@ class BonusController extends ApiController
     public function cancelRun($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $row = $this->loadRunOrFail((int) $id);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $row = $this->loadRunOrFail((int) $id, $companyId);
         if (! $row) return $this->response;
-        if ($row['status'] === 'PAID') {
-            return $this->fail('Tidak bisa cancel run yang sudah PAID', 422);
-        }
-        if ($row['status'] === 'CANCELLED') {
-            return $this->fail('Sudah dibatalkan', 422);
-        }
 
         $data = $this->getJsonInput();
         $reason = trim((string) ($data['reason'] ?? ''));
-        if (strlen($reason) < 5) {
-            return $this->fail('Alasan minimal 5 karakter', 422);
+        try {
+            $this->bonusWorkflow()->cancelRun((int) $row['id'], $companyId, $this->userId(), $reason);
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422, ErrorCode::APPROVAL_INVALID_STATE);
         }
-
-        $now = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('bonus_runs')->where('id', (int) $row['id'])->update([
-            'status'              => 'CANCELLED',
-            'cancelled_by'        => $this->userId(),
-            'cancelled_at'        => $now,
-            'cancellation_reason' => $reason,
-            'updated_at'          => $now,
-        ]);
 
         Services::audit()->forModule('PAYROLL')->log(
             action: 'bonus.cancel',
@@ -755,19 +645,17 @@ class BonusController extends ApiController
     public function listRecipients($runId = null)
     {
         if (! $this->canView()) return $this->fail('Forbidden', 403);
-        $run = $this->loadRunOrFail((int) $runId);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $run = $this->loadRunOrFail((int) $runId, $companyId);
         if (! $run) return $this->response;
 
-        $db = \Config\Database::connect();
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(200, max(1, (int) ($this->request->getGet('per_page') ?? 50)));
-
-        $b = $db->table('bonus_recipients')->where('bonus_run_id', (int) $run['id']);
-        $total = $b->countAllResults(false);
-        $rows = $b->orderBy('amount', 'DESC')
-            ->orderBy('employee_name', 'ASC')
-            ->limit($perPage, ($page - 1) * $perPage)
-            ->get()->getResultArray();
+        $result = $this->bonusRepository()->paginateRecipients(
+            (int) $run['id'], $companyId, $page, $perPage,
+        );
+        $rows = $result['rows'];
 
         // Decode breakdown JSON
         foreach ($rows as &$r) {
@@ -776,7 +664,7 @@ class BonusController extends ApiController
         }
         unset($r);
 
-        return $this->paginated($rows, $total, $page, $perPage);
+        return $this->paginated($rows, $result['total'], $page, $perPage);
     }
 
     /**
@@ -799,189 +687,58 @@ class BonusController extends ApiController
     public function includeAllRecipients($runId = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
-        $run = $this->loadRunOrFail((int) $runId);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+        $run = $this->loadRunOrFail((int) $runId, $companyId);
         if (! $run) return $this->response;
-        if (! in_array($run['status'], ['DRAFT', 'CALCULATED'], true)) {
-            return $this->fail('Run sudah locked, recipient tidak boleh diubah',
-                422, ErrorCode::APPROVAL_INVALID_STATE);
+
+        try {
+            $result = $this->bonusWorkflow()->includeAllRecipients((int) $run['id'], $companyId);
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422, ErrorCode::APPROVAL_INVALID_STATE);
         }
-
-        $db = \Config\Database::connect();
-
-        // Snapshot count BEFORE untuk reporting
-        $beforeExcluded = (int) $db->table('bonus_recipients')
-            ->where('bonus_run_id', (int) $run['id'])
-            ->where('is_excluded', 1)
-            ->countAllResults();
-        $beforeOverridden = (int) $db->table('bonus_recipients')
-            ->where('bonus_run_id', (int) $run['id'])
-            ->where('amount_overridden', 1)
-            ->countAllResults();
-        $totalRecipients = (int) $db->table('bonus_recipients')
-            ->where('bonus_run_id', (int) $run['id'])
-            ->countAllResults();
-
-        if ($totalRecipients === 0) {
-            return $this->fail(
-                'Run ini belum punya recipient sama sekali. Klik Calculate dulu.',
-                422,
-            );
-        }
-
-        // Load scheme untuk recompute
-        $scheme = $db->table('bonus_schemes')
-            ->where('id', (int) $run['bonus_scheme_id'])
-            ->get()->getRowArray();
-        if (! $scheme) {
-            return $this->fail('Scheme tidak ditemukan', 404);
-        }
-
-        $referenceDate = (string) $run['reference_date'];
-
-        // Loop tiap recipient → re-compute amount dari scheme (kalau ada
-        // employee data masih valid). Reset is_excluded=0, amount_overridden=0.
-        $rows = $db->table('bonus_recipients')
-            ->where('bonus_run_id', (int) $run['id'])
-            ->get()->getResultArray();
-
-        $now = date('Y-m-d H:i:s');
-        $totalRecomputed = 0;
-
-        foreach ($rows as $rec) {
-            // Lookup employee fresh (basic_salary mungkin sudah berubah)
-            $emp = $db->table('employees')
-                ->where('id', (int) $rec['employee_id'])
-                ->where('deleted_at IS NULL')
-                ->get()->getRowArray();
-            if (! $emp) continue;
-            // Default fixed_allowance = 0 kalau kolom belum ada
-            if (! array_key_exists('fixed_allowance', $emp) || $emp['fixed_allowance'] === null) {
-                $emp['fixed_allowance'] = 0;
-            }
-
-            $compute = BonusCalculator::compute($scheme, $emp, $referenceDate);
-            $newAmount = (float) $compute['amount'];
-
-            $db->table('bonus_recipients')
-                ->where('id', (int) $rec['id'])
-                ->update([
-                    'is_excluded'       => 0,
-                    'exclude_reason'    => null,
-                    'amount_overridden' => 0,
-                    'override_reason'   => null,
-                    'amount'            => $newAmount,
-                    'amount_capped'     => $compute['capped'] ? 1 : 0,
-                    'breakdown_json'    => json_encode($compute['breakdown'], JSON_UNESCAPED_UNICODE),
-                    'updated_at'        => $now,
-                ]);
-            $totalRecomputed++;
-        }
-
-        // Recompute aggregate run
-        $sum = $db->table('bonus_recipients')
-            ->selectSum('amount', 'total')
-            ->selectCount('id', 'cnt')
-            ->where('bonus_run_id', (int) $run['id'])
-            ->where('is_excluded', 0)
-            ->get()->getRowArray();
-        $db->table('bonus_runs')->where('id', (int) $run['id'])->update([
-            'total_amount'    => (float) ($sum['total'] ?? 0),
-            'recipient_count' => (int) ($sum['cnt'] ?? 0),
-            'updated_at'      => $now,
-        ]);
 
         Services::audit()->forModule('PAYROLL')->log(
             action: 'bonus.include_all',
             entity: 'bonus_run',
             entityId: (int) $run['id'],
-            after: [
-                'before_excluded'   => $beforeExcluded,
-                'before_overridden' => $beforeOverridden,
-                'recomputed'        => $totalRecomputed,
-                'new_total'         => (float) ($sum['total'] ?? 0),
-            ],
-            description: "Include all + recompute: {$totalRecomputed} recipient di-reset (sebelumnya: "
-                . "{$beforeExcluded} excluded, {$beforeOverridden} overridden)",
+            after: $result,
+            description: "Include all + recompute: {$result['affected']} recipient di-reset",
             severity: 'NOTICE',
         );
 
-        return $this->ok([
-            'affected'          => $totalRecomputed,
-            'before_excluded'   => $beforeExcluded,
-            'before_overridden' => $beforeOverridden,
-            'total_included'    => (int) ($sum['cnt'] ?? 0),
-            'total_amount'      => (float) ($sum['total'] ?? 0),
-        ], "Berhasil reset {$totalRecomputed} recipient (include + clear override)");
+        return $this->ok(
+            $result,
+            "Berhasil reset {$result['affected']} recipient (include + clear override)",
+        );
     }
 
     /** PUT /bonus-recipients/{id} — override amount + reason */
     public function overrideRecipient($id = null)
     {
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
 
-        $db = \Config\Database::connect();
-        $rec = $db->table('bonus_recipients')->where('id', (int) $id)->get()->getRowArray();
-        if (! $rec) return $this->fail('Recipient tidak ditemukan', 404);
-
-        $tenant = $this->tenant();
-        if (! $tenant->isSuperAdmin() && (int) $rec['company_id'] !== $tenant->getCompanyId()) {
-            return $this->fail('Forbidden', 403);
+        try {
+            $result = $this->bonusWorkflow()->overrideRecipient(
+                (int) $id,
+                $companyId,
+                $this->getJsonInput(),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail($exception->getMessage(), 404, ErrorCode::RESOURCE_NOT_FOUND);
+        } catch (\DomainException $exception) {
+            return $this->fail($exception->getMessage(), 422, ErrorCode::APPROVAL_INVALID_STATE);
         }
 
-        // Cek run masih editable (DRAFT/CALCULATED)
-        $run = $db->table('bonus_runs')->where('id', (int) $rec['bonus_run_id'])->get()->getRowArray();
-        if (! $run || ! in_array($run['status'], ['DRAFT', 'CALCULATED'], true)) {
-            return $this->fail('Run sudah locked, recipient tidak boleh diubah',
-                422, ErrorCode::APPROVAL_INVALID_STATE);
-        }
-
-        $data = $this->getJsonInput();
-        $update = ['updated_at' => date('Y-m-d H:i:s')];
-
-        if (array_key_exists('amount', $data)) {
-            $newAmount = (float) $data['amount'];
-            if ($newAmount < 0) return $this->fail('Amount tidak boleh negatif', 422);
-
-            // Cek cap_amount di scheme
-            $scheme = $db->table('bonus_schemes')->where('id', (int) $run['bonus_scheme_id'])
-                ->get()->getRowArray();
-            if ($scheme && $scheme['cap_amount'] !== null && $newAmount > (float) $scheme['cap_amount']) {
-                return $this->fail(
-                    'Amount melebihi cap_amount skema (Rp '
-                        . number_format((float) $scheme['cap_amount'], 0, ',', '.') . ')',
-                    422,
-                );
-            }
-            $update['amount'] = $newAmount;
-            $update['amount_overridden'] = 1;
-            $update['override_reason'] = trim((string) ($data['reason'] ?? ''));
-        }
-        if (array_key_exists('is_excluded', $data)) {
-            $update['is_excluded'] = (int) (bool) $data['is_excluded'];
-            if ((int) $update['is_excluded'] === 1) {
-                $update['exclude_reason'] = trim((string) ($data['exclude_reason'] ?? ''));
-                $update['amount'] = 0;
-            }
-        }
-
-        $db->table('bonus_recipients')->where('id', (int) $rec['id'])->update($update);
-
-        // Recompute aggregate run
-        $sum = $db->table('bonus_recipients')
-            ->selectSum('amount', 'total')
-            ->selectCount('id', 'cnt')
-            ->where('bonus_run_id', (int) $run['id'])
-            ->where('is_excluded', 0)
-            ->get()->getRowArray();
-        $db->table('bonus_runs')->where('id', (int) $run['id'])->update([
-            'total_amount'    => (float) ($sum['total'] ?? 0),
-            'recipient_count' => (int) ($sum['cnt'] ?? 0),
-            'updated_at'      => date('Y-m-d H:i:s'),
-        ]);
-
+        $recipient = $result['recipient'];
         Services::audit()->forModule('PAYROLL')->logUpdate(
-            'bonus_recipient', (int) $rec['id'], $rec, $update,
-            "Override bonus recipient #{$rec['id']} ({$rec['employee_name']})",
+            'bonus_recipient',
+            (int) $recipient['id'],
+            $recipient,
+            $result['update'],
+            "Override bonus recipient #{$recipient['id']} ({$recipient['employee_name']})",
         );
 
         return $this->ok(null, 'Updated');
@@ -1015,42 +772,38 @@ class BonusController extends ApiController
         return $t->isSuperAdmin() || $t->hasPermission('bonus.approve');
     }
 
-    private function loadSchemeOrFail(int $id): ?array
+    private function loadSchemeOrFail(int $id, int $companyId): ?array
     {
-        $db = \Config\Database::connect();
-        $row = $db->table('bonus_schemes')->where('id', $id)
-            ->where('deleted_at IS NULL')->get()->getRowArray();
+        $row = $this->bonusRepository()->findScheme($id, $companyId);
         if (! $row) {
             $this->response = $this->fail('Skema tidak ditemukan', 404,
                 ErrorCode::RESOURCE_NOT_FOUND);
-            return null;
-        }
-        $tenant = $this->tenant();
-        if (! $tenant->isSuperAdmin() && (int) $row['company_id'] !== $tenant->getCompanyId()) {
-            $this->response = $this->fail('Forbidden', 403);
             return null;
         }
 
         return $row;
     }
 
-    private function loadRunOrFail(int $id): ?array
+    private function loadRunOrFail(int $id, int $companyId): ?array
     {
-        $db = \Config\Database::connect();
-        $row = $db->table('bonus_runs')->where('id', $id)
-            ->where('deleted_at IS NULL')->get()->getRowArray();
+        $row = $this->bonusRepository()->findRun($id, $companyId);
         if (! $row) {
             $this->response = $this->fail('Bonus run tidak ditemukan', 404,
                 ErrorCode::RESOURCE_NOT_FOUND);
             return null;
         }
-        $tenant = $this->tenant();
-        if (! $tenant->isSuperAdmin() && (int) $row['company_id'] !== $tenant->getCompanyId()) {
-            $this->response = $this->fail('Forbidden', 403);
-            return null;
-        }
 
         return $row;
+    }
+
+    private function bonusRepository(): BonusRepository
+    {
+        return new BonusRepository();
+    }
+
+    private function bonusWorkflow(): BonusWorkflowService
+    {
+        return new BonusWorkflowService();
     }
 
     /**
@@ -1099,7 +852,8 @@ class BonusController extends ApiController
             $includePending = false;
         }
 
-        $companyId = $tenant->isSuperAdmin() ? null : $tenant->getCompanyId();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
 
         $service = new \App\Libraries\Payroll\BonusService();
         $history = $service->bonusHistoryForEmployee($employeeId, $companyId, [
@@ -1120,11 +874,7 @@ class BonusController extends ApiController
         // (lintas semua status, termasuk excluded), break down by status,
         // company_id yang sedang di-filter. Sangat membantu debugging
         // "kok tidak muncul" tanpa harus buka SQL/log.
-        $diagnostic = $this->bonusHistoryDiagnostic(
-            $employeeId,
-            $companyId,
-            $tenant->getCompanyId(),
-        );
+        $diagnostic = $this->bonusRepository()->historyDiagnostic($employeeId, $companyId);
 
         return $this->ok([
             'history' => $history,
@@ -1147,46 +897,4 @@ class BonusController extends ApiController
      *                                  (null untuk super admin = tidak filter)
      * @param int      $userCompanyId Tenant company dari user login (untuk cross-check)
      */
-    private function bonusHistoryDiagnostic(int $employeeId, ?int $filterCompanyId, int $userCompanyId): array
-    {
-        $db = \Config\Database::connect();
-
-        // Total recipient row untuk employee ini, lintas semua status & company
-        $allRecipients = $db->table('bonus_recipients r')
-            ->select('r.id, r.is_excluded, r.bonus_run_id, run.status AS run_status, run.company_id AS run_company_id')
-            ->join('bonus_runs run', 'run.id = r.bonus_run_id')
-            ->where('r.employee_id', $employeeId)
-            ->where('run.deleted_at IS NULL')
-            ->get()->getResultArray();
-
-        $byStatus = ['DRAFT' => 0, 'CALCULATED' => 0, 'APPROVED' => 0, 'PAID' => 0, 'CANCELLED' => 0];
-        $excludedCount = 0;
-        $companyIds = [];
-        foreach ($allRecipients as $r) {
-            $st = (string) $r['run_status'];
-            if (isset($byStatus[$st])) $byStatus[$st]++;
-            if ((int) $r['is_excluded'] === 1) $excludedCount++;
-            $companyIds[(int) $r['run_company_id']] = true;
-        }
-
-        // Cek employee record exists di company user
-        $emp = $db->table('employees')
-            ->select('id, company_id, full_name, employee_number')
-            ->where('id', $employeeId)
-            ->where('deleted_at IS NULL')
-            ->get()->getRowArray();
-
-        return [
-            'employee_id'           => $employeeId,
-            'employee_company_id'   => $emp ? (int) $emp['company_id'] : null,
-            'employee_exists'       => $emp !== null,
-            'user_tenant_company_id'=> $userCompanyId,
-            'filter_company_id'     => $filterCompanyId,                  // null = super admin
-            'cross_company'         => $emp && (int) $emp['company_id'] !== $userCompanyId,
-            'total_recipients_db'   => count($allRecipients),
-            'excluded_count'        => $excludedCount,
-            'recipients_by_status'  => $byStatus,
-            'distinct_run_companies'=> array_keys($companyIds),
-        ];
-    }
 }

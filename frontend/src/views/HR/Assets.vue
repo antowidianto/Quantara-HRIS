@@ -128,7 +128,7 @@ async function doAssign() {
     const payload = { ...formAssign }
     Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k] })
     await api.post(`/assets/${showAssign.value.id}/assign`, payload)
-    toast.success('Asset di-assign')
+    toast.success('Assignment asset diajukan untuk approval')
     showAssign.value = null
     fetchData()
   } catch (e) {
@@ -144,7 +144,7 @@ function openReturn(row) {
 async function doReturn() {
   try {
     await api.post(`/assets/${showReturn.value.id}/return`, formReturn)
-    toast.success('Asset di-return')
+    toast.success('Return asset diajukan untuk approval')
     showReturn.value = null
     fetchData()
   } catch (e) {
@@ -265,6 +265,9 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                 <span class="px-2 py-0.5 rounded text-xs" :class="STATUS_BADGE[r.status]?.cls">
                   {{ STATUS_BADGE[r.status]?.label || r.status }}
                 </span>
+                <span v-if="r.approval_action" class="ml-1 px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700">
+                  {{ r.approval_action === 'ASSIGN' ? 'Assignment' : 'Return' }} menunggu approval
+                </span>
               </td>
               <td class="text-xs">
                 <div v-if="r.employee_name">
@@ -275,11 +278,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
               </td>
               <td class="text-right">
                 <div class="flex items-center justify-end gap-1">
-                  <button v-if="canManage && r.status === 'AVAILABLE'"
+                  <button v-if="canManage && r.status === 'AVAILABLE' && !r.approval_action"
                     class="text-blue-600 hover:text-blue-800 p-1 text-xs" title="Assign" @click="openAssign(r)">
                     <ArrowUpTrayIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage && r.status === 'ASSIGNED'"
+                  <button v-if="canManage && r.status === 'ASSIGNED' && !r.approval_action"
                     class="text-emerald-600 hover:text-emerald-800 p-1" title="Return" @click="openReturn(r)">
                     <ArrowDownTrayIcon class="w-4 h-4" />
                   </button>
@@ -288,10 +291,10 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
                     @click="downloadBast(r, 'ASSIGN')">
                     <DocumentArrowDownIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage" class="text-gray-600 hover:text-primary-600 p-1" title="Edit" @click="openEdit(r)">
+                  <button v-if="canManage && !r.approval_action" class="text-gray-600 hover:text-primary-600 p-1" title="Edit" @click="openEdit(r)">
                     <PencilIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="canManage && ['AVAILABLE','RETIRED'].includes(r.status)"
+                  <button v-if="canManage && ['AVAILABLE','RETIRED'].includes(r.status) && !r.approval_action"
                     class="text-red-600 hover:text-red-800 p-1" title="Hapus" @click="remove(r)">
                     <TrashIcon class="w-4 h-4" />
                   </button>

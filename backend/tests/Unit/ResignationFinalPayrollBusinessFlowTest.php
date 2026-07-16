@@ -21,7 +21,8 @@ final class ResignationFinalPayrollBusinessFlowTest extends TestCase
     public function testFinalSettlementIsTenantScopedIdempotentAndPayrollConsumed(): void
     {
         $offboarding = file_get_contents(APPPATH . 'Libraries/Lifecycle/OffboardingService.php');
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php')
+            . file_get_contents(APPPATH . 'Repositories/Payroll/PayrollRepository.php');
         $deactivation = file_get_contents(APPPATH . 'Commands/DeactivateResigned.php');
         self::assertNotFalse($offboarding);
         self::assertNotFalse($payroll);
@@ -38,7 +39,7 @@ final class ResignationFinalPayrollBusinessFlowTest extends TestCase
 
     public function testInactiveEmployeeResigningInsidePeriodRemainsInFinalPayrollSelection(): void
     {
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $payroll = file_get_contents(APPPATH . 'Repositories/Payroll/PayrollRepository.php');
         self::assertNotFalse($payroll);
         self::assertMatchesRegularExpression(
             '/where\\(\'is_active\', 1\\)[\\s\\S]{0,240}where\\(\'resign_date >=\', \\$period\\[\'start_date\'\\]\\)[\\s\\S]{0,160}where\\(\'resign_date <=\', \\$period\\[\'end_date\'\\]\\)/',

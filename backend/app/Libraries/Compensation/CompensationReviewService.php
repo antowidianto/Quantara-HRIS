@@ -2,12 +2,18 @@
 
 namespace App\Libraries\Compensation;
 
-use App\Libraries\Employee\EmployeeEffectiveHistoryService;
 use CodeIgniter\Database\BaseConnection;
 
 final class CompensationReviewService
 {
-    public function __construct(private ?BaseConnection $db = null) { $this->db ??= \Config\Database::connect(); }
+    /** @var callable(array<string,mixed>):array<string,mixed>|null */
+    private $approvalStarter;
+
+    public function __construct(private ?BaseConnection $db = null, ?callable $approvalStarter = null)
+    {
+        $this->db ??= \Config\Database::connect();
+        $this->approvalStarter = $approvalStarter;
+    }
 
     public function cycles(int $companyId): array
     {
@@ -67,7 +73,7 @@ final class CompensationReviewService
 
     public function propose(int $companyId, int $cycleId, int $employeeId, float $salary, ?float $performance, ?string $calibration, int $managerId): array
     {
-        $cycle = $this->cycle($companyId, $cycleId); if (! in_array($cycle['status'], ['DRAFT', 'OPEN'], true)) throw new \RuntimeException('Cycle is not open for proposals.');
+        $cycle = $this->cycle($companyId, $cycleId); if ($cycle['status'] !== 'OPEN') throw new \RuntimeException('Cycle is not open for proposals.');
         $employee = $this->db->table('employees e')->select('e.*, jg.min_salary, jg.max_salary')->join('job_grades jg', 'jg.id = e.job_grade_id AND jg.company_id = e.company_id', 'left')
             ->where('e.id', $employeeId)->where('e.company_id', $companyId)->where('e.deleted_at IS NULL')->get()->getRowArray();
         if (! $employee) throw new \InvalidArgumentException('Employee not found in active company.');
@@ -77,43 +83,54 @@ final class CompensationReviewService
         $payload = ['company_id' => $companyId, 'cycle_id' => $cycleId, 'employee_id' => $employeeId, 'department_id' => $employee['department_id'], 'cost_center_id' => $employee['cost_center_id'] ?? null,
             'current_salary' => $current, 'proposed_salary' => $salary, 'range_min' => $min, 'range_max' => $max, 'compa_ratio' => $metric['compa_ratio'], 'range_penetration' => $metric['range_penetration'],
             'performance_score' => $performance, 'calibration_input' => $calibration, 'status' => 'SUBMITTED', 'approval_level' => 0, 'proposed_by' => $managerId, 'updated_at' => $now];
+        $manager = $this->db->table('users')->where('id', $managerId)->where('company_id', $companyId)
+            ->where('is_active', 1)->get()->getRowArray();
+        $requesterEmployeeId = (int) ($manager['employee_id'] ?? 0);
+        if ($requesterEmployeeId <= 0) throw new \InvalidArgumentException('Proposer must be linked to an active employee in the company.');
         $existing = $this->db->table('compensation_review_proposals')->where('company_id', $companyId)->where('cycle_id', $cycleId)->where('employee_id', $employeeId)->get()->getRowArray();
-        if ($existing) $this->db->table('compensation_review_proposals')->where('id', $existing['id'])->where('company_id', $companyId)->update($payload);
-        else { $payload['created_at'] = $now; $this->db->table('compensation_review_proposals')->insert($payload); }
-        return $this->proposal($companyId, $cycleId, $employeeId);
-    }
-
-    public function approve(int $companyId, int $proposalId, int $approverId): array
-    {
-        $row = $this->db->table('compensation_review_proposals')->where('id', $proposalId)->where('company_id', $companyId)->get()->getRowArray(); if (! $row) throw new \InvalidArgumentException('Proposal not found.');
-        if (! in_array($row['status'], ['SUBMITTED', 'IN_APPROVAL'], true)) throw new \RuntimeException('Proposal is not awaiting approval.');
-        if ((int) $row['proposed_by'] === $approverId) throw new \RuntimeException('Proposer cannot approve their own proposal.');
-        if ($this->db->table('compensation_review_approvals')->where('company_id', $companyId)->where('proposal_id', $proposalId)->where('approver_id', $approverId)->countAllResults() > 0) throw new \RuntimeException('Each approval level requires a different approver.');
-        $cycle = $this->cycle($companyId, (int) $row['cycle_id']); $next = (int) $row['approval_level'] + 1; $final = $next >= (int) $cycle['approval_levels'];
-        if ($final) $this->assertBudget($companyId, $row);
-        $update = ['approval_level' => $next, 'status' => $final ? 'APPROVED' : 'IN_APPROVAL', 'approved_by' => $approverId, 'approved_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')];
+        if ($existing && $existing['status'] !== 'REJECTED') {
+            throw new \RuntimeException('An active or approved proposal is immutable; reject it before resubmission.');
+        }
         $this->db->transBegin();
         try {
-        if ($final) {
-            $snapshot = (new EmployeeEffectiveHistoryService($this->db))->schedule($companyId, (int) $row['employee_id'], (string) $cycle['effective_date'], ['basic_salary' => (float) $row['proposed_salary']], $approverId, 'COMPENSATION_REVIEW', $proposalId, (int) $row['proposed_by']);
-            $update['history_snapshot_id'] = $snapshot['id']; $update['letter_reference'] = sprintf('COMP/%s/%06d', $cycle['code'], $proposalId);
+            if ($existing) {
+                $payload += ['approved_by' => null, 'approved_at' => null, 'history_snapshot_id' => null,
+                    'letter_reference' => null, 'rejected_by' => null, 'rejected_at' => null, 'rejection_reason' => null];
+                $this->db->table('compensation_review_proposals')->where('id', $existing['id'])
+                    ->where('company_id', $companyId)->where('status', 'REJECTED')->update($payload);
+                if ($this->db->affectedRows() !== 1) throw new \RuntimeException('Proposal changed; reload data.');
+                $proposalId = (int) $existing['id'];
+            } else {
+                $payload['created_at'] = $now;
+                $this->db->table('compensation_review_proposals')->insert($payload);
+                $proposalId = (int) $this->db->insertID();
+            }
+            $increase = $salary - $current;
+            $approval = $this->startApproval([
+                'company_id' => $companyId,
+                'module' => 'COMPENSATION_REVIEW',
+                'entity_table' => 'compensation_review_proposals',
+                'entity_id' => $proposalId,
+                'employee_id' => $requesterEmployeeId,
+                'meta' => [
+                    'amount' => max(0, $increase),
+                    'salary_variance_pct' => $current > 0 ? round(($increase / $current) * 100, 4) : 0,
+                    'target_employee_id' => $employeeId,
+                    'department_id' => $employee['department_id'] ?? null,
+                    'cost_center_id' => $employee['cost_center_id'] ?? null,
+                    'effective_date' => $cycle['effective_date'],
+                    'submitted_by' => $managerId,
+                ],
+            ]);
+            if (! $this->db->transStatus()) throw new \RuntimeException('Failed to create compensation approval.');
+            $this->db->transCommit();
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
         }
-        $this->db->table('compensation_review_proposals')->where('id', $proposalId)->where('company_id', $companyId)->update($update);
-        $this->db->table('compensation_review_approvals')->insert(['company_id' => $companyId, 'proposal_id' => $proposalId, 'approval_level' => $next, 'approver_id' => $approverId, 'decision' => 'APPROVED', 'created_at' => date('Y-m-d H:i:s')]);
-        if ($this->db->transStatus() === false) throw new \RuntimeException('Failed to persist compensation approval.');
-        $this->db->transCommit();
-        } catch (\Throwable $e) { $this->db->transRollback(); throw $e; }
-        return $this->db->table('compensation_review_proposals')->where('id', $proposalId)->where('company_id', $companyId)->get()->getRowArray();
-    }
-
-    public function reject(int $companyId, int $proposalId, int $approverId, string $reason): array
-    {
-        $row = $this->db->table('compensation_review_proposals')->where('id', $proposalId)->where('company_id', $companyId)->get()->getRowArray(); if (! $row) throw new \InvalidArgumentException('Proposal not found.');
-        if (! in_array($row['status'], ['SUBMITTED', 'IN_APPROVAL'], true)) throw new \RuntimeException('Proposal is not awaiting approval.');
-        if (trim($reason) === '') throw new \InvalidArgumentException('Rejection reason is required.');
-        $level = (int) $row['approval_level'] + 1; $now = date('Y-m-d H:i:s');
-        $this->db->transBegin(); try { $this->db->table('compensation_review_proposals')->where('id', $proposalId)->where('company_id', $companyId)->update(['status' => 'REJECTED', 'manager_note' => trim($reason), 'approved_by' => $approverId, 'approved_at' => $now, 'updated_at' => $now]); $this->db->table('compensation_review_approvals')->insert(['company_id' => $companyId, 'proposal_id' => $proposalId, 'approval_level' => $level, 'approver_id' => $approverId, 'decision' => 'REJECTED', 'created_at' => $now]); if ($this->db->transStatus() === false) throw new \RuntimeException('Failed to reject proposal.'); $this->db->transCommit(); } catch (\Throwable $e) { $this->db->transRollback(); throw $e; }
-        return $this->db->table('compensation_review_proposals')->where('id', $proposalId)->where('company_id', $companyId)->get()->getRowArray();
+        $result = $this->proposal($companyId, $cycleId, $employeeId);
+        $result['approval'] = $approval;
+        return $result;
     }
 
     public function letter(int $companyId, int $proposalId): array
@@ -123,23 +140,19 @@ final class CompensationReviewService
         return ['reference' => $row['letter_reference'], 'employee' => ['id' => (int) $row['employee_id'], 'number' => $row['employee_number'], 'name' => $row['full_name']], 'cycle' => $row['cycle_name'], 'effective_date' => $row['effective_date'], 'current_salary' => (float) $row['current_salary'], 'new_salary' => (float) $row['proposed_salary'], 'increase' => (float) $row['proposed_salary'] - (float) $row['current_salary'], 'issued_at' => $row['approved_at']];
     }
 
-    private function assertBudget(int $companyId, array $proposal): void
-    {
-        $budgets = $this->db->table('compensation_review_budgets')->where('company_id', $companyId)->where('cycle_id', $proposal['cycle_id'])
-            ->groupStart()->where('department_id', $proposal['department_id'])->orWhere('department_id IS NULL')->groupEnd()->groupStart()->where('cost_center_id', $proposal['cost_center_id'])->orWhere('cost_center_id IS NULL')->groupEnd()->get()->getResultArray();
-        $specificity = array_map(static fn (array $r): int => ($r['department_id'] !== null ? 1 : 0) + ($r['cost_center_id'] !== null ? 1 : 0), $budgets); $highest = $specificity === [] ? -1 : max($specificity); $budget = 0.0;
-        foreach ($budgets as $index => $row) if ($specificity[$index] === $highest) $budget += (float) $row['budget_amount'];
-        $approved = $this->db->table('compensation_review_proposals')->selectSum('proposed_salary')->selectSum('current_salary')->where('company_id', $companyId)->where('cycle_id', $proposal['cycle_id'])->where('status', 'APPROVED')->get()->getRowArray();
-        $used = (float) ($approved['proposed_salary'] ?? 0) - (float) ($approved['current_salary'] ?? 0); $increase = (float) $proposal['proposed_salary'] - (float) $proposal['current_salary'];
-        if ($increase > 0 && ($budget <= 0 || $used + $increase > $budget)) throw new \RuntimeException('Merit budget would be exceeded.');
-    }
-
     private function summary(int $companyId, int $cycleId): array
     {
         $budget = $this->db->table('compensation_review_budgets')->selectSum('budget_amount')->where('company_id', $companyId)->where('cycle_id', $cycleId)->get()->getRowArray();
         $rows = $this->db->table('compensation_review_proposals')->where('company_id', $companyId)->where('cycle_id', $cycleId)->get()->getResultArray(); $used = 0.0; $counts = [];
         foreach ($rows as $row) { $counts[$row['status']] = ($counts[$row['status']] ?? 0) + 1; if ($row['status'] === 'APPROVED') $used += (float) $row['proposed_salary'] - (float) $row['current_salary']; }
         $total = (float) ($budget['budget_amount'] ?? 0); return ['budget' => $total, 'approved_increase' => $used, 'remaining' => $total - $used, 'proposal_count' => count($rows), 'status_counts' => $counts];
+    }
+
+    /** @param array<string,mixed> $params @return array<string,mixed> */
+    private function startApproval(array $params): array
+    {
+        if ($this->approvalStarter !== null) return ($this->approvalStarter)($params);
+        return \Config\Services::approval()->start($params);
     }
 
     private function assertCompany(int $companyId): void { if ($companyId <= 0) throw new \InvalidArgumentException('Active company is required.'); }

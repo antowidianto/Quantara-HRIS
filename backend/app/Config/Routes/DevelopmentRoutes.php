@@ -15,8 +15,6 @@ final class DevelopmentRoutes
         $routes->put('compensation-reviews/(:num)/budgets', 'Compensation\CompensationReviewController::budgets/$1', ['filter' => 'permission:employee.manage']);
         $routes->post('compensation-reviews/(:num)/open', 'Compensation\CompensationReviewController::open/$1', ['filter' => ['permission:employee.manage', 'idempotency:required']]);
         $routes->post('compensation-reviews/(:num)/proposals', 'Compensation\CompensationReviewController::propose/$1', ['filter' => ['permission:employee.manage', 'idempotency:required']]);
-        $routes->post('compensation-proposals/(:num)/approve', 'Compensation\CompensationReviewController::approve/$1', ['filter' => ['permission:employee.manage', 'idempotency:required']]);
-        $routes->post('compensation-proposals/(:num)/reject', 'Compensation\CompensationReviewController::reject/$1', ['filter' => ['permission:employee.manage', 'idempotency:required']]);
         $routes->get('compensation-proposals/(:num)/letter', 'Compensation\CompensationReviewController::letter/$1', ['filter' => 'permission:employee.view,payroll.view']);
 
         // â”€â”€â”€ Individual Development Plan (Sprint 3 / OD-2) â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -84,35 +84,41 @@ class TimesheetController extends ApiController
         $employeeId = $this->resolveCurrentEmployeeId();
         if ($employeeId === null) return $this->fail('Employee not linked', 422, 'NO_EMPLOYEE');
         try {
-            $this->service->submit($id, $employeeId);
+            $result = $this->service->submit($id, $this->companyId(), $employeeId, $this->userId());
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'SUBMIT_FAILED');
         }
-        return $this->ok(['id' => $id, 'status' => 'SUBMITTED']);
+        return $this->ok($result);
     }
 
     public function approve(int $id)
     {
         try {
-            $this->service->approve($id, $this->userId());
+            $result = \Config\Services::approval()->approveEntity(
+                'TIMESHEET', 'timesheet_entries', $id, $this->companyId(), $this->userId(),
+                trim((string) ($this->getJsonInput()['note'] ?? ''))
+            );
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'APPROVE_FAILED');
         }
-        return $this->ok(['id' => $id, 'status' => 'APPROVED']);
+        return $this->ok($result);
     }
 
     public function reject(int $id)
     {
         $body = $this->validateOrFail($this->getJsonInput(), [
-            'reason' => 'required|min_length[3]',
+            'reason' => 'required|min_length[5]',
         ]);
         if ($body === null) return null;
         try {
-            $this->service->reject($id, $this->userId(), (string) $body['reason']);
+            $result = \Config\Services::approval()->rejectEntity(
+                'TIMESHEET', 'timesheet_entries', $id, $this->companyId(), $this->userId(),
+                (string) $body['reason']
+            );
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'REJECT_FAILED');
         }
-        return $this->ok(['id' => $id, 'status' => 'REJECTED']);
+        return $this->ok($result);
     }
 
     public function utilization()
@@ -144,6 +150,8 @@ class TimesheetController extends ApiController
         $row = $db->table('employees')
             ->select('id')
             ->where('user_id', $userId)
+            ->where('company_id', $this->companyId())
+            ->where('deleted_at IS NULL')
             ->limit(1)->get()->getRowArray();
         return $row ? (int) $row['id'] : null;
     }

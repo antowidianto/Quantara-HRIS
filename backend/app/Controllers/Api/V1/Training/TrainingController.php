@@ -249,47 +249,29 @@ class TrainingController extends ApiController
     {
         if (! $this->can('training.register')) return $this->fail('Forbidden', 403);
         $trainingId = (int) $trainingId;
-
-        $training = $this->db()->table('trainings')->where('id', $trainingId)
-            ->where('deleted_at IS NULL')->get()->getRowArray();
-        if (! $training) return $this->fail('Training tidak ditemukan', 404);
-        if ($training['status'] !== 'PUBLISHED') return $this->fail('Training belum dipublish', 422);
-
+        $companyId = (int) $this->tenant()->getCompanyId();
+        $userId = (int) $this->tenant()->getUserId();
         $myEmpId = $this->getMyEmployeeId();
         $data = $this->getJsonInput();
         // HR bisa daftarkan karyawan lain
         $employeeId = (int) ($data['employee_id'] ?? $myEmpId);
         if (! $employeeId) return $this->fail('Employee tidak ditemukan', 400);
-
-        // Cek duplikasi
-        $exists = $this->db()->table('training_registrations')
-            ->where('training_id', $trainingId)
-            ->where('employee_id', $employeeId)
-            ->whereNotIn('status', ['CANCELLED','REJECTED'])
-            ->countAllResults();
-        if ($exists > 0) return $this->fail('Karyawan sudah terdaftar', 422);
-
-        $now = date('Y-m-d H:i:s');
-        $insert = [
-            'company_id'    => (int) $training['company_id'],
-            'training_id'   => $trainingId,
-            'employee_id'   => $employeeId,
-            'status'        => 'REGISTERED',
-            'registered_at' => $now,
-            'cost'          => (float) $training['cost_per_participant'],
-            'notes'         => $data['notes'] ?? null,
-            'created_at'    => $now, 'updated_at' => $now,
-        ];
-        $this->db()->table('training_registrations')->insert($insert);
-        $regId = (int) $this->db()->insertID();
-
         try {
-            Services::audit()->forModule('TRAINING')->log(
-                action: 'training.register', entity: 'training_registrations', entityId: $regId, after: $insert,
-                description: "Register karyawan #{$employeeId} ke training {$training['code']}",
+            $result = $this->svc()->register(
+                $companyId, $trainingId, $employeeId, $userId,
+                isset($data['notes']) ? (string) $data['notes'] : null
             );
-        } catch (\Throwable $e) {}
-        return $this->ok(['id' => $regId], 'OK', 201);
+            try {
+                Services::audit()->forModule('TRAINING')->log(
+                    action: 'training.register', entity: 'training_registrations', entityId: (int) $result['id'],
+                    after: ['status' => 'REGISTERED'],
+                    description: "Register karyawan #{$employeeId} ke training #{$trainingId}",
+                );
+            } catch (\Throwable $e) {}
+            return $this->ok($result, 'OK', 201);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
     }
 
     public function approveRegistration($regId = null)
@@ -297,8 +279,12 @@ class TrainingController extends ApiController
         if (! $this->can('training.manage')) return $this->fail('Forbidden', 403);
         $regId = (int) $regId;
         $userId = (int) $this->tenant()->getUserId();
+        $companyId = (int) $this->tenant()->getCompanyId();
         try {
-            $result = $this->svc()->approveRegistration($regId, $userId);
+            $result = Services::approval()->approveEntity(
+                'TRAINING_REGISTRATION', 'training_registrations', $regId, $companyId, $userId,
+                trim((string) ($this->getJsonInput()['note'] ?? ''))
+            );
             try {
                 Services::audit()->forModule('TRAINING')->log(
                     action: 'training.reg.approve', entity: 'training_registrations', entityId: $regId,
@@ -318,18 +304,14 @@ class TrainingController extends ApiController
         $data = $this->getJsonInput();
         $reason = trim((string) ($data['reason'] ?? ''));
         if (strlen($reason) < 5) return $this->fail('Alasan min 5 karakter', 400);
-
-        $reg = $this->db()->table('training_registrations')->where('id', $regId)->get()->getRowArray();
-        if (! $reg) return $this->fail('Registration tidak ditemukan', 404);
-        if (! in_array($reg['status'], ['REGISTERED','APPROVED'], true)) {
-            return $this->fail("Tidak bisa reject status {$reg['status']}", 422);
+        try {
+            return $this->ok(Services::approval()->rejectEntity(
+                'TRAINING_REGISTRATION', 'training_registrations', $regId,
+                (int) $this->tenant()->getCompanyId(), (int) $this->tenant()->getUserId(), $reason
+            ));
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
         }
-        $this->db()->table('training_registrations')->where('id', $regId)->update([
-            'status' => 'REJECTED',
-            'rejection_reason' => $reason,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-        return $this->ok(['id' => $regId]);
     }
 
     public function completeRegistration($regId = null)
@@ -338,7 +320,7 @@ class TrainingController extends ApiController
         $regId = (int) $regId;
         $data = $this->getJsonInput();
         try {
-            $result = $this->svc()->completeRegistration($regId, [
+            $result = $this->svc()->completeRegistration($regId, (int) $this->tenant()->getCompanyId(), [
                 'final_score' => $data['final_score'] ?? null,
                 'attendance_percent' => $data['attendance_percent'] ?? null,
             ]);
@@ -357,7 +339,9 @@ class TrainingController extends ApiController
     public function cancelRegistration($regId = null)
     {
         $regId = (int) $regId;
-        $reg = $this->db()->table('training_registrations')->where('id', $regId)->get()->getRowArray();
+        $companyId = (int) $this->tenant()->getCompanyId();
+        $reg = $this->db()->table('training_registrations')->where('id', $regId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $reg) return $this->fail('Not found', 404);
 
         // Karyawan bisa cancel sendiri
@@ -365,14 +349,11 @@ class TrainingController extends ApiController
         $isOwner = $myEmpId && (int) $reg['employee_id'] === $myEmpId;
         if (! $isOwner && ! $this->can('training.manage')) return $this->fail('Forbidden', 403);
 
-        if (in_array($reg['status'], ['COMPLETED','CERTIFIED','REJECTED','CANCELLED'], true)) {
-            return $this->fail("Tidak bisa cancel status {$reg['status']}", 422);
+        try {
+            return $this->ok($this->svc()->cancelRegistration($regId, $companyId));
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
         }
-        $this->db()->table('training_registrations')->where('id', $regId)->update([
-            'status' => 'CANCELLED',
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-        return $this->ok(['id' => $regId]);
     }
 
     // ─── Certificates ────────────────────────────────────────────────

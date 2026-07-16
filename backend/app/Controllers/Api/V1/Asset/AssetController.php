@@ -102,7 +102,6 @@ class AssetController extends ApiController
     {
         $row = $this->loadAssetOrFail((int) $id);
         if (! $row) return $this->response;
-
         // Sertakan history assignment
         $db = \Config\Database::connect();
         $history = $db->table('asset_assignments aa')
@@ -167,6 +166,9 @@ class AssetController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $row = $this->loadAssetOrFail((int) $id);
         if (! $row) return $this->response;
+        if (! empty($row['approval_action'])) {
+            return $this->fail('Asset sedang menunggu approval dan tidak dapat diedit', 409);
+        }
 
         $data = $this->getJsonInput();
         $update = array_intersect_key($data, array_flip([
@@ -196,6 +198,9 @@ class AssetController extends ApiController
         if (! $this->canManage()) return $this->fail('Forbidden', 403);
         $row = $this->loadAssetOrFail((int) $id);
         if (! $row) return $this->response;
+        if (! empty($row['approval_action'])) {
+            return $this->fail('Asset sedang menunggu approval dan tidak dapat dihapus', 409);
+        }
         if (! in_array($row['status'], ['AVAILABLE','RETIRED'], true)) {
             return $this->fail('Asset masih ASSIGNED/REPAIR/LOST. Return atau retire dulu sebelum delete.', 422);
         }
@@ -224,25 +229,25 @@ class AssetController extends ApiController
         if (! $valid) return null;
 
         try {
-            $assignmentId = Services::asset()->assignToEmployee((int) $id, (int) $data['employee_id'], [
+            $result = (new \App\Libraries\Asset\AssetApprovalWorkflowService())->submitAssign(
+                (int) $id, (int) $row['company_id'], $this->userId(), (int) $data['employee_id'], [
                 'assigned_at'      => $data['assigned_at'] ?? null,
                 'expected_return'  => $data['expected_return'] ?? null,
                 'purpose'          => $data['purpose'] ?? null,
                 'condition_when_assigned' => strtoupper((string) ($data['condition_when_assigned'] ?? $row['condition'])),
-                'assigned_by'      => $this->userId(),
             ]);
-        } catch (\Throwable $e) {
-            return $this->fail($e->getMessage(), 422);
+        } catch (\App\Libraries\Asset\AssetApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode);
         }
 
         Services::audit()->forModule('ASSET')->log(
-            action: 'asset.assign',
+            action: 'asset.assign.submit',
             entity: 'asset', entityId: (int) $id,
-            after: ['assignment_id' => $assignmentId, 'employee_id' => (int) $data['employee_id']],
-            description: "Assign asset {$row['asset_number']} ke employee #{$data['employee_id']}",
+            after: ['status' => 'PENDING_APPROVAL', 'employee_id' => (int) $data['employee_id']],
+            description: "Ajukan assignment asset {$row['asset_number']} ke employee #{$data['employee_id']}",
             severity: 'NOTICE'
         );
-        return $this->ok(['assignment_id' => $assignmentId], 'Assigned', 201);
+        return $this->ok($result, 'Assignment asset diajukan untuk approval', 201);
     }
 
     public function returnAsset($id = null)
@@ -257,24 +262,24 @@ class AssetController extends ApiController
 
         $data = $this->getJsonInput();
         try {
-            Services::asset()->returnAsset((int) $row['current_assignment_id'], [
+            $result = (new \App\Libraries\Asset\AssetApprovalWorkflowService())->submitReturn(
+                (int) $id, (int) $row['company_id'], $this->userId(), [
                 'returned_at'             => $data['returned_at'] ?? null,
                 'condition_when_returned' => $data['condition_when_returned'] ?? 'GOOD',
                 'damage_note'             => $data['damage_note'] ?? null,
-                'returned_by'             => $this->userId(),
             ]);
-        } catch (\Throwable $e) {
-            return $this->fail($e->getMessage(), 422);
+        } catch (\App\Libraries\Asset\AssetApprovalException $exception) {
+            return $this->fail($exception->getMessage(), $exception->httpStatus, $exception->errorCode);
         }
 
         Services::audit()->forModule('ASSET')->log(
-            action: 'asset.return',
+            action: 'asset.return.submit',
             entity: 'asset', entityId: (int) $id,
             after: ['condition' => $data['condition_when_returned'] ?? 'GOOD'],
-            description: "Return asset {$row['asset_number']}",
+            description: "Ajukan return asset {$row['asset_number']}",
             severity: 'NOTICE'
         );
-        return $this->ok(null, 'Returned');
+        return $this->ok($result, 'Return asset diajukan untuk approval');
     }
 
     /**

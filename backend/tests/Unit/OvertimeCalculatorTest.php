@@ -53,7 +53,7 @@ class OvertimeCalculatorTest extends CIUnitTestCase
         $this->assertTrue($largeWithNote['valid']);
         $this->assertGreaterThan(0, $calculator->calculate(10_000_000, 7.0, 'WEEKDAY'));
 
-        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollService.php');
+        $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
         $this->assertNotFalse($payroll);
         $this->assertStringContainsString("whereIn('status', ['APPROVED', 'REALIZED'])", $payroll);
     }

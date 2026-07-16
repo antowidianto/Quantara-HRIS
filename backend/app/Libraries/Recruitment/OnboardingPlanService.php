@@ -447,7 +447,12 @@ class OnboardingPlanService
                 continue;
             }
 
-            $bal = $leaveSvc->ensureBalance($employeeId, (int) $t['id'], $year);
+            $bal = $leaveSvc->ensureBalance(
+                $employeeId,
+                (int) $t['id'],
+                $year,
+                (int) $emp['company_id'],
+            );
             if (! $bal) continue;
 
             if (! empty($bal['__created'])) {

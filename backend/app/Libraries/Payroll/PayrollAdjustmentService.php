@@ -3,6 +3,7 @@
 namespace App\Libraries\Payroll;
 
 use CodeIgniter\Database\BaseConnection;
+use Config\Services;
 
 /** Append-only payroll correction workflow; historical payslips are never mutated. */
 final class PayrollAdjustmentService
@@ -50,18 +51,6 @@ final class PayrollAdjustmentService
         return $this->find($companyId, (int) $this->db->insertID());
     }
 
-    public function approve(int $companyId, int $id, int $userId): array
-    {
-        $row = $this->find($companyId, $id);
-        if ($row['status'] !== 'DRAFT') throw new \RuntimeException('Only draft adjustment can be approved');
-        if ((int) $row['created_by'] === $userId) throw new \DomainException('Adjustment maker cannot approve it');
-        $this->db->table('payroll_adjustments')->where('id', $id)->where('company_id', $companyId)->update([
-            'status' => 'APPROVED', 'approved_by' => $userId,
-            'approved_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-        return $this->find($companyId, $id);
-    }
-
     public function reverse(int $companyId, int $id, int $userId, int $targetPeriodId, string $reason): array
     {
         $row = $this->find($companyId, $id);
@@ -78,17 +67,46 @@ final class PayrollAdjustmentService
             'original_period_id' => $row['original_period_id'], 'target_period_id' => $targetPeriodId,
             'reversal_of_id' => $id,
             'adjustment_type' => $row['adjustment_type'] === 'EARNING' ? 'DEDUCTION' : 'EARNING',
-            'amount' => $row['amount'], 'reason' => trim($reason), 'status' => 'APPROVED',
+            'amount' => $row['amount'], 'reason' => trim($reason), 'status' => 'DRAFT',
             'is_taxable' => $row['is_taxable'],
-            'created_by' => $userId, 'approved_by' => $userId, 'approved_at' => $now,
+            'created_by' => $userId,
             'created_at' => $now, 'updated_at' => $now,
         ]);
         $newId = (int) $this->db->insertID();
-        $this->db->table('payroll_adjustments')->where('id', $id)->where('company_id', $companyId)
-            ->update(['status' => 'REVERSED', 'updated_at' => $now]);
         $this->db->transComplete();
         if (! $this->db->transStatus()) throw new \RuntimeException('Adjustment reversal failed');
         return $this->find($companyId, $newId);
+    }
+
+    public function cancel(int $companyId, int $id, int $userId, string $reason): array
+    {
+        $row = $this->find($companyId, $id);
+        if (! in_array($row['status'], ['DRAFT', 'PENDING_APPROVAL', 'REJECTED'], true)) {
+            throw new \RuntimeException('Only unposted adjustment can be cancelled');
+        }
+        $reason = trim($reason);
+        if (mb_strlen($reason) < 5) throw new \InvalidArgumentException('Cancellation reason is required');
+        $now = date('Y-m-d H:i:s');
+        $this->db->transBegin();
+        try {
+            $this->db->table('payroll_adjustments')->where('id', $id)->where('company_id', $companyId)
+                ->where('status', (string) $row['status'])->update([
+                    'status' => 'CANCELLED', 'cancelled_by' => $userId,
+                    'cancelled_at' => $now, 'cancellation_reason' => $reason, 'updated_at' => $now,
+                ]);
+            if ($this->db->affectedRows() !== 1) throw new \RuntimeException('Adjustment changed; reload data');
+            if ($row['status'] === 'PENDING_APPROVAL') {
+                Services::approval()->cancelEntity(
+                    'PAYROLL_ADJUSTMENT', 'payroll_adjustments', $id, $companyId
+                );
+            }
+            if (! $this->db->transStatus()) throw new \RuntimeException('Adjustment cancellation failed');
+            $this->db->transCommit();
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+            throw $exception;
+        }
+        return $this->find($companyId, $id);
     }
 
     public function find(int $companyId, int $id): array

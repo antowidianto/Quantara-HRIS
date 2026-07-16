@@ -157,4 +157,92 @@ final class JicQueryRepository
             ->where('company_id', $companyId)->where('manager_employee_id', (int) $caller['id'])
             ->countAllResults() > 0;
     }
+
+    /** @return array<string,mixed>|null */
+    public function employeeProfile(int $employeeId, int $companyId): ?array
+    {
+        $this->requireCompany($companyId);
+        return $this->db->table('employees e')->select(
+            'e.id, e.employee_number, e.full_name, e.first_name, e.last_name, e.gender, e.email, e.phone, '
+            . 'e.avatar_path, e.user_id, e.employment_status, e.employment_type, e.is_active, e.join_date, '
+            . 'e.probation_end_date, e.contract_end_date, e.resign_date, e.basic_salary, e.tax_method, '
+            . 'e.ptkp_status, e.education_level, e.marital_status, b.name AS branch_name, '
+            . 'd.name AS department_name, p.name AS position_name, p.tier AS position_tier, '
+            . 'g.name AS grade_name, wl.name AS work_location_name, wl.type AS work_location_type'
+        )->join('branches b', 'b.id = e.branch_id AND b.company_id = e.company_id', 'left')
+            ->join('departments d', 'd.id = e.department_id AND d.company_id = e.company_id', 'left')
+            ->join('positions p', 'p.id = e.position_id AND p.company_id = e.company_id', 'left')
+            ->join('job_grades g', 'g.id = e.job_grade_id AND g.company_id = e.company_id', 'left')
+            ->join('work_locations wl', 'wl.id = e.work_location_id AND wl.company_id = e.company_id', 'left')
+            ->where('e.id', $employeeId)->where('e.company_id', $companyId)->get()->getRowArray() ?: null;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function employeeDetail(int $employeeId, int $companyId): ?array
+    {
+        if ($employeeId <= 0) return null;
+        $this->requireCompany($companyId);
+        $row = $this->db->table('employees e')->select(
+            'e.id, e.employee_number, e.full_name, e.email, e.phone, e.user_id, '
+            . 'p.name AS position_name, p.tier AS position_tier, d.name AS department_name'
+        )->join('positions p', 'p.id = e.position_id AND p.company_id = e.company_id', 'left')
+            ->join('departments d', 'd.id = e.department_id AND d.company_id = e.company_id', 'left')
+            ->where('e.id', $employeeId)->where('e.company_id', $companyId)->get()->getRowArray();
+        if (! $row) return null;
+        return ['employee_id' => (int) $row['id'], 'employee_number' => $row['employee_number'], 'full_name' => $row['full_name'],
+            'email' => $row['email'], 'phone' => $row['phone'], 'position' => $row['position_name'],
+            'position_tier' => $row['position_tier'], 'department' => $row['department_name'],
+            'user_id' => $row['user_id'] ? (int) $row['user_id'] : null];
+    }
+
+    /** @return array<string,mixed>|null */
+    public function departmentHead(int $departmentId, int $companyId): ?array
+    {
+        if ($departmentId <= 0) return null;
+        $this->requireCompany($companyId);
+        $department = $this->db->table('departments')->select('manager_employee_id')->where('id', $departmentId)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        return empty($department['manager_employee_id']) ? null : $this->employeeDetail((int) $department['manager_employee_id'], $companyId);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function workLocation(int $id, int $companyId): ?array
+    {
+        if ($id <= 0) return null;
+        $this->requireCompany($companyId);
+        return $this->db->table('work_locations')->select('id, code, name, type, address, city, province')
+            ->where('id', $id)->where('company_id', $companyId)->get()->getRowArray() ?: null;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function actor(int $userId, int $companyId): ?array
+    {
+        if ($userId <= 0) return null;
+        $this->requireCompany($companyId);
+        $row = $this->db->table('users u')->select(
+            'u.id, u.name, u.email, e.id AS employee_id, e.employee_number, '
+            . 'e.full_name AS employee_name, p.name AS position_name'
+        )->join('employees e', 'e.user_id = u.id AND e.company_id = u.company_id', 'left')
+            ->join('positions p', 'p.id = e.position_id AND p.company_id = u.company_id', 'left')
+            ->where('u.id', $userId)->where('u.company_id', $companyId)->get()->getRowArray();
+        if (! $row) return null;
+        return ['user_id' => (int) $row['id'], 'name' => $row['name'], 'email' => $row['email'],
+            'employee_id' => $row['employee_id'] ? (int) $row['employee_id'] : null,
+            'employee_number' => $row['employee_number'], 'employee_name' => $row['employee_name'], 'position' => $row['position_name']];
+    }
+
+    /** @return array<string,mixed>|null */
+    public function initiator(int $userId, int $companyId): ?array
+    {
+        if ($userId <= 0) return null;
+        $this->requireCompany($companyId);
+        return $this->db->table('users u')->select('u.id, u.name, u.email, e.full_name AS employee_name, e.employee_number')
+            ->join('employees e', 'e.user_id = u.id AND e.company_id = u.company_id', 'left')
+            ->where('u.id', $userId)->where('u.company_id', $companyId)->get()->getRowArray() ?: null;
+    }
+
+    private function requireCompany(int $companyId): void
+    {
+        if ($companyId <= 0) throw new \DomainException('Active company context is required');
+    }
 }

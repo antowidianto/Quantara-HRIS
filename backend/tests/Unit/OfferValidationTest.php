@@ -163,6 +163,8 @@ class OfferValidationTest extends TestCase
     {
         $statuses = \App\Libraries\Recruitment\OfferService::STATUSES;
         $this->assertContains('DRAFT',     $statuses);
+        $this->assertContains('PENDING_APPROVAL', $statuses);
+        $this->assertContains('APPROVAL_REJECTED', $statuses);
         $this->assertContains('SENT',      $statuses);
         $this->assertContains('ACCEPTED',  $statuses);
         $this->assertContains('REJECTED',  $statuses);

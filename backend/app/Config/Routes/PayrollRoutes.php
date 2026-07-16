@@ -35,12 +35,15 @@ final class PayrollRoutes
         $routes->get('payslips/(:num)/bukti-potong', 'Payroll\PayslipController::buktiPotong/$1', ['filter' => 'permission:payslip.view_self,payslip.view_all']);
         $routes->get('payroll-adjustments', 'Payroll\PayrollAdjustmentController::index', ['filter' => 'permission:payroll.adjustment.manage']);
         $routes->post('payroll-adjustments', 'Payroll\PayrollAdjustmentController::create', ['filter' => ['permission:payroll.adjustment.manage', 'idempotency:required']]);
-        $routes->post('payroll-adjustments/(:num)/approve', 'Payroll\PayrollAdjustmentController::approve/$1', ['filter' => ['permission:payroll.adjustment.approve', 'idempotency:required']]);
+        $routes->post('payroll-adjustments/(:num)/submit', 'Payroll\PayrollAdjustmentController::submit/$1', ['filter' => ['permission:payroll.adjustment.manage', 'idempotency:required']]);
         $routes->post('payroll-adjustments/(:num)/reverse', 'Payroll\PayrollAdjustmentController::reverse/$1', ['filter' => ['permission:payroll.adjustment.approve', 'idempotency:required']]);
+        $routes->post('payroll-adjustments/(:num)/cancel', 'Payroll\PayrollAdjustmentController::cancel/$1', ['filter' => ['permission:payroll.adjustment.manage', 'idempotency:required']]);
         $routes->post('payroll/thr', 'Payroll\PayrollController::generateThr', ['filter' => ['permission:payroll.manage', 'idempotency:required']]);
         $routes->get('thr/projection', 'Payroll\PayrollController::thrProjection', ['filter' => 'permission:payroll.view,payroll.manage']);
         $routes->get('my-benefit-balances', 'Payroll\ReimbursementController::myBalances', ['filter' => 'permission:reimbursement.view']);
         $routes->post('reimbursements', 'Payroll\ReimbursementController::create', ['filter' => ['permission:reimbursement.create', 'idempotency:required']]);
+        $routes->post('reimbursements/(:num)/approve', 'Payroll\ReimbursementController::approve/$1', ['filter' => ['permission:reimbursement.approve', 'idempotency:required']]);
+        $routes->post('reimbursements/(:num)/reject', 'Payroll\ReimbursementController::reject/$1', ['filter' => ['permission:reimbursement.approve', 'idempotency:required']]);
         $routes->resource('reimbursements', ['controller' => 'Payroll\ReimbursementController', 'only' => ['index', 'show'], 'filter' => 'permission:reimbursement.view']);
         $routes->resource('reimbursements', ['controller' => 'Payroll\ReimbursementController', 'only' => ['update', 'delete'], 'filter' => 'permission:reimbursement.create']);
         $routes->post('loans', 'Payroll\LoanController::create', ['filter' => ['permission:loan.create', 'idempotency:required']]);

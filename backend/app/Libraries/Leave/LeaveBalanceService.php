@@ -104,18 +104,22 @@ class LeaveBalanceService
      *
      * Return: row leave_balances (ada `__created` flag kalau baru dibuat).
      */
-    public function ensureBalance(int $employeeId, int $leaveTypeId, int $year): ?array
+    public function ensureBalance(int $employeeId, int $leaveTypeId, int $year, int $companyId): ?array
     {
+        if ($companyId <= 0) throw new \DomainException('Active company context is required');
         $db = \Config\Database::connect();
         $existing = $db->table('leave_balances')
+            ->where('company_id', $companyId)
             ->where('employee_id', $employeeId)
             ->where('leave_type_id', $leaveTypeId)
             ->where('period_year', $year)
             ->get()->getRowArray();
         if ($existing) return $existing;
 
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
-        $type = $db->table('leave_types')->where('id', $leaveTypeId)->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $employeeId)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        $type = $db->table('leave_types')->where('id', $leaveTypeId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $emp || ! $type) return null;
 
         // Kalau tipe ini bukan reset_yearly atau tidak punya default_days,
@@ -559,10 +563,12 @@ class LeaveBalanceService
      *
      * @return array<int,array>  [{leave_type, balance, prorate_info, ...}]
      */
-    public function summary(int $employeeId, int $year): array
+    public function summary(int $employeeId, int $year, int $companyId): array
     {
+        if ($companyId <= 0) throw new \DomainException('Active company context is required');
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $employeeId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $emp) return [];
 
         $types = $db->table('leave_types')
@@ -585,7 +591,7 @@ class LeaveBalanceService
                 continue;
             }
 
-            $bal = $this->ensureBalance($employeeId, (int) $type['id'], $year);
+            $bal = $this->ensureBalance($employeeId, (int) $type['id'], $year, $companyId);
             if (! $bal) continue;
 
             $info = $this->computeProratedQuota($emp, $type, $year);

@@ -2,7 +2,8 @@
 
 namespace App\Libraries\Asset;
 
-use Config\Services;
+use CodeIgniter\Database\BaseConnection;
+use Config\Database;
 
 /**
  * AssetService
@@ -23,12 +24,16 @@ use Config\Services;
  */
 class AssetService
 {
+    public function __construct(private readonly ?BaseConnection $connection = null)
+    {
+    }
+
     /**
      * Generate asset_number unik. Format: `AST-<YEAR>-<5-digit-seq>`.
      */
     public function nextAssetNumber(int $companyId): string
     {
-        $db = \Config\Database::connect();
+        $db = $this->db();
         $year = date('Y');
         $prefix = "AST-{$year}-";
         $count = $db->table('assets')
@@ -60,7 +65,7 @@ class AssetService
      */
     public function assignToEmployee(int $assetId, int $employeeId, array $params = []): int
     {
-        $db = \Config\Database::connect();
+        $db = $this->db();
         $asset = $db->table('assets')->where('id', $assetId)->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $asset) {
             throw new \InvalidArgumentException("Asset #{$assetId} tidak ditemukan");
@@ -108,19 +113,6 @@ class AssetService
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
-        // Notifikasi karyawan
-        if (! empty($emp['user_id'])) {
-            Services::notification()->send(
-                (int) $emp['user_id'],
-                (int) $asset['company_id'],
-                'asset.assigned',
-                "Aset {$asset['name']} telah diserahkan kepada Anda",
-                "Asset {$asset['asset_number']} ({$asset['name']}) — kondisi {$insert['condition_when_assigned']}",
-                ['asset_id' => $assetId, 'assignment_id' => $assignmentId],
-                null, true
-            );
-        }
-
         return $assignmentId;
     }
 
@@ -129,7 +121,7 @@ class AssetService
      */
     public function returnAsset(int $assignmentId, array $params = []): void
     {
-        $db = \Config\Database::connect();
+        $db = $this->db();
         $assignment = $db->table('asset_assignments')->where('id', $assignmentId)->get()->getRowArray();
         if (! $assignment) {
             throw new \InvalidArgumentException("Assignment #{$assignmentId} tidak ditemukan");
@@ -195,7 +187,7 @@ class AssetService
      */
     public function renderBastHtml(array $assignment, array $asset, array $employee, string $mode = 'ASSIGN'): string
     {
-        $db = \Config\Database::connect();
+        $db = $this->db();
         $company = $db->table('companies')->where('id', $assignment['company_id'])->get()->getRowArray() ?: [];
         $position = ! empty($employee['position_id'])
             ? ($db->table('positions')->where('id', (int) $employee['position_id'])->get()->getRowArray() ?: [])
@@ -305,7 +297,7 @@ class AssetService
      */
     public function listForEmployee(int $employeeId, bool $includeReturned = false): array
     {
-        $db = \Config\Database::connect();
+        $db = $this->db();
         $builder = $db->table('asset_assignments aa')
             ->select('aa.*, a.asset_number, a.name AS asset_name, a.category, a.brand, a.model, a.serial_number')
             ->join('assets a', 'a.id = aa.asset_id')
@@ -313,5 +305,10 @@ class AssetService
             ->orderBy('aa.assigned_at', 'DESC');
         if (! $includeReturned) $builder->where('aa.returned_at IS NULL');
         return $builder->get()->getResultArray();
+    }
+
+    private function db(): BaseConnection
+    {
+        return $this->connection ?? Database::connect();
     }
 }

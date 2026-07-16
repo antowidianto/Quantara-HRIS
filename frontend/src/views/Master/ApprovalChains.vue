@@ -20,6 +20,15 @@ const moduleOptions = computed(() => [
   { value: 'ATTENDANCE_CHANGE', label: t('master.approval_chains.mod_attendance_change') },
   { value: 'REIMBURSEMENT', label: t('master.approval_chains.mod_reimbursement') },
   { value: 'LOAN', label: t('master.approval_chains.mod_loan') },
+  { value: 'BUSINESS_TRIP', label: 'Perjalanan Dinas / SPPD' },
+  { value: 'BONUS', label: 'Bonus' },
+  { value: 'PAYROLL_ADJUSTMENT', label: 'Koreksi Payroll' },
+  { value: 'COMPENSATION_REVIEW', label: 'Perubahan Kompensasi' },
+  { value: 'TRAINING_REGISTRATION', label: 'Registrasi Training' },
+  { value: 'TIMESHEET', label: 'Timesheet' },
+  { value: 'CANDIDATE_OFFER', label: 'Candidate Offer' },
+  { value: 'GENERATED_CONTRACT', label: 'Kontrak Kerja' },
+  { value: 'ASSET_TRANSACTION', label: 'Transaksi Asset' },
   { value: 'GENERIC', label: t('master.approval_chains.mod_generic') },
 ])
 
@@ -33,6 +42,7 @@ const approverTypes = computed(() => [
   { value: 'ROLE', label: t('master.approval_chains.ap_role') },
   { value: 'SPECIFIC_USER', label: t('master.approval_chains.ap_specific_user') },
   { value: 'SPECIFIC_EMPLOYEE', label: t('master.approval_chains.ap_specific_employee') },
+  { value: 'HIRING_MANAGER', label: 'Hiring Manager' },
 ])
 
 const fallbackOptions = computed(() => [

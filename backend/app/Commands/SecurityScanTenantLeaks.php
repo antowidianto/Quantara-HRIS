@@ -72,6 +72,7 @@ class SecurityScanTenantLeaks extends BaseCommand
         'app/Controllers',
         'app/Libraries',
         'app/Models',
+        'app/Repositories',
     ];
 
     public function run(array $params)

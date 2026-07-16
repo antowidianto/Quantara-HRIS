@@ -77,6 +77,32 @@ class Horizon4ServicesTest extends TestCase
         $this->assertStringContainsString('payroll', $prompt);
     }
 
+    public function testAiResponsePolicyBlocksUnauthorizedLinksAndApiPaths(): void
+    {
+        $reply = 'Coba [Admin Users](/admin/users), [Payroll](/payroll/periods), '
+            . '[Cuti](/leaves/new), atau GET /api/v1/admin/users.';
+        $filtered = AiAssistantService::enforceResponsePolicy($reply, [
+            'role' => 'employee', 'permissions' => [],
+        ]);
+
+        $this->assertStringNotContainsString('](/admin/users)', $filtered);
+        $this->assertStringNotContainsString('](/payroll/periods)', $filtered);
+        $this->assertStringContainsString('[Cuti](/leaves/new)', $filtered);
+        $this->assertStringNotContainsString('/api/v1/admin/users', $filtered);
+        $this->assertStringContainsString('[akses API dibatasi]', $filtered);
+    }
+
+    public function testAiResponsePolicyAllowsPermissionedLinks(): void
+    {
+        $filtered = AiAssistantService::enforceResponsePolicy(
+            '[Payroll](/payroll/periods) dan [Profil](/profile)',
+            ['role' => 'hr_admin', 'permissions' => ['payroll.view']],
+        );
+
+        $this->assertStringContainsString('[Payroll](/payroll/periods)', $filtered);
+        $this->assertStringContainsString('[Profil](/profile)', $filtered);
+    }
+
     // ─── H4.3 WorkforceSimulationService ────────────────────────
 
     public function testPercentile(): void

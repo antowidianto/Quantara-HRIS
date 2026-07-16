@@ -5,8 +5,7 @@ import api from '@/api/client'
 import { useToast } from 'vue-toastification'
 import { confirm as confirmDialog } from '@/composables/useConfirm'
 import {
-  DocumentTextIcon, EyeIcon, TrashIcon, PaperAirplaneIcon,
-  CheckBadgeIcon, NoSymbolIcon,
+  DocumentTextIcon, EyeIcon, TrashIcon, PaperAirplaneIcon, NoSymbolIcon,
 } from '@heroicons/vue/24/outline'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
 
@@ -14,7 +13,7 @@ import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
  * Halaman daftar kontrak yang sudah digenerate.
  *
  * Menampilkan kontrak yang dihasilkan dari template dengan snapshot HTML —
- * dari sini HR bisa preview, ubah status (DRAFT → SENT → SIGNED), atau hapus.
+ * dari sini HR bisa preview serta mengajukan pelepasan/pencabutan kontrak.
  */
 
 const { t, locale } = useI18n()
@@ -27,6 +26,8 @@ const params = reactive({ page: 1, per_page: 20, status: '', employee_id: '' })
 
 const statusBadge = computed(() => ({
   DRAFT:   { class: 'bg-gray-100 text-gray-700',   label: t('employees.contracts.st_draft') },
+  PENDING_APPROVAL: { class: 'bg-amber-50 text-amber-700', label: 'Menunggu Approval' },
+  APPROVAL_REJECTED: { class: 'bg-red-50 text-red-700', label: 'Approval Ditolak' },
   SENT:    { class: 'bg-blue-50 text-blue-700',    label: t('employees.contracts.st_sent') },
   SIGNED:  { class: 'bg-green-50 text-green-700',  label: t('employees.contracts.st_signed') },
   REVOKED: { class: 'bg-red-50 text-red-700',      label: t('employees.contracts.st_revoked') },
@@ -86,7 +87,6 @@ async function openHtml(item) {
 async function changeStatus(item, newStatus) {
   const actionMap = {
     SENT: t('employees.contracts.action_sent'),
-    SIGNED: t('employees.contracts.action_signed'),
     REVOKED: t('employees.contracts.action_revoked'),
   }
   const ok = await confirmDialog({
@@ -101,7 +101,7 @@ async function changeStatus(item, newStatus) {
   if (! ok) return
   try {
     await api.put(`/generated-contracts/${item.id}/status`, { status: newStatus })
-    toast.success(t('employees.contracts.status_updated'))
+    toast.success('Kontrak diajukan untuk approval')
     fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || t('employees.contracts.status_failed'))
@@ -146,6 +146,8 @@ function fmtDate(d) {
         <select v-model="params.status" class="input w-full md:w-48">
           <option value="">{{ t('employees.contracts.all_status') }}</option>
           <option value="DRAFT">{{ t('employees.contracts.st_draft') }}</option>
+          <option value="PENDING_APPROVAL">Menunggu Approval</option>
+          <option value="APPROVAL_REJECTED">Approval Ditolak</option>
           <option value="SENT">{{ t('employees.contracts.st_sent') }}</option>
           <option value="SIGNED">{{ t('employees.contracts.st_signed') }}</option>
           <option value="REVOKED">{{ t('employees.contracts.st_revoked') }}</option>
@@ -199,23 +201,18 @@ function fmtDate(d) {
                     v-bind="{ title: t('employees.contracts.view_print'), 'aria-label': t('employees.contracts.view_print') }">
                     <EyeIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="item.status === 'DRAFT'" type="button" class="text-blue-600 hover:text-blue-800"
+                  <button v-if="['DRAFT','APPROVAL_REJECTED'].includes(item.status)" type="button" class="text-blue-600 hover:text-blue-800"
                     @click="changeStatus(item, 'SENT')"
-                    v-bind="{ title: t('employees.contracts.mark_sent'), 'aria-label': t('employees.contracts.mark_sent') }">
+                    v-bind="{ title: 'Ajukan pengiriman', 'aria-label': 'Ajukan pengiriman' }">
                     <PaperAirplaneIcon class="w-4 h-4" />
                   </button>
-                  <button v-if="item.status === 'SENT'" type="button" class="text-green-600 hover:text-green-800"
-                    @click="changeStatus(item, 'SIGNED')"
-                    v-bind="{ title: t('employees.contracts.mark_signed'), 'aria-label': t('employees.contracts.mark_signed') }">
-                    <CheckBadgeIcon class="w-4 h-4" />
-                  </button>
-                  <button v-if="['DRAFT','SENT','SIGNED'].includes(item.status)" type="button"
+                  <button v-if="['SENT','SIGNED'].includes(item.status)" type="button"
                     class="text-amber-600 hover:text-amber-800"
                     @click="changeStatus(item, 'REVOKED')"
-                    v-bind="{ title: t('employees.contracts.revoke'), 'aria-label': t('employees.contracts.revoke') }">
+                    v-bind="{ title: 'Ajukan pencabutan', 'aria-label': 'Ajukan pencabutan' }">
                     <NoSymbolIcon class="w-4 h-4" />
                   </button>
-                  <button type="button" class="text-gray-500 hover:text-red-600" @click="remove(item)"
+                  <button v-if="['DRAFT','APPROVAL_REJECTED'].includes(item.status)" type="button" class="text-gray-500 hover:text-red-600" @click="remove(item)"
                     v-bind="{ title: t('employees.contracts.delete'), 'aria-label': t('employees.contracts.delete') }">
                     <TrashIcon class="w-4 h-4" />
                   </button>

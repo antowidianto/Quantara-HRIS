@@ -14,8 +14,8 @@ use Config\Database;
  *   - Update aggregate (total_amount, recipient_count) di `bonus_runs`
  *
  * Workflow status `bonus_runs`:
- *   DRAFT → CALCULATED (boleh di-recalculate selama belum APPROVED)
- *         → APPROVED   (lock, hanya HR-approver yang bisa)
+ *   DRAFT → CALCULATED → PENDING_APPROVAL → APPROVED
+ *         → REJECTED → CALCULATED (koreksi dan submit ulang)
  *         → PAID       (final; cancellable hanya oleh super_admin)
  *         OR CANCELLED (terminal dari mana saja kecuali PAID)
  *
@@ -41,32 +41,34 @@ class BonusService
      * @param int $runId
      * @return array{recipient_count:int, total_amount:float, skipped:int}
      */
-    public function calculateRun(int $runId): array
+    public function calculateRun(int $runId, int $companyId): array
     {
-        $run = $this->db->table('bonus_runs')->where('id', $runId)->get()->getRowArray();
+        if ($companyId <= 0) throw new \InvalidArgumentException('Active company context is required');
+        $run = $this->db->table('bonus_runs')->where('id', $runId)
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $run) {
             throw new \InvalidArgumentException("Bonus run #{$runId} tidak ditemukan");
         }
-        if (! in_array($run['status'], ['DRAFT', 'CALCULATED'], true)) {
+        if (! in_array($run['status'], ['DRAFT', 'CALCULATED', 'REJECTED'], true)) {
             throw new \InvalidArgumentException(
                 "Run sudah {$run['status']}, tidak bisa di-recalculate"
             );
         }
 
-        $scheme = $this->db->table('bonus_schemes')->where('id', (int) $run['bonus_scheme_id'])->get()->getRowArray();
+        $scheme = $this->db->table('bonus_schemes')->where('id', (int) $run['bonus_scheme_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
         if (! $scheme) {
             throw new \InvalidArgumentException("Bonus scheme #{$run['bonus_scheme_id']} tidak ditemukan");
         }
 
         $eligibility = $this->decodeJson($scheme['eligibility_json'] ?? null);
         $referenceDate = (string) $run['reference_date'];
-        $companyId = (int) $run['company_id'];
-
         // Hapus recipient lama supaya re-calc clean (preserve manual override
         // belum di-support di Sprint 16+ — kalau HR sudah edit recipient
         // dan calculate ulang, override hilang. Reasonable trade-off untuk
         // first iteration; bisa enhance nanti).
-        $this->db->table('bonus_recipients')->where('bonus_run_id', $runId)->delete();
+        $this->db->table('bonus_recipients')->where('bonus_run_id', $runId)
+            ->where('company_id', $companyId)->delete();
 
         // Ambil karyawan eligible. Apply hard-filter di SQL untuk efisien
         // (department/branch/grade/position whitelist + employment_status),
@@ -93,12 +95,14 @@ class BonusService
         $posNames  = [];
         if (! empty($deptIds)) {
             $rows = $this->db->table('departments')
-                ->select('id, name')->whereIn('id', $deptIds)->get()->getResultArray();
+                ->select('id, name')->where('company_id', $companyId)
+                ->whereIn('id', $deptIds)->get()->getResultArray();
             foreach ($rows as $r) $deptNames[(int) $r['id']] = $r['name'];
         }
         if (! empty($posIds)) {
             $rows = $this->db->table('positions')
-                ->select('id, name')->whereIn('id', $posIds)->get()->getResultArray();
+                ->select('id, name')->where('company_id', $companyId)
+                ->whereIn('id', $posIds)->get()->getResultArray();
             foreach ($rows as $r) $posNames[(int) $r['id']] = $r['name'];
         }
 
@@ -168,7 +172,7 @@ class BonusService
         }
 
         // Update aggregate di run
-        $this->db->table('bonus_runs')->where('id', $runId)->update([
+        $this->db->table('bonus_runs')->where('id', $runId)->where('company_id', $companyId)->update([
             'status'          => 'CALCULATED',
             'total_amount'    => $totalAmount,
             'recipient_count' => $recipientCount,
@@ -231,8 +235,9 @@ class BonusService
      * @return array<int, array<string, mixed>> List bonus diterima karyawan
      *         dengan metadata run + scheme. Sorted by paid_at DESC.
      */
-    public function bonusHistoryForEmployee(int $employeeId, ?int $companyId = null, array $opts = []): array
+    public function bonusHistoryForEmployee(int $employeeId, int $companyId, array $opts = []): array
     {
+        if ($companyId <= 0) throw new \InvalidArgumentException('Active company context is required');
         $limit = (int) ($opts['limit'] ?? 50);
         $includePending = (bool) ($opts['include_pending'] ?? false);
 
@@ -252,16 +257,13 @@ class BonusService
                 . 'sch.code AS scheme_code, sch.name AS scheme_name, '
                 . 'sch.kind AS scheme_kind, sch.tax_treatment'
             )
-            ->join('bonus_runs run', 'run.id = r.bonus_run_id')
-            ->join('bonus_schemes sch', 'sch.id = run.bonus_scheme_id')
+            ->join('bonus_runs run', 'run.id = r.bonus_run_id AND run.company_id = r.company_id')
+            ->join('bonus_schemes sch', 'sch.id = run.bonus_scheme_id AND sch.company_id = run.company_id')
             ->where('r.employee_id', $employeeId)
+            ->where('r.company_id', $companyId)
             ->where('r.is_excluded', 0)
             ->whereIn('run.status', $statuses)
             ->where('run.deleted_at IS NULL');
-
-        if ($companyId !== null) {
-            $b->where('run.company_id', $companyId);
-        }
 
         // Order: PAID first by paid_at DESC, then CALCULATED/APPROVED by reference_date DESC
         $rows = $b->orderBy('run.pay_date', 'DESC')
@@ -297,15 +299,17 @@ class BonusService
      * @return array<int, array{amount:float, breakdown:array}>
      *         Map employee_id → {amount, breakdown[]}
      */
-    public function bonusesForPayrollPeriod(int $payrollPeriodId): array
+    public function bonusesForPayrollPeriod(int $payrollPeriodId, int $companyId): array
     {
+        if ($companyId <= 0) throw new \InvalidArgumentException('Active company context is required');
         $rows = $this->db->table('bonus_recipients r')
             ->select('r.employee_id, r.amount, r.breakdown_json, r.is_excluded,
                       run.id AS run_id, run.name AS run_name,
                       sch.code AS scheme_code, sch.kind AS scheme_kind, sch.tax_treatment')
-            ->join('bonus_runs run', 'run.id = r.bonus_run_id')
-            ->join('bonus_schemes sch', 'sch.id = run.bonus_scheme_id')
+            ->join('bonus_runs run', 'run.id = r.bonus_run_id AND run.company_id = r.company_id')
+            ->join('bonus_schemes sch', 'sch.id = run.bonus_scheme_id AND sch.company_id = run.company_id')
             ->where('run.payroll_period_id', $payrollPeriodId)
+            ->where('run.company_id', $companyId)
             ->whereIn('run.status', ['APPROVED', 'PAID'])
             ->where('run.deleted_at IS NULL')
             ->where('r.is_excluded', 0)
