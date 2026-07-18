@@ -19,4 +19,13 @@ final class ApprovalDelegationBusinessFlowTest extends TestCase
             self::assertStringContainsString("'{$module}'", $controller);
         }
     }
+
+    public function testEligibleDelegateQueryAliasesTheUsersTableInsteadOfUsingAliasAsTableName(): void
+    {
+        $model = file_get_contents(APPPATH . 'Models/Identity/UserModel.php');
+
+        self::assertIsString($model);
+        self::assertStringContainsString("->table('users u')", $model);
+        self::assertStringNotContainsString("->builder('u')", $model);
+    }
 }

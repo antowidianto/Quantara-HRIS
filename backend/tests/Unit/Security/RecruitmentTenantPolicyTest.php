@@ -50,6 +50,7 @@ final class RecruitmentTenantPolicyTest extends TestCase
         self::assertStringContainsString('ot.company_id = ota.company_id', $repository);
         self::assertStringContainsString("->where('ota.company_id', \$companyId)", $repository);
         self::assertStringContainsString("->where('company_id', \$companyId)", $repository);
+        self::assertStringNotContainsString("->where('s.deleted_at IS NULL')", $repository);
         self::assertStringContainsString('moveStage(int $candidateId, int $companyId', $service);
         self::assertStringContainsString('onlineTestCompletionStatus(int $candidateId, int $companyId)', $service);
         self::assertStringContainsString('resolvePipelineStages(int $jobPostingId, int $companyId)', $service);

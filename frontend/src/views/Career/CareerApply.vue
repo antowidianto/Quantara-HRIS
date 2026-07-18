@@ -21,13 +21,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import careerApi from '@/api/careerPublic'
 import { useCandidateAuthStore } from '@/stores/candidateAuth'
+import AppDatePicker from '@/components/AppDatePicker.vue'
 import {
   INSTITUTION_OPTIONS as FALLBACK_INSTITUTION_OPTIONS,
   LOCATION_OPTIONS as FALLBACK_LOCATION_OPTIONS,
   joinList,
   onlyDigits,
   splitList,
-  toDisplayDate,
   toIsoDate,
 } from '@/utils/careerFormOptions'
 
@@ -213,6 +213,17 @@ const isSchoolLevel = computed(() => ['SMA', 'SMK'].includes(form.last_education
 const showGradeField = computed(() => !!form.last_education_level)
 const gradeLabel = computed(() => isSchoolLevel.value ? 'Nilai rata-rata' : 'IPK')
 const gradePlaceholder = computed(() => isSchoolLevel.value ? '0 - 100' : '0.00 - 4.00')
+const birthDateLimits = (() => {
+  const today = new Date()
+  const format = date => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
+  const min = new Date(today.getFullYear() - 80, today.getMonth(), today.getDate())
+  const max = new Date(today.getFullYear() - 14, today.getMonth(), today.getDate())
+  return { min: format(min), max: format(max), yearRange: `${min.getFullYear()}:${max.getFullYear()}` }
+})()
 
 // ─── Draft persistence (localStorage) ───────────────────────────
 function draftKey() {
@@ -247,7 +258,9 @@ function loadDraft() {
 function applyDraft(draft) {
   Object.keys(form).forEach(k => {
     if (k in draft && draft[k] !== undefined && k !== 'consent') {
-      form[k] = draft[k]
+      form[k] = ['birth_date', 'available_from'].includes(k)
+        ? toIsoDate(draft[k])
+        : draft[k]
     }
   })
   hydrateMultiRows()
@@ -272,10 +285,6 @@ function addWorkExperience() { form.work_experiences.push({ position: '', compan
 function removeWorkExperience(idx) { form.work_experiences.splice(idx, 1) }
 function addSimpleItem(key) { form[key].push('') }
 function removeSimpleItem(key, idx) { form[key].splice(idx, 1) }
-
-function normalizeDateField(field) {
-  form[field] = toDisplayDate(toIsoDate(form[field]) || form[field])
-}
 
 function cityOptionsForValue(province) {
   return locationOptions.value.find((item) => item.province === province)?.cities || []
@@ -402,7 +411,7 @@ async function fetchJob() {
     // Default available_from H+14
     if (! form.available_from) {
       const d = new Date(); d.setDate(d.getDate() + 14)
-      form.available_from = toDisplayDate(d.toISOString().slice(0, 10))
+      form.available_from = d.toISOString().slice(0, 10)
     }
     hydrateMultiRows()
 
@@ -496,9 +505,10 @@ function validateStep(s) {
     else {
       const birthDate = toIsoDate(form.birth_date)
       const birthMs = new Date(birthDate).getTime()
-      const age = (Date.now() - birthMs) / (1000 * 60 * 60 * 24 * 365.25)
       if (Number.isNaN(birthMs)) errors.value.birth_date = 'Format tanggal dd/mm/yy'
-      if (age < 14 || age > 80) errors.value.birth_date = 'Tanggal lahir tidak valid'
+      else if (birthDate < birthDateLimits.min || birthDate > birthDateLimits.max) {
+        errors.value.birth_date = 'Tanggal lahir tidak valid'
+      }
     }
     if (! form.gender) errors.value.gender = 'Jenis kelamin wajib diisi'
   }
@@ -792,7 +802,16 @@ function fmtSize(bytes) {
             </div>
             <div>
               <label class="cp-label">Tanggal Lahir <span class="text-red-500">*</span></label>
-              <input v-model="form.birth_date" type="text" class="cp-input" :class="errors.birth_date && 'cp-error-mark'" placeholder="dd/mm/yy" @blur="normalizeDateField('birth_date')" />
+              <AppDatePicker
+                v-model="form.birth_date"
+                class="cp-input"
+                :class="errors.birth_date && 'cp-error-mark'"
+                :min="birthDateLimits.min"
+                :max="birthDateLimits.max"
+                :year-range="birthDateLimits.yearRange"
+                placeholder="dd/mm/yy"
+                required
+              />
               <p v-if="errors.birth_date" class="cp-err">{{ errors.birth_date }}</p>
             </div>
           </div>
@@ -1176,7 +1195,7 @@ function fmtSize(bytes) {
               </div>
               <div>
                 <label class="cp-label">Tanggal Bisa Mulai</label>
-                <input v-model="form.available_from" type="text" class="cp-input" placeholder="dd/mm/yy" @blur="normalizeDateField('available_from')" />
+                <AppDatePicker v-model="form.available_from" class="cp-input" placeholder="dd/mm/yy" />
               </div>
             </div>
             <div class="mt-4">
@@ -1439,7 +1458,14 @@ function fmtSize(bytes) {
                   <option value="">— Pilih —</option>
                   <option v-for="opt in q.options || []" :key="opt" :value="opt">{{ opt }}</option>
                 </select>
-                <input v-else :type="q.type === 'number' ? 'number' : (q.type === 'date' ? 'date' : (q.type === 'url' ? 'url' : 'text'))" v-model="form.extra_answers[q.key]" class="cp-input" :class="errors[`xq_${q.key}`] && 'cp-error-mark'" />
+                <AppDatePicker
+                  v-else-if="q.type === 'date'"
+                  v-model="form.extra_answers[q.key]"
+                  class="cp-input"
+                  :class="errors[`xq_${q.key}`] && 'cp-error-mark'"
+                  :required="q.required"
+                />
+                <input v-else :type="q.type === 'number' ? 'number' : (q.type === 'url' ? 'url' : 'text')" v-model="form.extra_answers[q.key]" class="cp-input" :class="errors[`xq_${q.key}`] && 'cp-error-mark'" />
                 <p v-if="errors[`xq_${q.key}`]" class="cp-err">{{ errors[`xq_${q.key}`] }}</p>
               </div>
             </div>
@@ -1561,6 +1587,57 @@ function fmtSize(bytes) {
   outline: none;
   border-color: var(--brand-color, #0F62FE);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-color, #0F62FE) 20%, transparent);
+}
+:deep(.app-date-picker) {
+  display: flex;
+  width: 100%;
+}
+:deep(.app-date-picker .app-date-picker__input) {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgb(203 213 225); /* slate-300 */
+  border-right: 0;
+  border-radius: 0.375rem 0 0 0.375rem;
+  background: #fff;
+  color: rgb(15 23 42); /* slate-900 */
+  font-size: 0.875rem;
+  box-shadow: none;
+}
+:deep(.app-date-picker .app-date-picker__input::placeholder) {
+  color: rgb(148 163 184); /* slate-400 */
+}
+:deep(.app-date-picker .p-datepicker-trigger) {
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+  min-height: 38px;
+  padding: 0;
+  border: 1px solid rgb(203 213 225); /* slate-300 */
+  border-left: 0;
+  border-radius: 0 0.375rem 0.375rem 0;
+  background: #fff;
+  color: rgb(51 65 85); /* slate-700 */
+  box-shadow: none;
+}
+:deep(.app-date-picker:focus-within) {
+  border-radius: 0.375rem;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-color, #0F62FE) 20%, transparent);
+}
+:deep(.app-date-picker:focus-within .app-date-picker__input) {
+  outline: none;
+  border-color: var(--brand-color, #0F62FE);
+  box-shadow: none;
+}
+:deep(.app-date-picker:focus-within .p-datepicker-trigger) {
+  border-color: var(--brand-color, #0F62FE);
+  box-shadow: none;
+}
+:deep(.app-date-picker .app-date-picker__input.cp-error-mark) {
+  border-color: rgb(239 68 68); /* red-500 */
+}
+:deep(.app-date-picker .app-date-picker__input.cp-error-mark + .p-datepicker-trigger) {
+  border-color: rgb(239 68 68); /* red-500 */
 }
 .cp-input.cp-error-mark,
 .cp-error-mark .cp-input {
