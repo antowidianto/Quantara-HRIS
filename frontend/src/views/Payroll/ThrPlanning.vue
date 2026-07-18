@@ -147,7 +147,7 @@ onMounted(fetchProjection)
         </div>
         <div>
           <label class="label">{{ $t('payroll.thr_planning.pay_date_optional') }}</label>
-          <input type="date" v-model="filters.pay_date" class="input" @change="fetchProjection" />
+          <AppDatePicker  v-model="filters.pay_date" class="input" @change="fetchProjection" />
           <p class="text-xs text-gray-500 mt-1">
             {{ $t('payroll.thr_planning.pay_date_default', { year: filters.year }) }}
           </p>

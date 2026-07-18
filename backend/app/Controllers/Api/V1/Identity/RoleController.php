@@ -69,6 +69,189 @@ class RoleController extends ApiController
         return $this->ok($row);
     }
 
+    /**
+     * Daftar permintaan persetujuan RBAC untuk tenant aktif.
+     */
+    public function approvalRequests()
+    {
+        $companyId = $this->companyId();
+        if ($companyId <= 0) return $this->fail('Company context tidak valid', 422);
+
+        $db = \Config\Database::connect();
+        $rows = $db->table('privileged_action_requests par')
+            ->select(
+                'par.*, maker.name AS submitted_by_name, maker.email AS submitted_by_email,'
+                . ' approver.name AS approved_by_name, rejector.name AS rejected_by_name,'
+                . ' ar.id AS approval_request_id, ar.status AS workflow_status,'
+                . ' ar.current_step_order, ar.current_step_id, ar.workflow_snapshot,'
+                . ' cs.name AS current_step_name'
+            )
+            ->join('users maker', 'maker.id = par.submitted_by', 'left')
+            ->join('users approver', 'approver.id = par.approved_by', 'left')
+            ->join('users rejector', 'rejector.id = par.rejected_by', 'left')
+            ->join(
+                'approval_requests ar',
+                "ar.entity_table = 'privileged_action_requests'"
+                    . ' AND ar.entity_id = par.id'
+                    . " AND ar.module = 'PRIVILEGED_ACTION'",
+                'left'
+            )
+            ->join('approval_chain_steps cs', 'cs.id = ar.current_step_id', 'left')
+            ->where('par.company_id', $companyId)
+            ->where('par.action_group', 'RBAC')
+            ->where('par.deleted_at IS NULL')
+            ->orderBy('par.created_at', 'DESC')
+            ->limit(100)
+            ->get()->getResultArray();
+
+        $userCache = [];
+        foreach ($rows as &$row) {
+            $snapshot = json_decode((string) ($row['workflow_snapshot'] ?? ''), true);
+            $expectedIds = [];
+            foreach ((array) ($snapshot['steps'] ?? []) as $step) {
+                if ((int) ($step['id'] ?? 0) === (int) ($row['current_step_id'] ?? 0)) {
+                    $expectedIds = array_values(array_unique(array_map(
+                        'intval',
+                        (array) ($step['expected_approver_user_ids'] ?? [])
+                    )));
+                    break;
+                }
+            }
+
+            $approvers = [];
+            foreach ($expectedIds as $userId) {
+                if (! array_key_exists($userId, $userCache)) {
+                    $userCache[$userId] = $db->table('users u')
+                        ->select('u.id, u.name, u.email, r.name AS role_name')
+                        ->join('roles r', 'r.id = u.role_id', 'left')
+                        ->where('u.id', $userId)
+                        ->where('u.company_id', $companyId)
+                        ->where('u.is_active', 1)
+                        ->get()->getRowArray();
+                }
+                if ($userCache[$userId]) $approvers[] = $userCache[$userId];
+            }
+
+            $row['current_approvers'] = $approvers;
+            $row['change_detail'] = $this->rbacChangeDetail(
+                $db,
+                (string) ($row['http_method'] ?? ''),
+                (string) ($row['request_path'] ?? ''),
+                $row['request_payload'] ?? null,
+                $companyId
+            );
+            unset($row['workflow_snapshot'], $row['request_hash'], $row['request_payload']);
+        }
+        unset($row);
+
+        return $this->ok($rows);
+    }
+
+    /**
+     * Bentuk detail perubahan role tanpa mengekspos payload mentah.
+     *
+     * @return array<string,mixed>
+     */
+    private function rbacChangeDetail(
+        $db,
+        string $method,
+        string $path,
+        ?string $rawPayload,
+        int $companyId
+    ): array {
+        $snapshot = is_string($rawPayload) && $rawPayload !== ''
+            ? json_decode($rawPayload, true)
+            : null;
+        if (! is_array($snapshot)) {
+            return ['available' => false];
+        }
+        // schema_version=1 menyimpan state sebelum + payload usulan.
+        // Fallback mendukung payload mentah dari versi transisi.
+        $payload = isset($snapshot['proposed']) && is_array($snapshot['proposed'])
+            ? $snapshot['proposed']
+            : $snapshot;
+        $beforeSnapshot = isset($snapshot['before']) && is_array($snapshot['before'])
+            ? $snapshot['before']
+            : null;
+
+        $roleId = null;
+        if (preg_match('#/roles/(\d+)$#', $path, $matches)) {
+            $roleId = (int) $matches[1];
+        }
+
+        $existing = $beforeSnapshot;
+        $oldPermissionIds = isset($beforeSnapshot['permissions'])
+            ? array_values(array_unique(array_map('intval', (array) $beforeSnapshot['permissions'])))
+            : [];
+        if ($roleId !== null && $existing === null) {
+            $existing = $db->table('roles')
+                ->where('id', $roleId)
+                ->groupStart()
+                    ->where('company_id', $companyId)
+                    ->orWhere('company_id IS NULL')
+                ->groupEnd()
+                ->get()->getRowArray();
+            if ($existing) {
+                $oldPermissionIds = array_map(
+                    'intval',
+                    array_column(
+                        $db->table('role_permissions')
+                            ->select('permission_id')
+                            ->where('role_id', $roleId)
+                            ->get()->getResultArray(),
+                        'permission_id'
+                    )
+                );
+            }
+        }
+
+        $newPermissionIds = isset($payload['permissions']) && is_array($payload['permissions'])
+            ? array_values(array_unique(array_filter(array_map('intval', $payload['permissions']))))
+            : $oldPermissionIds;
+        $addedIds = array_values(array_diff($newPermissionIds, $oldPermissionIds));
+        $removedIds = array_values(array_diff($oldPermissionIds, $newPermissionIds));
+        $keptIds = array_values(array_intersect($newPermissionIds, $oldPermissionIds));
+        $allIds = array_values(array_unique(array_merge($addedIds, $removedIds, $keptIds)));
+
+        $permissionMap = [];
+        if ($allIds !== []) {
+            foreach ($db->table('permissions')
+                ->select('id, slug, name, `group`')
+                ->whereIn('id', $allIds)
+                ->orderBy('slug', 'ASC')
+                ->get()->getResultArray() as $permission
+            ) {
+                $permissionMap[(int) $permission['id']] = $permission;
+            }
+        }
+        $resolve = static fn (array $ids): array => array_values(array_filter(array_map(
+            static fn (int $id): ?array => $permissionMap[$id] ?? null,
+            $ids
+        )));
+
+        return [
+            'available' => true,
+            'action' => match (strtoupper($method)) {
+                'POST' => 'CREATE',
+                'DELETE' => 'DELETE',
+                default => 'UPDATE',
+            },
+            'role_id' => $roleId,
+            'role_slug' => $existing['slug'] ?? ($payload['slug'] ?? null),
+            'role_name_before' => $existing['name'] ?? null,
+            'role_name_after' => $payload['name'] ?? ($existing['name'] ?? null),
+            'description_before' => $existing['description'] ?? null,
+            'description_after' => array_key_exists('description', $payload)
+                ? $payload['description']
+                : ($existing['description'] ?? null),
+            'permissions_added' => $resolve($addedIds),
+            'permissions_removed' => $resolve($removedIds),
+            'permissions_kept' => $resolve($keptIds),
+            'permission_count_before' => count($oldPermissionIds),
+            'permission_count_after' => count($newPermissionIds),
+        ];
+    }
+
     public function create()
     {
         if ($block = $this->ensureSuperAdmin()) return $block;

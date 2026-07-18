@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Libraries\Approval\ApprovalTimelineService;
 use App\Libraries\Attendance\AttendanceChangeApprovalException;
 use Config\Services;
 
@@ -110,12 +111,16 @@ class AttendanceChangeRequestController extends ApiController
     public function show($id = null)
     {
         $db = \Config\Database::connect();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) return null;
+
         $row = $db->table('attendance_change_requests cr')
             ->select('cr.*, e.full_name AS employee_name, e.employee_number, e.branch_id, e.department_id, e.company_id AS emp_company_id, b.name AS branch_name, u.name AS reviewer_name')
             ->join('employees e', 'e.id = cr.employee_id')
             ->join('branches b', 'b.id = e.branch_id', 'left')
             ->join('users u', 'u.id = cr.reviewer_id', 'left')
             ->where('cr.id', (int) $id)
+            ->where('cr.company_id', $companyId)
             ->get()
             ->getRowArray();
         if (! $row) return $this->fail('Pengajuan tidak ditemukan', 404);
@@ -127,6 +132,20 @@ class AttendanceChangeRequestController extends ApiController
         )) {
             return $this->fail('Forbidden', 403);
         }
+
+        $row['approval'] = (new ApprovalTimelineService())->forEntity(
+            $companyId,
+            'ATTENDANCE_CHANGE',
+            'attendance_change_requests',
+            (int) $id
+        );
+
+        // Generate hanya setelah tenant/ownership check di atas berhasil.
+        // Endpoint file publik mewajibkan signature + expiry.
+        $row['attachment_url'] = ! empty($row['attachment_path'])
+            ? Services::fileStorage()->signedUrl((string) $row['attachment_path'], 300)
+            : null;
+
         return $this->ok($row);
     }
 

@@ -287,11 +287,11 @@ function go(page) { params.page = page; fetchData() }
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label class="label">{{ t('master.regulations.f_effective_from') }}</label>
-              <input v-model="form.effective_from" type="date" class="input" />
+              <AppDatePicker v-model="form.effective_from"  class="input" />
             </div>
             <div>
               <label class="label">{{ t('master.regulations.f_effective_to') }}</label>
-              <input v-model="form.effective_to" type="date" class="input" />
+              <AppDatePicker v-model="form.effective_to"  class="input" />
             </div>
             <div class="flex items-end">
               <label class="flex items-center gap-2">

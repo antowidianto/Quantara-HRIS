@@ -1,7 +1,7 @@
 # HRIS — Docker Compose untuk development.
 #
 # Stack lengkap untuk dev lokal: backend (php-fpm + nginx), frontend (vite),
-# mysql, redis (cache + session), mailhog (catch outgoing email).
+# mysql, redis (cache + session), Mailpit (catch outgoing email).
 #
 # Pakai:
 #   docker compose up -d              # start semua service
@@ -53,15 +53,20 @@ services:
       timeout: 3s
       retries: 10
 
-  # ─── MailHog (dev SMTP catcher) ──────────────────────────────────
+  # ─── Mailpit (dev SMTP catcher) ──────────────────────────────────
   # SMTP di port 1025, web UI di http://localhost:8025
-  mailhog:
-    image: mailhog/mailhog:latest
-    container_name: hris-mailhog
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: hris-mailpit
     restart: unless-stopped
     ports:
       - "1025:1025"  # SMTP
       - "8025:8025"  # Web UI
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # ─── Backend (PHP-FPM + spark serve) ─────────────────────────────
   # Pakai `php spark serve` di dev (lebih simpel daripada nginx+fpm).
@@ -85,8 +90,10 @@ services:
       database.default.DBDriver: MySQLi
       database.default.port: "3306"
       mail.protocol: smtp
-      mail.SMTPHost: mailhog
-      mail.SMTPPort: "1025"
+      mail.host: mailpit
+      mail.port: "1025"
+      mail.mailpitHost: mailpit
+      mail.mailpitPort: "1025"
       mail.fromAddress: noreply@hris.local
       mail.fromName: HRIS Dev
       cache.handler: redis
@@ -100,8 +107,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      mailhog:
-        condition: service_started
+      mailpit:
+        condition: service_healthy
     command: >
       sh -c "
         composer install --no-interaction --prefer-dist --optimize-autoloader &&

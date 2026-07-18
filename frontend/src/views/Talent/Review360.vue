@@ -726,11 +726,11 @@ onMounted(() => {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="label">Tanggal Mulai *</label>
-              <input v-model="cycleForm.start_date" type="date" class="input" />
+              <AppDatePicker v-model="cycleForm.start_date"  class="input" />
             </div>
             <div>
               <label class="label">Tanggal Selesai *</label>
-              <input v-model="cycleForm.end_date" type="date" class="input" />
+              <AppDatePicker v-model="cycleForm.end_date"  class="input" />
             </div>
           </div>
         </div>

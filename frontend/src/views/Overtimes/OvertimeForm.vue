@@ -56,7 +56,7 @@ async function submit() {
       <div class="card-body space-y-4">
         <div>
           <label class="label">{{ t('overtime.date_label') }}</label>
-          <input v-model="form.work_date" type="date" class="input" required />
+          <AppDatePicker v-model="form.work_date"  class="input" required />
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>

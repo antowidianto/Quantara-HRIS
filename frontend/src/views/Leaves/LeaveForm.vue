@@ -311,12 +311,12 @@ async function submit() {
         <div v-if="selectedType" class="grid grid-cols-2 gap-4">
           <div>
             <label class="label">{{ t('leave.form.start_date') }}</label>
-            <input v-model="form.start_date" type="date" class="input" required
+            <AppDatePicker v-model="form.start_date"  class="input" required
               :min="selectedType.min_start_date" :max="selectedType.max_start_date" />
           </div>
           <div>
             <label class="label">{{ t('leave.form.end_date') }}</label>
-            <input v-model="form.end_date" type="date" class="input" required
+            <AppDatePicker v-model="form.end_date"  class="input" required
               :min="form.start_date" :max="selectedType.max_start_date" />
           </div>
           <div class="col-span-2 -mt-1 text-xs text-gray-500">

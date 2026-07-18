@@ -30,6 +30,8 @@ const saving = ref(false)
 const testing = ref(false)
 const testTo = ref('')
 const queueStats = ref({ queued: 0, sent: 0, failed: 0 })
+const isMailpit = ref(false)
+const mailpitUrl = import.meta.env.VITE_MAILPIT_URL || 'http://localhost:8025'
 
 const form = reactive({
   host: '',
@@ -63,6 +65,7 @@ async function load() {
       from_name: cfg.from_name || '',
     })
     hasPassword.value = ! ! cfg.has_password
+    isMailpit.value = ! ! cfg.is_mailpit
     Object.assign(source, data.data?.source || {})
     queueStats.value = data.data?.queue_stats || { queued: 0, sent: 0, failed: 0 }
   } catch (e) {
@@ -143,6 +146,16 @@ function presetMailtrap() {
   form.encryption = 'tls'
   toast.info(t('email_settings.mailtrapPresetInfo'))
 }
+function presetMailpit() {
+  form.host = 'localhost'
+  form.port = 1025
+  form.username = ''
+  form.password = ''
+  form.encryption = 'none'
+  if (! form.from_address) form.from_address = 'noreply@hris.local'
+  if (! form.from_name) form.from_name = 'HRIS Dev'
+  toast.info(t('email_settings.mailpitPresetInfo'))
+}
 function presetSendGrid() {
   form.host = 'smtp.sendgrid.net'
   form.port = 587
@@ -195,12 +208,22 @@ onMounted(load)
             <ServerIcon class="w-5 h-5" /> {{ t('email_settings.server.title') }}
           </h2>
 
+          <div v-if="isMailpit" class="mb-4 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+            <div class="font-semibold">{{ t('email_settings.mailpitActiveTitle') }}</div>
+            <div class="mt-1">{{ t('email_settings.mailpitActiveHelp') }}</div>
+            <a :href="mailpitUrl" target="_blank" rel="noopener"
+              class="mt-2 inline-flex font-medium text-sky-700 hover:underline">
+              {{ t('email_settings.openMailpit') }} ↗
+            </a>
+          </div>
+
           <!-- Quick presets -->
           <div class="mb-4 flex flex-wrap items-center gap-2 text-xs">
             <span class="text-gray-500">Quick preset:</span>
             <button @click="presetGmail" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">Gmail</button>
             <button @click="presetSendGrid" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">SendGrid</button>
-            <button @click="presetMailtrap" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">Mailtrap (testing)</button>
+            <button @click="presetMailtrap" class="px-3 py-1 border border-gray-300 rounded hover:bg-gray-50">Mailtrap</button>
+            <button @click="presetMailpit" class="px-3 py-1 border border-sky-300 text-sky-700 rounded hover:bg-sky-50">Mailpit (local)</button>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

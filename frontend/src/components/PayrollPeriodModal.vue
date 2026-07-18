@@ -284,9 +284,9 @@ function handleBackdropClick() {
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Cutoff Absensi
                     </label>
-                    <input 
+                    <AppDatePicker
                       v-model="form.cutoff_attendance_date" 
-                      type="date" 
+
                       class="input w-full"
                       :disabled="saving"
                     />
@@ -299,9 +299,9 @@ function handleBackdropClick() {
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Tanggal Mulai <span class="text-red-500">*</span>
                     </label>
-                    <input 
+                    <AppDatePicker
                       v-model="form.start_date" 
-                      type="date" 
+
                       class="input w-full" 
                       required 
                       :disabled="saving"
@@ -311,9 +311,9 @@ function handleBackdropClick() {
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Tanggal Akhir <span class="text-red-500">*</span>
                     </label>
-                    <input 
+                    <AppDatePicker
                       v-model="form.end_date" 
-                      type="date" 
+
                       class="input w-full" 
                       required 
                       :disabled="saving"
@@ -326,9 +326,9 @@ function handleBackdropClick() {
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Tanggal Bayar <span class="text-red-500">*</span>
                   </label>
-                  <input 
+                  <AppDatePicker
                     v-model="form.pay_date" 
-                    type="date" 
+
                     class="input w-full" 
                     required 
                     :disabled="saving"

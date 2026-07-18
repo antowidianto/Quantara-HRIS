@@ -15,11 +15,11 @@
     <div class="flex gap-2 items-end">
       <div>
         <label class="text-xs text-slate-500">From</label>
-        <input v-model="from" type="date" class="border rounded px-2 py-1 text-sm" @change="load" />
+        <AppDatePicker v-model="from"  class="border rounded px-2 py-1 text-sm" @change="load" />
       </div>
       <div>
         <label class="text-xs text-slate-500">To</label>
-        <input v-model="to" type="date" class="border rounded px-2 py-1 text-sm" @change="load" />
+        <AppDatePicker v-model="to"  class="border rounded px-2 py-1 text-sm" @change="load" />
       </div>
       <button class="px-3 py-1 text-sm bg-slate-100 rounded" @click="loadUtilization">
         Lihat Utilization
@@ -106,7 +106,7 @@
           </div>
           <div>
             <label class="block text-sm">Tanggal</label>
-            <input v-model="form.work_date" type="date" class="w-full border rounded px-2 py-1" required />
+            <AppDatePicker v-model="form.work_date"  class="w-full border rounded px-2 py-1" required />
           </div>
           <div>
             <label class="block text-sm">Jam (kelipatan 0.25)</label>

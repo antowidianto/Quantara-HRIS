@@ -347,11 +347,11 @@ function isCurrentlyActive(d) {
 
           <div>
             <label class="label">{{ t('delegation.valid_from') }}</label>
-            <input v-model="form.date_from" type="date" class="input" required />
+            <AppDatePicker v-model="form.date_from"  class="input" required />
           </div>
           <div>
             <label class="label">{{ t('delegation.valid_to') }}</label>
-            <input v-model="form.date_to" type="date" class="input" required />
+            <AppDatePicker v-model="form.date_to"  class="input" required />
           </div>
 
           <div class="md:col-span-2">

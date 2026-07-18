@@ -275,11 +275,11 @@ onMounted(() => {
           </div>
           <div>
             <label class="label text-xs">{{ t('attendance.anomaly.filter_from') }}</label>
-            <input v-model="aFilters.from_date" type="date" class="input" />
+            <AppDatePicker v-model="aFilters.from_date"  class="input" />
           </div>
           <div>
             <label class="label text-xs">{{ t('attendance.anomaly.filter_to') }}</label>
-            <input v-model="aFilters.to_date" type="date" class="input" />
+            <AppDatePicker v-model="aFilters.to_date"  class="input" />
           </div>
           <div class="flex items-end">
             <button class="btn-primary w-full" @click="applyFilters">{{ t('common.filter') }}</button>

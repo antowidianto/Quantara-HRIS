@@ -36,6 +36,8 @@ final class CoreRoutes
         $routes->post('notification-broadcast/send', 'Notification\NotificationBroadcastController::send', ['filter' => ['permission:notifications.broadcast', 'idempotency:required']]);
 
         // Roles & Permissions (admin)
+        // Static sub-route wajib sebelum resource /roles/(:num).
+        $routes->get('roles/approval-requests', 'Identity\RoleController::approvalRequests', ['filter' => 'permission:role.manage']);
         $routes->resource('roles', ['controller' => 'Identity\RoleController', 'only' => ['index', 'show'], 'filter' => 'permission:role.manage']);
         $routes->post('roles', 'Identity\RoleController::create', ['filter' => ['permission:role.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);
         $routes->put('roles/(:num)', 'Identity\RoleController::update/$1', ['filter' => ['permission:role.manage', 'idempotency:required', 'privilegedapproval:RBAC']]);

@@ -207,7 +207,7 @@ function sourceLabel(s) {
         </div>
         <div>
           <label class="label">{{ t('master.shift_assignments.f_date') }}</label>
-          <input v-model="preview.date" type="date" class="input" />
+          <AppDatePicker v-model="preview.date"  class="input" />
         </div>
         <div class="flex items-end">
           <button type="button" class="btn-primary w-full" :disabled="previewLoading" @click="runPreview">
@@ -395,11 +395,11 @@ function sourceLabel(s) {
 
           <div>
             <label class="label">{{ t('master.shift_assignments.f_effective_from') }}</label>
-            <input v-model="form.effective_from" type="date" class="input" />
+            <AppDatePicker v-model="form.effective_from"  class="input" />
           </div>
           <div>
             <label class="label">{{ t('master.shift_assignments.f_effective_to') }}</label>
-            <input v-model="form.effective_to" type="date" class="input" />
+            <AppDatePicker v-model="form.effective_to"  class="input" />
           </div>
           <div>
             <label class="label">{{ t('master.shift_assignments.f_priority') }}</label>

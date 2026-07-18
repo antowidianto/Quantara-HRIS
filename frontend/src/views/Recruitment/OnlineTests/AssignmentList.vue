@@ -233,11 +233,11 @@ function resetForm() {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium mb-1">Available From</label>
-              <input v-model="form.available_from" type="datetime-local" class="w-full px-3 py-2 border rounded-lg" />
+              <AppDatePicker mode="datetime" v-model="form.available_from"  class="w-full px-3 py-2 border rounded-lg" />
             </div>
             <div>
               <label class="block text-xs font-medium mb-1">Due At</label>
-              <input v-model="form.due_at" type="datetime-local" class="w-full px-3 py-2 border rounded-lg" />
+              <AppDatePicker mode="datetime" v-model="form.due_at"  class="w-full px-3 py-2 border rounded-lg" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">

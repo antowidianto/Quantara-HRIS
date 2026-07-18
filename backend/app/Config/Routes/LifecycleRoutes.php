@@ -141,6 +141,7 @@ final class LifecycleRoutes
         $routes->delete('approval-assignments/(:num)', 'Approval\ApprovalChainController::deleteAssignment/$1', ['filter' => 'permission:approval_chain.manage']);
         // Inbox + decision
         $routes->get('approval-requests/inbox',         'Approval\ApprovalChainController::inbox', ['filter' => 'ownership:assigned-approver']);
+        $routes->get('approval-requests/history',       'Approval\ApprovalChainController::history', ['filter' => 'ownership:assigned-approver']);
         // Bulk endpoints (Sprint 7 / H1.1) â€” harus didefinisikan SEBELUM
         // /(:num)/approve & /(:num)/reject supaya path /bulk-approve tidak
         // di-resolve sebagai numeric id.

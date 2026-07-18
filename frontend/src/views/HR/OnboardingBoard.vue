@@ -256,7 +256,7 @@ function isOverdue(task) {
           </div>
           <div>
             <label class="label">Anchor date (opsional)</label>
-            <input type="date" v-model="genInput.anchor_date" class="input" />
+            <AppDatePicker  v-model="genInput.anchor_date" class="input" />
             <div class="text-xs text-gray-500 mt-1">
               Default: ONBOARD pakai join_date karyawan, OFFBOARD pakai resign_date.
               Due date setiap task = anchor + offset_days.

@@ -170,11 +170,11 @@ function tooltip(leave) {
       <div class="card-body grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
         <div>
           <label class="label">{{ t('leave.cal.start') }}</label>
-          <input v-model="filters.start_date" type="date" class="input" @change="fetchData" />
+          <AppDatePicker v-model="filters.start_date"  class="input" @change="fetchData" />
         </div>
         <div>
           <label class="label">{{ t('leave.cal.end') }}</label>
-          <input v-model="filters.end_date" type="date" class="input" @change="fetchData" />
+          <AppDatePicker v-model="filters.end_date"  class="input" @change="fetchData" />
         </div>
         <div>
           <label class="label">{{ t('leave.cal.branch') }}</label>

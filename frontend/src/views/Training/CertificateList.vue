@@ -129,12 +129,12 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">{{ t('training_ui.certificates.issued_required') }}</label>
-              <input v-model="form.issued_date" type="date" required
+              <AppDatePicker v-model="form.issued_date"  required
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">{{ t('training_ui.certificates.expires') }}</label>
-              <input v-model="form.expires_date" type="date"
+              <AppDatePicker v-model="form.expires_date"
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                 v-bind="{ placeholder: t('training_ui.certificates.expires_placeholder') }" />
             </div>

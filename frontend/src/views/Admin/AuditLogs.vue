@@ -173,8 +173,8 @@ onMounted(() => { fetchData(); fetchStats() })
     <!-- Filters -->
     <div class="card mb-4">
       <div class="card-header gap-2 flex-wrap">
-        <input v-model="filters.start_date" type="date" class="input w-44" :placeholder="t('audit_logs.filters.startDate')" />
-        <input v-model="filters.end_date" type="date" class="input w-44" :placeholder="t('audit_logs.filters.endDate')" />
+        <AppDatePicker v-model="filters.start_date"  class="input w-44" :placeholder="t('audit_logs.filters.startDate')" />
+        <AppDatePicker v-model="filters.end_date"  class="input w-44" :placeholder="t('audit_logs.filters.endDate')" />
         <select v-model="filters.module" class="input w-44">
           <option v-for="[v, l] in MODULE_OPTIONS" :key="v" :value="v">{{ l }}</option>
         </select>

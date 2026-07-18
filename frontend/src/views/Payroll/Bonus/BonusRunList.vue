@@ -272,11 +272,11 @@ async function cancel(row) {
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="label">Reference Date (untuk hitung tenure)</label>
-              <input v-model="form.reference_date" type="date" class="input" />
+              <AppDatePicker v-model="form.reference_date"  class="input" />
             </div>
             <div>
               <label class="label">Pay Date</label>
-              <input v-model="form.pay_date" type="date" class="input" />
+              <AppDatePicker v-model="form.pay_date"  class="input" />
             </div>
           </div>
           <div>

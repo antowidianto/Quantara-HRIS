@@ -419,10 +419,10 @@ class NotificationService
             'from_address' => (string) env('mail.fromAddress', 'noreply@hris.local'),
             'from_name'    => (string) env('mail.fromName', 'HRIS'),
         ];
-        if (! $companyId) return $cfg;
+        if (! $companyId) return $this->applyDevelopmentMailpit($cfg);
 
         $db = \Config\Database::connect();
-        if (! $db->tableExists('settings')) return $cfg;
+        if (! $db->tableExists('settings')) return $this->applyDevelopmentMailpit($cfg);
         $rows = $db->table('settings')
             ->where('company_id', $companyId)
             ->whereIn('key', [
@@ -447,6 +447,24 @@ class NotificationService
                 $cfg['password'] = $plain;
             }
         }
+        return $this->applyDevelopmentMailpit($cfg);
+    }
+
+    /**
+     * Safety net dev: abaikan SMTP tenant/production → seluruh email ke Mailpit.
+     */
+    private function applyDevelopmentMailpit(array $cfg): array
+    {
+        if (strtolower((string) env('CI_ENVIRONMENT', ENVIRONMENT)) !== 'development') {
+            return $cfg;
+        }
+
+        $cfg['host'] = (string) env('mail.mailpitHost', 'localhost');
+        $cfg['port'] = (int) env('mail.mailpitPort', 1025);
+        $cfg['username'] = '';
+        $cfg['password'] = '';
+        $cfg['encryption'] = 'none';
+
         return $cfg;
     }
 

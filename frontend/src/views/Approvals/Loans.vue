@@ -82,7 +82,7 @@
 
             <div v-if="selectedLoan.status === 'PENDING'">
               <label class="block text-sm font-medium mb-1 dark:text-slate-300">Mulai Potong Gaji Bulan (Jatuh Tempo Pertama) <span class="text-rose-500">*</span></label>
-              <input v-model="firstInstallmentDate" type="date" class="form-input w-full dark:bg-slate-900 dark:border-slate-600" />
+              <AppDatePicker v-model="firstInstallmentDate"  class="form-input w-full dark:bg-slate-900 dark:border-slate-600" />
               <p class="text-xs text-slate-500 mt-1">Sistem akan menggenerate jadwal cicilan setiap bulan mulai tanggal ini.</p>
             </div>
           </div>

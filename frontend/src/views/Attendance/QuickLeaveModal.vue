@@ -253,12 +253,12 @@ async function submit() {
           <div v-if="selectedType" class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium mb-1">{{ t('leave.quick.start') }}</label>
-              <input v-model="form.start_date" type="date" class="input w-full" required
+              <AppDatePicker v-model="form.start_date"  class="input w-full" required
                 :min="selectedType.min_start_date" :max="selectedType.max_start_date" />
             </div>
             <div>
               <label class="block text-sm font-medium mb-1">{{ t('leave.quick.end') }}</label>
-              <input v-model="form.end_date" type="date" class="input w-full" required
+              <AppDatePicker v-model="form.end_date"  class="input w-full" required
                 :min="form.start_date" :max="selectedType.max_start_date" />
             </div>
             <div class="col-span-2 text-[11px] text-gray-500">

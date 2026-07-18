@@ -430,11 +430,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </div>
           <div>
             <label class="label">Tgl Berangkat *</label>
-            <input type="date" v-model="editing.start_date" class="input" />
+            <AppDatePicker  v-model="editing.start_date" class="input" />
           </div>
           <div>
             <label class="label">Tgl Kembali *</label>
-            <input type="date" v-model="editing.end_date" class="input" />
+            <AppDatePicker  v-model="editing.end_date" class="input" />
           </div>
           <div>
             <label class="label">Transportasi</label>
@@ -557,7 +557,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </div>
           <div>
             <label class="label">Tanggal</label>
-            <input type="date" v-model="expenseInput.expense_date" class="input" />
+            <AppDatePicker  v-model="expenseInput.expense_date" class="input" />
           </div>
           <div>
             <label class="label">Deskripsi *</label>

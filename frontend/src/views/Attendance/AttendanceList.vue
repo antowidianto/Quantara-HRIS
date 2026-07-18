@@ -108,8 +108,8 @@ onMounted(async () => {
 
     <div class="card">
       <div class="card-header gap-3 flex-wrap">
-        <input v-model="filters.start_date" type="date" class="input w-44" />
-        <input v-model="filters.end_date" type="date" class="input w-44" />
+        <AppDatePicker v-model="filters.start_date"  class="input w-44" />
+        <AppDatePicker v-model="filters.end_date"  class="input w-44" />
         <div v-if="canCrossBranch" class="w-56">
           <SearchableSelect
             v-model="filters.branch_id"

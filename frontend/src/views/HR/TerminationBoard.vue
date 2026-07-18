@@ -377,7 +377,7 @@ function downloadLetter() {
             </div>
             <div>
               <label class="label">Tanggal Target Efektif *</label>
-              <input type="date" v-model="createForm.planned_termination_date" class="input" />
+              <AppDatePicker  v-model="createForm.planned_termination_date" class="input" />
             </div>
           </div>
 

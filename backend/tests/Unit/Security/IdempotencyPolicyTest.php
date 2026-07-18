@@ -72,6 +72,15 @@ final class IdempotencyPolicyTest extends TestCase
         self::assertStringContainsString('return true', $webPolicy);
     }
 
+    public function testFilterDoesNotAttachDynamicStateToFrameworkRequest(): void
+    {
+        $source = file_get_contents(APPPATH . 'Filters/IdempotencyFilter.php');
+
+        self::assertNotFalse($source);
+        self::assertStringContainsString('private ?int $idempotencyKeyId = null;', $source);
+        self::assertStringNotContainsString('$request->idempotencyKeyId', $source);
+    }
+
     public function testRequiredModeReturnsStableMissingKeyError(): void
     {
         $request = $this->createMock(RequestInterface::class);

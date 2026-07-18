@@ -22,6 +22,7 @@ import organizationRoles from './id/organization_roles.js'
 import recruitmentPipelines from './id/recruitment_pipelines.js'
 import benefitPolicies from './id/benefit_policies.js'
 import allowanceNatura from './id/allowance_natura.js'
+import loginMarketing from './id/login_marketing.js'
 
 export default {
   ...core,
@@ -48,4 +49,5 @@ export default {
   ...recruitmentPipelines,
   ...benefitPolicies,
   ...allowanceNatura,
+  ...loginMarketing,
 }

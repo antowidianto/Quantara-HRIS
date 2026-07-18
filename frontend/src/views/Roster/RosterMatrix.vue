@@ -296,11 +296,11 @@ const visibleEmployeeCount = computed(() => matrix.value.rows.length)
       <div class="card-body grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
         <div>
           <label class="label">{{ t('roster_ui.start') }}</label>
-          <input v-model="filters.start_date" type="date" class="input" @change="fetchData" />
+          <AppDatePicker v-model="filters.start_date"  class="input" @change="fetchData" />
         </div>
         <div>
           <label class="label">{{ t('roster_ui.end') }}</label>
-          <input v-model="filters.end_date" type="date" class="input" @change="fetchData" />
+          <AppDatePicker v-model="filters.end_date"  class="input" @change="fetchData" />
         </div>
         <div>
           <label class="label">{{ t('roster_ui.branch') }}</label>
@@ -526,15 +526,15 @@ const visibleEmployeeCount = computed(() => matrix.value.rows.length)
           </div>
           <div>
             <label class="label">{{ t('roster_ui.start') }}</label>
-            <input v-model="generateForm.start_date" type="date" class="input" />
+            <AppDatePicker v-model="generateForm.start_date"  class="input" />
           </div>
           <div>
             <label class="label">{{ t('roster_ui.end') }}</label>
-            <input v-model="generateForm.end_date" type="date" class="input" />
+            <AppDatePicker v-model="generateForm.end_date"  class="input" />
           </div>
           <div class="md:col-span-2">
             <label class="label">{{ t('roster_ui.anchor_date') }}</label>
-            <input v-model="generateForm.anchor_date" type="date" class="input" />
+            <AppDatePicker v-model="generateForm.anchor_date"  class="input" />
             <div class="text-xs text-gray-500 mt-1">
               {{ t('roster_ui.anchor_hint') }}
             </div>

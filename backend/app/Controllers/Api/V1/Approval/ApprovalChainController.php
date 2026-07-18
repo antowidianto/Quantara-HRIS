@@ -305,6 +305,16 @@ class ApprovalChainController extends ApiController
     }
 
     /**
+     * Daftar approval yang sudah diproses user saat ini.
+     */
+    public function history()
+    {
+        $module = trim((string) $this->request->getGet('module'));
+        $rows = Services::approval()->processedForUser((int) $this->userId(), $module ?: null, 100);
+        return $this->ok($rows);
+    }
+
+    /**
      * Detail satu request beserta histori keputusan.
      */
     public function showRequest($id = null)
@@ -328,7 +338,152 @@ class ApprovalChainController extends ApiController
             ->get()->getResultArray();
         $req['decisions'] = $decisions;
         $req['meta'] = $req['meta'] ? json_decode($req['meta'], true) : null;
+
+        // Detail domain memakai allowlist per modul agar Inbox informatif tanpa
+        // mengekspos seluruh kolom tabel sumber yang mungkin sensitif.
+        $source = $this->approvalSourceDetail($db, $req);
+        $req['request_detail'] = $source['detail'];
+        $req['submitter_note'] = $source['submitter_note'];
+        $req['attachment'] = $source['attachment'];
+        $req['timeline'] = $this->approvalTimeline($req, $decisions);
+
         return $this->ok($req);
+    }
+
+    /**
+     * @return array{detail:array<string,mixed>,submitter_note:?string,attachment:?array<string,string>}
+     */
+    private function approvalSourceDetail($db, array $request): array
+    {
+        $config = [
+            'LEAVE' => [
+                'table' => 'leaves',
+                'fields' => [
+                    'request_number', 'start_date', 'end_date', 'days',
+                    'is_half_day', 'half_day_part', 'contact_during_leave', 'status',
+                ],
+                'note' => 'reason',
+                'attachment' => 'attachment',
+            ],
+            'OVERTIME' => [
+                'table' => 'overtimes',
+                'fields' => [
+                    'request_number', 'work_date', 'start_time', 'end_time',
+                    'hours', 'day_type', 'computed_amount', 'status',
+                ],
+                'note' => 'reason',
+                'attachment' => null,
+            ],
+            'ATTENDANCE_CHANGE' => [
+                'table' => 'attendance_change_requests',
+                'fields' => [
+                    'request_number', 'work_date', 'change_type',
+                    'current_clock_in', 'requested_clock_in',
+                    'current_clock_out', 'requested_clock_out',
+                    'current_status', 'requested_status', 'status',
+                ],
+                'note' => 'reason',
+                'attachment' => 'attachment_path',
+            ],
+        ];
+
+        $module = strtoupper((string) ($request['module'] ?? ''));
+        $moduleConfig = $config[$module] ?? null;
+        if ($moduleConfig === null
+            || (string) ($request['entity_table'] ?? '') !== $moduleConfig['table']
+            || ! $db->tableExists($moduleConfig['table'])
+        ) {
+            return [
+                'detail' => is_array($request['meta']) ? $request['meta'] : [],
+                'submitter_note' => null,
+                'attachment' => null,
+            ];
+        }
+
+        $columns = array_values(array_unique(array_filter(array_merge(
+            ['id', 'company_id'],
+            $moduleConfig['fields'],
+            [$moduleConfig['note'], $moduleConfig['attachment']]
+        ))));
+        $row = $db->table($moduleConfig['table'])
+            ->select(implode(', ', $columns))
+            ->where('id', (int) $request['entity_id'])
+            ->where('company_id', (int) $request['company_id'])
+            ->get()->getRowArray();
+
+        if (! $row) {
+            return ['detail' => [], 'submitter_note' => null, 'attachment' => null];
+        }
+
+        $detail = [];
+        foreach ($moduleConfig['fields'] as $field) {
+            if (array_key_exists($field, $row)) $detail[$field] = $row[$field];
+        }
+
+        $attachment = null;
+        $attachmentField = $moduleConfig['attachment'];
+        $path = $attachmentField ? trim((string) ($row[$attachmentField] ?? '')) : '';
+        if ($path !== '') {
+            $attachment = [
+                'name' => basename(str_replace('\\', '/', $path)),
+                'url' => Services::fileStorage()->signedUrl($path, 300),
+            ];
+        }
+
+        return [
+            'detail' => $detail,
+            'submitter_note' => trim((string) ($row[$moduleConfig['note']] ?? '')) ?: null,
+            'attachment' => $attachment,
+        ];
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function approvalTimeline(array $request, array $decisions): array
+    {
+        $snapshot = $request['workflow_snapshot'] ?? null;
+        if (is_string($snapshot)) $snapshot = json_decode($snapshot, true);
+        $steps = is_array($snapshot) ? (array) ($snapshot['steps'] ?? []) : [];
+        $decisionByStep = [];
+        foreach ($decisions as $decision) {
+            $decisionByStep[(int) ($decision['step_order'] ?? 0)] = $decision;
+        }
+
+        $timeline = [];
+        foreach ($steps as $step) {
+            $order = (int) ($step['step_order'] ?? 0);
+            $decision = $decisionByStep[$order] ?? [];
+            $timeline[] = [
+                'step_order' => $order,
+                'step_name' => (string) ($step['name'] ?? "Step {$order}"),
+                'approver_type' => $step['approver_type'] ?? null,
+                'status' => $decision['decision']
+                    ?? (! empty($step['condition_matched']) ? 'WAITING_APPROVAL' : 'SKIPPED'),
+                'approver_user_name' => $decision['approver_user_name'] ?? null,
+                'decided_at' => $decision['decided_at'] ?? null,
+                'note' => $decision['note'] ?? null,
+                'is_current' => $request['status'] === 'PENDING'
+                    && $order === (int) $request['current_step_order'],
+            ];
+        }
+
+        // Workflow fallback tanpa chain.
+        if ($timeline === [] && $decisions !== []) {
+            foreach ($decisions as $decision) {
+                $timeline[] = [
+                    'step_order' => (int) ($decision['step_order'] ?? 0),
+                    'step_name' => $decision['step_name'] ?: 'Fallback HR',
+                    'approver_type' => $decision['approver_type'] ?: 'HR',
+                    'status' => $decision['decision'],
+                    'approver_user_name' => $decision['approver_user_name'] ?? null,
+                    'decided_at' => $decision['decided_at'] ?? null,
+                    'note' => $decision['note'] ?? null,
+                    'is_current' => $request['status'] === 'PENDING'
+                        && $decision['decision'] === 'PENDING',
+                ];
+            }
+        }
+
+        return $timeline;
     }
 
     public function approveRequest($id = null)

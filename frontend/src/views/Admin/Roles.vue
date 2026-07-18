@@ -7,6 +7,7 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { useI18n } from '@/locales'
 import {
   PlusIcon, PencilIcon, EyeIcon, ShieldCheckIcon, LockClosedIcon, TrashIcon,
+  ClockIcon, CheckCircleIcon, XCircleIcon, ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
 
 /**
@@ -33,11 +34,32 @@ const showForm = ref(false)
 const viewMode = ref(false)        // true = read-only view (untuk admin biasa)
 const editing = ref(null)
 const form = ref({ slug: '', name: '', description: '', permissions: [] })
+const privilegedPending = ref(null)
+const saving = ref(false)
+const approvalRequests = ref([])
+const approvalsLoading = ref(false)
+const detailRequest = ref(null)
+
+async function fetchApprovals() {
+  approvalsLoading.value = true
+  try {
+    const res = await api.get('/roles/approval-requests')
+    approvalRequests.value = res.data.data || []
+  } catch (e) {
+    toast.error(e.response?.data?.message || 'Gagal memuat daftar persetujuan RBAC')
+  } finally {
+    approvalsLoading.value = false
+  }
+}
 
 async function fetchData() {
   loading.value = true
   try {
-    const [r, p] = await Promise.all([api.get('/roles'), api.get('/permissions')])
+    const [r, p] = await Promise.all([
+      api.get('/roles'),
+      api.get('/permissions'),
+      fetchApprovals(),
+    ])
     roles.value = r.data.data
     grouped.value = p.data.data.grouped
   } catch (e) {
@@ -65,6 +87,7 @@ async function open(role, modeView = false) {
       description: res.data.data.description || '',
       permissions: res.data.data.permissions.map(p => p.id),
     }
+    privilegedPending.value = null
     showForm.value = true
   } catch (e) {
     toast.error(e.response?.data?.message || t('roles.failed_load_detail'))
@@ -79,6 +102,7 @@ function openCreate() {
   editing.value = null
   viewMode.value = false
   form.value = { slug: '', name: '', description: '', permissions: [] }
+  privilegedPending.value = null
   showForm.value = true
 }
 
@@ -87,17 +111,30 @@ async function save() {
     toast.error(t('roles.only_superadmin_save'))
     return
   }
+  saving.value = true
   try {
-    if (editing.value) {
-      await api.put(`/roles/${editing.value.id}`, form.value)
-    } else {
-      await api.post('/roles', form.value)
+    const res = editing.value
+      ? await api.put(`/roles/${editing.value.id}`, form.value)
+      : await api.post('/roles', form.value)
+
+    if (res.status === 202 && res.data?.data?.approval_state === 'PENDING') {
+      privilegedPending.value = {
+        requestId: res.data.data.request_id,
+        requestNumber: res.data.data.request_number,
+      }
+      toast.warning('Perubahan belum diterapkan. Menunggu persetujuan checker.')
+      await fetchApprovals()
+      return
     }
+
+    privilegedPending.value = null
     toast.success(t('roles.saved'))
     showForm.value = false
-    fetchData()
+    await fetchData()
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -140,6 +177,29 @@ function toggleGroup(perms) {
 function groupSelectedCount(perms) {
   return perms.filter(p => form.value.permissions.includes(p.id)).length
 }
+
+function fmtDate(value) {
+  if (! value) return '-'
+  return new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function approvalStatus(item) {
+  if (item.status === 'USED') return { label: 'Diterapkan', class: 'bg-blue-50 text-blue-700', icon: CheckCircleIcon }
+  if (item.status === 'APPROVED') return { label: 'Siap diterapkan', class: 'bg-green-50 text-green-700', icon: CheckCircleIcon }
+  if (item.status === 'REJECTED') return { label: 'Ditolak', class: 'bg-red-50 text-red-700', icon: XCircleIcon }
+  return { label: 'Menunggu persetujuan', class: 'bg-amber-50 text-amber-700', icon: ClockIcon }
+}
+
+function roleTarget(path) {
+  const match = String(path || '').match(/\/roles\/(\d+)$/)
+  if (! match) return path?.endsWith('/roles') ? 'Role baru' : 'Role & Permission'
+  const role = roles.value.find(item => Number(item.id) === Number(match[1]))
+  return role ? `${role.name} (${role.slug})` : `Role #${match[1]}`
+}
+
+function changed(before, after) {
+  return String(before ?? '') !== String(after ?? '')
+}
 </script>
 
 <template>
@@ -150,9 +210,6 @@ function groupSelectedCount(perms) {
           <ShieldCheckIcon class="w-7 h-7 text-primary-600" />
           {{ t('roles.title') }}
         </h1>
-        <p class="text-sm text-gray-500">
-          {{ t('nav.items.roles') }}
-        </p>
       </div>
       <button v-if="isSuperAdmin" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('roles.add_role') }}
@@ -170,6 +227,105 @@ function groupSelectedCount(perms) {
         </div>
       </div>
     </div>
+
+    <!-- Monitoring maker-checker perubahan RBAC -->
+    <section class="mb-5 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+        <div>
+          <h2 class="flex items-center gap-2 font-semibold text-gray-900">
+            <ClockIcon class="h-5 w-5 text-primary-600" />
+            Persetujuan Perubahan Role
+          </h2>
+          <p class="mt-0.5 text-xs text-gray-500">
+            Status perubahan role dan permission yang melalui proses maker-checker.
+          </p>
+        </div>
+        <button type="button" class="btn-secondary inline-flex items-center gap-2 text-xs"
+          :disabled="approvalsLoading" @click="fetchApprovals">
+          <ArrowPathIcon class="h-4 w-4" :class="{ 'animate-spin': approvalsLoading }" />
+          Muat Ulang
+        </button>
+      </div>
+
+      <div v-if="approvalsLoading && approvalRequests.length === 0"
+        class="px-5 py-8 text-center text-sm text-gray-400">
+        Memuat persetujuan...
+      </div>
+      <div v-else-if="approvalRequests.length === 0"
+        class="px-5 py-8 text-center text-sm text-gray-400">
+        Belum ada permintaan persetujuan perubahan role.
+      </div>
+      <div v-else class="divide-y divide-gray-100">
+        <article v-for="request in approvalRequests" :key="request.id"
+          class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-mono text-xs font-semibold text-primary-700">
+                {{ request.request_number }}
+              </span>
+              <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                :class="approvalStatus(request).class">
+                <component :is="approvalStatus(request).icon" class="h-3.5 w-3.5" />
+                {{ approvalStatus(request).label }}
+              </span>
+            </div>
+            <div class="mt-1 text-sm font-semibold text-gray-900">
+              {{ request.http_method }} · {{ roleTarget(request.request_path) }}
+            </div>
+            <div class="mt-1 text-xs text-gray-500">
+              Diajukan oleh {{ request.submitted_by_name || request.submitted_by_email || '-' }}
+              · {{ fmtDate(request.submitted_at) }}
+            </div>
+          </div>
+
+          <div class="min-w-0 text-xs">
+            <template v-if="request.status === 'PENDING_APPROVAL'">
+              <div class="font-semibold text-gray-700">
+                Tahap {{ request.current_step_order || '-' }} ·
+                {{ request.current_step_name || 'Menunggu checker' }}
+              </div>
+              <div class="mt-1 text-gray-500">
+                Approver:
+                <span v-if="request.current_approvers?.length">
+                  {{ request.current_approvers.map(user => user.name).join(', ') }}
+                </span>
+                <span v-else class="font-medium text-red-600">belum ter-resolve</span>
+              </div>
+            </template>
+            <template v-else-if="request.status === 'APPROVED'">
+              <div class="font-semibold text-green-700">
+                Disetujui oleh {{ request.approved_by_name || '-' }}
+              </div>
+              <div class="mt-1 text-gray-500">
+                Berlaku sampai {{ fmtDate(request.expires_at) }}; maker harus menerapkan ulang.
+              </div>
+            </template>
+            <template v-else-if="request.status === 'USED'">
+              <div class="font-semibold text-blue-700">Perubahan telah diterapkan</div>
+              <div class="mt-1 text-gray-500">{{ fmtDate(request.used_at) }}</div>
+            </template>
+            <template v-else>
+              <div class="font-semibold text-red-700">
+                Ditolak oleh {{ request.rejected_by_name || '-' }}
+              </div>
+              <div class="mt-1 text-gray-500">{{ request.rejection_reason || '-' }}</div>
+            </template>
+          </div>
+
+          <div class="flex flex-wrap gap-2 lg:justify-end">
+            <button type="button" class="btn-secondary justify-center whitespace-nowrap text-xs"
+              @click="detailRequest = request">
+              Detail Perubahan
+            </button>
+            <RouterLink v-if="request.approval_request_id"
+              :to="{ path: '/approvals/inbox', query: { request_id: request.approval_request_id } }"
+              class="btn-secondary justify-center whitespace-nowrap text-xs">
+              Lihat Approval
+            </RouterLink>
+          </div>
+        </article>
+      </div>
+    </section>
 
     <div class="card">
       <table class="table">
@@ -225,6 +381,127 @@ function groupSelectedCount(perms) {
       </table>
     </div>
 
+    <!-- Modal detail snapshot perubahan RBAC -->
+    <Teleport to="body">
+      <div v-if="detailRequest"
+        class="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"
+        @click.self="detailRequest = null">
+        <div role="dialog" aria-modal="true" aria-labelledby="rbac-detail-title"
+          class="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div class="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5">
+            <div>
+              <h2 id="rbac-detail-title" class="text-lg font-bold text-gray-900">
+                Detail Perubahan Role
+              </h2>
+              <p class="mt-1 font-mono text-xs text-primary-700">{{ detailRequest.request_number }}</p>
+            </div>
+            <button type="button" class="text-2xl leading-none text-gray-400 hover:text-gray-700"
+              aria-label="Tutup" @click="detailRequest = null">&times;</button>
+          </div>
+
+          <div class="overflow-y-auto p-6">
+            <div class="mb-5 grid gap-3 rounded-xl bg-gray-50 p-4 text-sm sm:grid-cols-2">
+              <div><span class="text-gray-500">Aksi:</span>
+                <strong class="ml-2">{{ detailRequest.http_method }} {{ detailRequest.request_path }}</strong>
+              </div>
+              <div><span class="text-gray-500">Target:</span>
+                <strong class="ml-2">{{ roleTarget(detailRequest.request_path) }}</strong>
+              </div>
+              <div><span class="text-gray-500">Pengaju:</span>
+                <strong class="ml-2">{{ detailRequest.submitted_by_name || '-' }}</strong>
+              </div>
+              <div><span class="text-gray-500">Diajukan:</span>
+                <strong class="ml-2">{{ fmtDate(detailRequest.submitted_at) }}</strong>
+              </div>
+            </div>
+
+            <div v-if="! detailRequest.change_detail?.available"
+              class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+              Detail payload tidak tersedia untuk request lama. Snapshot perubahan mulai direkam untuk request baru.
+            </div>
+
+            <template v-else>
+              <div class="mb-6">
+                <h3 class="mb-3 text-sm font-semibold text-gray-900">Perubahan Informasi Role</h3>
+                <div class="overflow-hidden rounded-xl border border-gray-200">
+                  <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+                      <tr><th class="px-4 py-3">Field</th><th class="px-4 py-3">Sebelum</th><th class="px-4 py-3">Usulan</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                      <tr>
+                        <td class="px-4 py-3 font-medium">Nama</td>
+                        <td class="px-4 py-3 text-gray-600">{{ detailRequest.change_detail.role_name_before || '-' }}</td>
+                        <td class="px-4 py-3" :class="{ 'font-semibold text-blue-700': changed(detailRequest.change_detail.role_name_before, detailRequest.change_detail.role_name_after) }">
+                          {{ detailRequest.change_detail.role_name_after || '-' }}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="px-4 py-3 font-medium">Deskripsi</td>
+                        <td class="px-4 py-3 whitespace-pre-wrap text-gray-600">{{ detailRequest.change_detail.description_before || '-' }}</td>
+                        <td class="px-4 py-3 whitespace-pre-wrap" :class="{ 'font-semibold text-blue-700': changed(detailRequest.change_detail.description_before, detailRequest.change_detail.description_after) }">
+                          {{ detailRequest.change_detail.description_after || '-' }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="grid gap-5 lg:grid-cols-2">
+                <div class="rounded-xl border border-green-200 bg-green-50/50 p-4">
+                  <h3 class="flex items-center gap-2 text-sm font-semibold text-green-800">
+                    <PlusIcon class="h-4 w-4" />
+                    Permission Dibuka ({{ detailRequest.change_detail.permissions_added.length }})
+                  </h3>
+                  <div v-if="detailRequest.change_detail.permissions_added.length" class="mt-3 space-y-2">
+                    <div v-for="permission in detailRequest.change_detail.permissions_added" :key="permission.id"
+                      class="rounded-lg border border-green-100 bg-white px-3 py-2">
+                      <div class="font-mono text-xs font-semibold text-green-700">{{ permission.slug }}</div>
+                      <div class="mt-0.5 text-xs text-gray-600">{{ permission.name }}</div>
+                    </div>
+                  </div>
+                  <p v-else class="mt-3 text-xs text-gray-500">Tidak ada permission baru.</p>
+                </div>
+
+                <div class="rounded-xl border border-red-200 bg-red-50/50 p-4">
+                  <h3 class="flex items-center gap-2 text-sm font-semibold text-red-800">
+                    <TrashIcon class="h-4 w-4" />
+                    Permission Dicabut ({{ detailRequest.change_detail.permissions_removed.length }})
+                  </h3>
+                  <div v-if="detailRequest.change_detail.permissions_removed.length" class="mt-3 space-y-2">
+                    <div v-for="permission in detailRequest.change_detail.permissions_removed" :key="permission.id"
+                      class="rounded-lg border border-red-100 bg-white px-3 py-2">
+                      <div class="font-mono text-xs font-semibold text-red-700">{{ permission.slug }}</div>
+                      <div class="mt-0.5 text-xs text-gray-600">{{ permission.name }}</div>
+                    </div>
+                  </div>
+                  <p v-else class="mt-3 text-xs text-gray-500">Tidak ada permission yang dicabut.</p>
+                </div>
+              </div>
+
+              <details class="mt-5 rounded-xl border border-gray-200 p-4">
+                <summary class="cursor-pointer text-sm font-semibold text-gray-700">
+                  Permission Tetap ({{ detailRequest.change_detail.permissions_kept.length }})
+                </summary>
+                <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div v-for="permission in detailRequest.change_detail.permissions_kept" :key="permission.id"
+                    class="rounded-lg bg-gray-50 px-3 py-2">
+                    <div class="font-mono text-xs text-gray-700">{{ permission.slug }}</div>
+                    <div class="text-xs text-gray-500">{{ permission.name }}</div>
+                  </div>
+                </div>
+              </details>
+            </template>
+          </div>
+
+          <div class="flex justify-end border-t border-gray-100 bg-gray-50 px-6 py-4">
+            <button type="button" class="btn-secondary" @click="detailRequest = null">Tutup</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Modal: edit / create / view -->
     <div v-if="showForm" class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40"
       @click.self="showForm = false">
@@ -243,6 +520,21 @@ function groupSelectedCount(perms) {
         </div>
 
         <div class="p-6 space-y-4">
+          <div v-if="privilegedPending"
+            class="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <div class="font-semibold">Perubahan belum diterapkan</div>
+            <p class="mt-1 text-xs leading-5">
+              Request <span class="font-mono">{{ privilegedPending.requestNumber }}</span>
+              menunggu persetujuan checker. Setelah disetujui, klik
+              <strong>Terapkan Perubahan</strong> dengan data yang sama.
+              Pembuat request tidak dapat menyetujui request-nya sendiri.
+            </p>
+            <RouterLink to="/approvals/inbox"
+              class="mt-2 inline-flex text-xs font-semibold text-primary-700 hover:underline">
+              Buka Approval Inbox
+            </RouterLink>
+          </div>
+
           <!-- Banner peringatan saat super admin edit role sistem -->
           <div v-if="!viewMode && editing && editing.is_system"
             class="rounded-md p-3 bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-2">
@@ -315,7 +607,13 @@ function groupSelectedCount(perms) {
           <button type="button" class="btn-secondary" @click="showForm = false">
             {{ viewMode ? t('common.close') : t('common.cancel') }}
           </button>
-          <button v-if="!viewMode" type="submit" class="btn-primary">{{ t('common.save') }}</button>
+          <button v-if="!viewMode" type="submit" class="btn-primary" :disabled="saving">
+            {{ saving
+              ? 'Memproses...'
+              : privilegedPending
+                ? 'Terapkan Perubahan'
+                : t('common.save') }}
+          </button>
         </div>
       </form>
     </div>

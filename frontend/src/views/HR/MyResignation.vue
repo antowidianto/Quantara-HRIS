@@ -341,7 +341,7 @@ onMounted(fetchData)
             <label class="label" for="lwd">
               Tanggal Terakhir Kerja <span class="text-red-500">*</span>
             </label>
-            <input id="lwd" type="date"
+            <AppDatePicker id="lwd"
               v-model="form.last_working_date"
               :min="minLastWorkingDate"
               class="input" />
@@ -356,7 +356,7 @@ onMounted(fetchData)
               Tanggal Efektif Resign
               <span class="text-gray-500 font-normal text-xs">(opsional)</span>
             </label>
-            <input id="effdate" type="date"
+            <AppDatePicker id="effdate"
               v-model="form.effective_date"
               :min="form.last_working_date || minLastWorkingDate"
               class="input" />

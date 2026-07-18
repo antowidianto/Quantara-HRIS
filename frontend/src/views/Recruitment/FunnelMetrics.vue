@@ -131,7 +131,7 @@ onMounted(async () => {
         </div>
         <div>
           <label class="label">Sejak (opsional)</label>
-          <input type="date" v-model="filters.since" class="input" @change="fetchAll" />
+          <AppDatePicker  v-model="filters.since" class="input" @change="fetchAll" />
         </div>
         <div>
           <label class="label">Threshold Stale (hari)</label>
