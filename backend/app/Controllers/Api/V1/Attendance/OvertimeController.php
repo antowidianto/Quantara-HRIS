@@ -36,7 +36,21 @@ class OvertimeController extends ApiController
             return $this->fail('Anda tidak memiliki akses ke modul lembur.', 403);
         }
 
-        if ($status) $builder->where('o.status', $status);
+        if ($status !== '') {
+            $statuses = array_values(array_filter(
+                array_map(
+                    static fn (string $value): string => strtoupper(trim($value)),
+                    explode(',', $status)
+                ),
+                static fn (string $value): bool => $value !== ''
+            ));
+
+            if (count($statuses) === 1) {
+                $builder->where('o.status', $statuses[0]);
+            } elseif ($statuses !== []) {
+                $builder->whereIn('o.status', $statuses);
+            }
+        }
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('o.created_at', 'DESC')
@@ -48,9 +62,11 @@ class OvertimeController extends ApiController
     {
         $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        $row = $db->table('overtimes')
-            ->where('id', (int) $id)
-            ->where('company_id', $companyId)
+        $row = $db->table('overtimes o')
+            ->select('o.*, e.full_name AS employee_name, e.employee_number')
+            ->join('employees e', 'e.id = o.employee_id', 'left')
+            ->where('o.id', (int) $id)
+            ->where('o.company_id', $companyId)
             ->get()->getRowArray();
         if (! $row) return $this->fail('Not found', 404);
         // Sebelumnya endpoint ini tanpa authorization — bisa diakses ID lain
@@ -58,6 +74,139 @@ class OvertimeController extends ApiController
         if (! $this->privacy()->canAccessRow($row, 'overtime')) {
             return $this->fail('Forbidden', 403);
         }
+
+        $approval = $db->table('approval_requests ar')
+            ->select('ar.*, ac.name AS chain_name')
+            ->join('approval_chains ac', 'ac.id = ar.chain_id', 'left')
+            ->where('ar.company_id', $companyId)
+            ->where('ar.module', 'OVERTIME')
+            ->where('ar.entity_table', 'overtimes')
+            ->where('ar.entity_id', (int) $id)
+            ->orderBy('ar.id', 'DESC')
+            ->get()->getRowArray();
+
+        if ($approval !== null) {
+            $approval['meta'] = ! empty($approval['meta'])
+                ? json_decode((string) $approval['meta'], true)
+                : null;
+
+            $snapshot = ! empty($approval['workflow_snapshot'])
+                ? json_decode((string) $approval['workflow_snapshot'], true)
+                : null;
+            $snapshot = is_array($snapshot) ? $snapshot : [];
+
+            $decisions = $db->table('approval_decisions ad')
+                ->select('ad.*, u.name AS approver_user_name')
+                ->join('users u', 'u.id = ad.approver_user_id', 'left')
+                ->where('ad.company_id', $companyId)
+                ->where('ad.approval_request_id', (int) $approval['id'])
+                ->orderBy('ad.step_order', 'ASC')
+                ->orderBy('ad.id', 'ASC')
+                ->get()->getResultArray();
+
+            $decisionByStepId = [];
+            foreach ($decisions as $decision) {
+                if ($decision['chain_step_id'] !== null) {
+                    $decisionByStepId[(int) $decision['chain_step_id']] = $decision;
+                }
+            }
+
+            $steps = $snapshot['steps'] ?? [];
+            if ($steps === [] && ! empty($approval['chain_id'])) {
+                $steps = $db->table('approval_chain_steps')
+                    ->where('company_id', $companyId)
+                    ->where('chain_id', (int) $approval['chain_id'])
+                    ->orderBy('step_order', 'ASC')
+                    ->get()->getResultArray();
+            }
+
+            $expectedUserIds = [];
+            foreach ($steps as $step) {
+                foreach ((array) ($step['expected_approver_user_ids'] ?? []) as $userId) {
+                    if ((int) $userId > 0) $expectedUserIds[] = (int) $userId;
+                }
+            }
+            $expectedUserIds = array_values(array_unique($expectedUserIds));
+
+            $expectedUserNames = [];
+            if ($expectedUserIds !== []) {
+                $users = $db->table('users')
+                    ->select('id, name')
+                    ->where('company_id', $companyId)
+                    ->whereIn('id', $expectedUserIds)
+                    ->get()->getResultArray();
+                foreach ($users as $user) {
+                    $expectedUserNames[(int) $user['id']] = (string) $user['name'];
+                }
+            }
+
+            $timeline = [];
+            foreach ($steps as $step) {
+                $stepId = (int) ($step['id'] ?? 0);
+                $conditionMatched = ! array_key_exists('condition_matched', $step)
+                    || (bool) $step['condition_matched'];
+                $decision = $decisionByStepId[$stepId] ?? null;
+                $approverIds = array_values(array_map(
+                    'intval',
+                    (array) ($step['expected_approver_user_ids'] ?? [])
+                ));
+                $approverNames = array_values(array_filter(array_map(
+                    static fn (int $userId): ?string => $expectedUserNames[$userId] ?? null,
+                    $approverIds
+                )));
+
+                $timeline[] = [
+                    'step_id'                  => $stepId,
+                    'step_order'               => (int) ($step['step_order'] ?? 0),
+                    'step_name'                => (string) ($step['name'] ?? 'Tahap approval'),
+                    'approver_type'            => (string) ($step['approver_type'] ?? ''),
+                    'condition_matched'         => $conditionMatched,
+                    'condition_field'           => $step['condition_field'] ?? null,
+                    'condition_op'              => $step['condition_op'] ?? null,
+                    'condition_value'           => $step['condition_value'] ?? null,
+                    'expected_approver_user_ids'=> $approverIds,
+                    'expected_approver_names'   => $approverNames,
+                    'status'                    => ($decision['decision'] ?? null) === 'PENDING'
+                        ? 'WAITING_APPROVAL'
+                        : ($decision['decision']
+                            ?? ($conditionMatched ? 'WAITING_APPROVAL' : 'SKIPPED')),
+                    'approver_user_name'        => $decision['approver_user_name'] ?? null,
+                    'decided_at'                => $decision['decided_at'] ?? null,
+                    'note'                      => $decision['note'] ?? null,
+                    'is_current'                => $conditionMatched
+                        && (int) ($approval['current_step_id'] ?? 0) === $stepId,
+                ];
+            }
+
+            // Workflow tanpa chain memakai fallback HR dengan step sintetis.
+            if ($timeline === [] && $decisions !== []) {
+                foreach ($decisions as $decision) {
+                    $timeline[] = [
+                        'step_id'                   => null,
+                        'step_order'                => (int) $decision['step_order'],
+                        'step_name'                 => 'Persetujuan HR (fallback)',
+                        'approver_type'             => 'HR',
+                        'condition_matched'          => true,
+                        'expected_approver_user_ids' => [],
+                        'expected_approver_names'    => [],
+                        'status'                     => $decision['decision'] === 'PENDING'
+                            ? 'WAITING_APPROVAL'
+                            : $decision['decision'],
+                        'approver_user_name'         => $decision['approver_user_name'] ?? null,
+                        'decided_at'                 => $decision['decided_at'] ?? null,
+                        'note'                       => $decision['note'] ?? null,
+                        'is_current'                 => $decision['decision'] === 'PENDING',
+                    ];
+                }
+            }
+
+            $approval['workflow_snapshot'] = $snapshot;
+            $approval['decisions'] = $decisions;
+            $approval['timeline'] = $timeline;
+        }
+
+        $row['approval'] = $approval;
+
         return $this->ok($row);
     }
 
@@ -190,7 +339,16 @@ class OvertimeController extends ApiController
             foreach ($approvers as $u) {
                 Services::notification()->send((int) $u['id'], (int) $emp['company_id'], 'overtime.requested',
                     'Pengajuan lembur baru', "{$emp['full_name']} mengajukan lembur {$hours} jam pada {$data['work_date']}",
-                    ['overtime_id' => $id], '/overtimes/' . $id, true);
+                    [
+                        'overtime_id' => $id,
+                        'request_id' => isset($approvalRes['request_id'])
+                            ? (int) $approvalRes['request_id']
+                            : null,
+                    ],
+                    isset($approvalRes['request_id'])
+                        ? '/approvals/inbox?request_id=' . (int) $approvalRes['request_id']
+                        : '/overtimes/' . $id,
+                    true);
             }
         }
 
@@ -291,19 +449,23 @@ class OvertimeController extends ApiController
         // panggil logic-nya secara langsung — di sini kita inject planned_*
         // setelah insert berhasil supaya audit log konsisten.
         $response = $this->create();
-        // create() sudah send response via $this->ok(...). Kita ambil ID
-        // dari last insert sebagai cara paling aman (tidak meleset karena
-        // create selalu insert satu row di atas berdasarkan request kita).
+        // Ambil ID dari response create(). Jangan memakai insertID() di sini:
+        // approval/notifikasi/audit dapat melakukan insert lain setelah row
+        // overtime dibuat sehingga connection insert ID sudah berubah.
+        $responseBody = json_decode((string) $response->getBody(), true);
+        $newId = (int) ($responseBody['data']['id'] ?? 0);
+
         $db = \Config\Database::connect();
-        $newId = (int) $db->insertID();
         if ($newId > 0) {
             $db->table('overtimes')
                 ->where('id', $newId)
                 ->where('company_id', $this->requireCompanyId())
                 ->update([
-                'planned_hours' => $hours,
-                'planned_at'    => date('Y-m-d H:i:s'),
-            ]);
+                    'status'        => 'PLANNED',
+                    'planned_hours' => $hours,
+                    'planned_at'    => date('Y-m-d H:i:s'),
+                    'updated_at'    => date('Y-m-d H:i:s'),
+                ]);
         }
         return $response;
     }

@@ -766,7 +766,7 @@ function downloadDoc(doc) {
           <div><label class="label">Perusahaan Saat Ini</label><input v-model="candForm.current_company" class="input" /></div>
           <div><label class="label">Pengalaman (tahun)</label><input type="number" v-model="candForm.years_experience" class="input" /></div>
           <div><label class="label">Expected Salary (Rp)</label><input type="number" v-model="candForm.expected_salary" class="input" /></div>
-          <div><label class="label">Available From</label><input type="date" v-model="candForm.available_from" class="input" /></div>
+          <div><label class="label">Available From</label><AppDatePicker  v-model="candForm.available_from" class="input" /></div>
           <div><label class="label">Sumber</label>
             <select v-model="candForm.source" class="input">
               <option v-for="s in SOURCES" :key="s" :value="s">{{ s }}</option>
@@ -1228,11 +1228,11 @@ function downloadDoc(doc) {
                 </div>
                 <div>
                   <label class="label">Tanggal Bergabung Diajukan</label>
-                  <input type="date" v-model="offerForm.proposed_join_date" class="input" />
+                  <AppDatePicker  v-model="offerForm.proposed_join_date" class="input" />
                 </div>
                 <div>
                   <label class="label">Deadline Respon Kandidat *</label>
-                  <input type="date" v-model="offerForm.response_deadline" class="input" />
+                  <AppDatePicker  v-model="offerForm.response_deadline" class="input" />
                   <p class="text-xs text-gray-500 mt-1">
                     Default H+7. Setelah lewat deadline, offer auto-EXPIRED via cron harian.
                   </p>
@@ -1343,7 +1343,7 @@ function downloadDoc(doc) {
               </div>
               <div>
                 <label class="label">Tanggal Bergabung *</label>
-                <input type="date" v-model="hireForm.join_date" class="input" />
+                <AppDatePicker  v-model="hireForm.join_date" class="input" />
                 <p class="text-xs text-gray-500 mt-1">Anchor untuk due date task onboarding.</p>
               </div>
               <div>
@@ -1357,7 +1357,7 @@ function downloadDoc(doc) {
                 <label class="label">Kontrak Berakhir
                   <span class="text-gray-400">(opsional)</span>
                 </label>
-                <input type="date" v-model="hireForm.contract_end_date" class="input"
+                <AppDatePicker  v-model="hireForm.contract_end_date" class="input"
                   :disabled="hireForm.employment_status === 'PKWTT'" />
                 <p class="text-xs text-gray-500 mt-1">Wajib diisi untuk PKWT/PROBATION/MAGANG.</p>
               </div>
@@ -1365,7 +1365,7 @@ function downloadDoc(doc) {
                 <label class="label">Probation Berakhir
                   <span class="text-gray-400">(opsional)</span>
                 </label>
-                <input type="date" v-model="hireForm.probation_end_date" class="input" />
+                <AppDatePicker  v-model="hireForm.probation_end_date" class="input" />
               </div>
             </div>
           </section>

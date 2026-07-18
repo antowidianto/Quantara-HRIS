@@ -86,7 +86,7 @@ async function submit() {
             </template>
           </select>
         </div>
-        <div><label class="label">{{ t('reimbursement.expense_date') }}</label><input v-model="form.expense_date" type="date" class="input" required /></div>
+        <div><label class="label">{{ t('reimbursement.expense_date') }}</label><AppDatePicker v-model="form.expense_date"  class="input" required /></div>
         <div><label class="label">{{ t('reimbursement.amount_label') }}</label><input v-model.number="form.amount" type="number" min="1" class="input" required /></div>
         <div><label class="label">{{ t('reimbursement.description') }}</label><textarea v-model="form.description" rows="3" class="input" required></textarea></div>
         <div class="flex justify-end gap-2">

@@ -4,33 +4,236 @@
 
 @layer base {
   html { font-family: 'Inter', system-ui, sans-serif; }
-  body { @apply bg-gray-50 text-gray-900; }
+  body { @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100; }
   input, select, textarea { @apply outline-none; }
 }
 
 @layer components {
   .btn { @apply inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed; }
   .btn-primary { @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500; }
-  .btn-secondary { @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-primary-500; }
+  .btn-secondary { @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700; }
   .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500; }
   .btn-success { @apply btn bg-green-600 text-white hover:bg-green-700 focus:ring-green-500; }
 
-  .input { @apply block w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500; }
-  .label { @apply block text-sm font-medium text-gray-700 mb-1; }
+  .input { @apply block w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 dark:placeholder-gray-500; }
+  .label { @apply block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300; }
 
-  .card { @apply bg-white rounded-lg shadow-sm border border-gray-200; }
-  .card-header { @apply px-6 py-4 border-b border-gray-200 flex items-center justify-between; }
+  .card { @apply bg-white rounded-lg shadow-sm border border-gray-200 dark:bg-gray-900 dark:border-gray-700; }
+  .card-header { @apply px-6 py-4 border-b border-gray-200 flex items-center justify-between dark:border-gray-700; }
   .card-body { @apply px-6 py-4; }
 
-  .table { @apply w-full divide-y divide-gray-200; }
-  .table thead th { @apply px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide bg-gray-50; }
-  .table tbody td { @apply px-4 py-3 text-sm text-gray-700; }
-  .table tbody tr:hover { @apply bg-gray-50; }
+  .table { @apply w-full divide-y divide-gray-200 dark:divide-gray-700; }
+  .table thead th { @apply px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide bg-gray-50 dark:bg-gray-800 dark:text-gray-300; }
+  .table tbody td { @apply px-4 py-3 text-sm text-gray-700 dark:text-gray-200; }
+  .table tbody tr:hover { @apply bg-gray-50 dark:bg-gray-800/70; }
 
   .badge { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
-  .badge-green  { @apply badge bg-green-100 text-green-800; }
-  .badge-red    { @apply badge bg-red-100 text-red-800; }
-  .badge-yellow { @apply badge bg-yellow-100 text-yellow-800; }
-  .badge-blue   { @apply badge bg-blue-100 text-blue-800; }
-  .badge-gray   { @apply badge bg-gray-100 text-gray-800; }
+  .badge-green  { @apply badge bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300; }
+  .badge-red    { @apply badge bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300; }
+  .badge-yellow { @apply badge bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300; }
+  .badge-blue   { @apply badge bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300; }
+  .badge-gray   { @apply badge bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200; }
+}
+
+/*
+ * Dark-mode compatibility layer
+ * --------------------------------
+ * Most screens predate the theme toggle and use light Tailwind utilities
+ * directly. These rules translate the shared light palette when `.dark` is on
+ * `<html>`, giving every routed menu a safe dark default without overriding a
+ * component that already declares an explicit `dark:*` variant.
+ */
+html.dark {
+  --dark-surface: #111827;
+  --dark-surface-subtle: #1f2937;
+  --dark-surface-raised: #273449;
+  --dark-border: #374151;
+  --dark-border-strong: #4b5563;
+  --dark-text: #f3f4f6;
+  --dark-text-muted: #d1d5db;
+  --dark-text-subtle: #9ca3af;
+  background-color: #030712;
+}
+
+html.dark body,
+html.dark #app {
+  min-height: 100%;
+  background-color: #030712;
+  color: var(--dark-text);
+}
+
+/* Neutral surfaces */
+html.dark [class~="bg-white"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-gray-50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-50"]:not([class*="dark:bg-"]) {
+  background-color: var(--dark-surface);
+}
+
+html.dark [class~="bg-gray-100"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-100"]:not([class*="dark:bg-"]) {
+  background-color: var(--dark-surface-subtle);
+}
+
+html.dark [class~="bg-gray-200"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-200"]:not([class*="dark:bg-"]) {
+  background-color: var(--dark-surface-raised);
+}
+
+html.dark [class~="bg-gray-50/40"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-gray-50/50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-gray-50/60"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-gray-50/80"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-50/50"]:not([class*="dark:bg-"]),
+html.dark [class~="bg-slate-50/60"]:not([class*="dark:bg-"]) {
+  background-color: rgb(31 41 55 / 0.72);
+}
+
+/* Neutral text */
+html.dark [class~="text-gray-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-800"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-900"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-800"]:not([class*="dark:text-"]) {
+  color: var(--dark-text);
+}
+
+html.dark [class~="text-gray-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-600"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-700"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-600"]:not([class*="dark:text-"]) {
+  color: var(--dark-text-muted);
+}
+
+html.dark [class~="text-gray-500"]:not([class*="dark:text-"]),
+html.dark [class~="text-gray-400"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-500"]:not([class*="dark:text-"]),
+html.dark [class~="text-slate-400"]:not([class*="dark:text-"]) {
+  color: var(--dark-text-subtle);
+}
+
+/* Neutral borders and table dividers */
+html.dark [class~="border-gray-50"]:not([class*="dark:border-"]),
+html.dark [class~="border-gray-100"]:not([class*="dark:border-"]),
+html.dark [class~="border-gray-200"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-50"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-100"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-200"]:not([class*="dark:border-"]) {
+  border-color: var(--dark-border);
+}
+
+html.dark [class~="border-gray-300"]:not([class*="dark:border-"]),
+html.dark [class~="border-slate-300"]:not([class*="dark:border-"]) {
+  border-color: var(--dark-border-strong);
+}
+
+html.dark [class~="divide-gray-100"]:not([class*="dark:divide-"]) > :not([hidden]) ~ :not([hidden]),
+html.dark [class~="divide-gray-200"]:not([class*="dark:divide-"]) > :not([hidden]) ~ :not([hidden]),
+html.dark [class~="divide-slate-100"]:not([class*="dark:divide-"]) > :not([hidden]) ~ :not([hidden]),
+html.dark [class~="divide-slate-200"]:not([class*="dark:divide-"]) > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--dark-border);
+}
+
+/* Form controls, including legacy forms that have no background utility. */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([class*="dark:bg-"]),
+html.dark select:not([class*="dark:bg-"]),
+html.dark textarea:not([class*="dark:bg-"]) {
+  background-color: var(--dark-surface-subtle);
+  border-color: var(--dark-border-strong);
+  color: var(--dark-text);
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #6b7280;
+}
+
+html.dark input:disabled,
+html.dark select:disabled,
+html.dark textarea:disabled {
+  color: var(--dark-text-subtle);
+  opacity: 0.75;
+}
+
+/* Hover states otherwise flash back to a light surface. */
+html.dark [class~="hover:bg-white"]:hover:not([class*="dark:hover:bg-"]),
+html.dark [class~="hover:bg-gray-50"]:hover:not([class*="dark:hover:bg-"]),
+html.dark [class~="hover:bg-slate-50"]:hover:not([class*="dark:hover:bg-"]) {
+  background-color: var(--dark-surface-subtle);
+}
+
+html.dark [class~="hover:bg-gray-100"]:hover:not([class*="dark:hover:bg-"]),
+html.dark [class~="hover:bg-gray-200"]:hover:not([class*="dark:hover:bg-"]),
+html.dark [class~="hover:bg-slate-100"]:hover:not([class*="dark:hover:bg-"]),
+html.dark [class~="hover:bg-slate-200"]:hover:not([class*="dark:hover:bg-"]) {
+  background-color: var(--dark-surface-raised);
+}
+
+html.dark :is([class~="hover:bg-primary-50"], [class~="hover:bg-primary-100"], [class~="hover:bg-primary-50/30"], [class~="hover:bg-primary-50/40"], [class~="hover:bg-primary-50/60"]):hover:not([class*="dark:hover:bg-"]) {
+  background-color: rgb(30 64 175 / 0.4);
+}
+
+/* Semantic pale backgrounds used by alerts, badges, and selected rows. */
+html.dark :is([class~="bg-primary-50"], [class~="bg-primary-100"], [class~="bg-primary-200"], [class~="bg-primary-50/30"], [class~="bg-primary-50/40"], [class~="bg-primary-50/60"], [class~="bg-primary-100/60"], [class~="bg-blue-50"], [class~="bg-blue-100"], [class~="bg-blue-200"], [class~="bg-sky-50"], [class~="bg-sky-100"], [class~="bg-cyan-50"], [class~="bg-cyan-100"]):not([class*="dark:bg-"]) {
+  background-color: rgb(30 64 175 / 0.28);
+}
+
+html.dark :is([class~="bg-indigo-50"], [class~="bg-indigo-100"], [class~="bg-indigo-200"], [class~="bg-violet-50"], [class~="bg-violet-100"], [class~="bg-purple-50"], [class~="bg-purple-100"], [class~="bg-purple-200"]):not([class*="dark:bg-"]) {
+  background-color: rgb(76 29 149 / 0.3);
+}
+
+html.dark :is([class~="bg-green-50"], [class~="bg-green-100"], [class~="bg-green-200"], [class~="bg-emerald-50"], [class~="bg-emerald-100"], [class~="bg-emerald-200"], [class~="bg-teal-50"], [class~="bg-teal-100"]):not([class*="dark:bg-"]) {
+  background-color: rgb(6 95 70 / 0.3);
+}
+
+html.dark :is([class~="bg-amber-50"], [class~="bg-amber-100"], [class~="bg-amber-200"], [class~="bg-yellow-50"], [class~="bg-yellow-100"], [class~="bg-yellow-200"], [class~="bg-orange-50"], [class~="bg-orange-100"]):not([class*="dark:bg-"]) {
+  background-color: rgb(146 64 14 / 0.3);
+}
+
+html.dark :is([class~="bg-red-50"], [class~="bg-red-100"], [class~="bg-red-200"], [class~="bg-rose-50"], [class~="bg-rose-100"], [class~="bg-rose-200"], [class~="bg-pink-50"], [class~="bg-pink-100"]):not([class*="dark:bg-"]) {
+  background-color: rgb(153 27 27 / 0.28);
+}
+
+/* Semantic text remains distinguishable on the dark surfaces above. */
+html.dark :is([class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"], [class~="text-primary-900"], [class~="text-blue-600"], [class~="text-blue-700"], [class~="text-blue-800"], [class~="text-blue-900"], [class~="text-sky-600"], [class~="text-sky-700"], [class~="text-cyan-600"], [class~="text-cyan-700"]):not([class*="dark:text-"]) {
+  color: #93c5fd;
+}
+
+html.dark :is([class~="text-indigo-600"], [class~="text-indigo-700"], [class~="text-indigo-800"], [class~="text-indigo-900"], [class~="text-violet-600"], [class~="text-violet-700"], [class~="text-purple-600"], [class~="text-purple-700"], [class~="text-purple-800"], [class~="text-purple-900"]):not([class*="dark:text-"]) {
+  color: #c4b5fd;
+}
+
+html.dark :is([class~="text-green-600"], [class~="text-green-700"], [class~="text-green-800"], [class~="text-green-900"], [class~="text-emerald-600"], [class~="text-emerald-700"], [class~="text-emerald-800"], [class~="text-emerald-900"], [class~="text-teal-600"], [class~="text-teal-700"]):not([class*="dark:text-"]) {
+  color: #6ee7b7;
+}
+
+html.dark :is([class~="text-amber-600"], [class~="text-amber-700"], [class~="text-amber-800"], [class~="text-amber-900"], [class~="text-yellow-600"], [class~="text-yellow-700"], [class~="text-yellow-800"], [class~="text-orange-600"], [class~="text-orange-700"], [class~="text-orange-800"]):not([class*="dark:text-"]) {
+  color: #fcd34d;
+}
+
+html.dark :is([class~="text-red-600"], [class~="text-red-700"], [class~="text-red-800"], [class~="text-red-900"], [class~="text-rose-600"], [class~="text-rose-700"], [class~="text-rose-800"], [class~="text-rose-900"], [class~="text-pink-600"], [class~="text-pink-700"]):not([class*="dark:text-"]) {
+  color: #fda4af;
+}
+
+/* Borders for status panels and validation messages. */
+html.dark :is([class~="border-primary-50"], [class~="border-primary-100"], [class~="border-primary-200"], [class~="border-primary-300"], [class~="border-blue-100"], [class~="border-blue-200"], [class~="border-blue-300"], [class~="border-indigo-100"], [class~="border-indigo-200"], [class~="border-purple-100"], [class~="border-purple-200"]):not([class*="dark:border-"]) {
+  border-color: rgb(96 165 250 / 0.55);
+}
+
+html.dark :is([class~="border-green-100"], [class~="border-green-200"], [class~="border-green-300"], [class~="border-emerald-100"], [class~="border-emerald-200"], [class~="border-emerald-300"]):not([class*="dark:border-"]) {
+  border-color: rgb(52 211 153 / 0.5);
+}
+
+html.dark :is([class~="border-amber-100"], [class~="border-amber-200"], [class~="border-amber-300"], [class~="border-yellow-100"], [class~="border-yellow-200"], [class~="border-orange-100"], [class~="border-orange-200"]):not([class*="dark:border-"]) {
+  border-color: rgb(251 191 36 / 0.5);
+}
+
+html.dark :is([class~="border-red-100"], [class~="border-red-200"], [class~="border-red-300"], [class~="border-rose-100"], [class~="border-rose-200"], [class~="border-rose-300"]):not([class*="dark:border-"]) {
+  border-color: rgb(251 113 133 / 0.5);
+}
+
+/* Keep native autofill legible after a saved credential is inserted. */
+html.dark input:-webkit-autofill,
+html.dark input:-webkit-autofill:hover,
+html.dark input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--dark-text);
+  box-shadow: 0 0 0 1000px var(--dark-surface-subtle) inset;
 }

@@ -13,10 +13,9 @@ import { ref, watch } from 'vue'
  *   - matchMedia('(prefers-color-scheme: dark)') untuk auto mode
  *   - graceful fallback ke 'light' saat di SSR / browser tua
  *
- * Catatan implementasi: dark mode butuh Tailwind utility `dark:*` di setiap
- * komponen. Sprint 5-6 hanya menyediakan toggle infrastruktur. Pages individual
- * akan dimigrasi inkremental — start dari Login & Dashboard yang paling sering
- * dilihat user.
+ * Tema diinisialisasi dari main.js agar route guest/public ikut mendapatkan
+ * preferensi user. assets/main.css menyediakan fallback untuk halaman legacy,
+ * sementara utility `dark:*` eksplisit tetap diprioritaskan.
  *
  * Sprint 5-6 item S.
  */
@@ -59,8 +58,13 @@ function applyToHtml(eff) {
   const html = document.documentElement
   if (eff === 'dark') html.classList.add('dark')
   else html.classList.remove('dark')
+  html.dataset.theme = eff
   // Beri tahu browser supaya scrollbar / form control native ikutan
   html.style.colorScheme = eff
+
+  // Keep the browser chrome/PWA status bar in sync with the active surface.
+  const themeMeta = document.querySelector('meta[name="theme-color"]')
+  if (themeMeta) themeMeta.setAttribute('content', eff === 'dark' ? '#111827' : '#2563eb')
 }
 
 function init() {
@@ -100,9 +104,9 @@ function setMode(m) {
   mode.value = m
 }
 
-/** Toggle cycle: light → dark → auto → light. */
+/** Toggle cycle: auto (OS/desktop) → dark → light → auto. */
 function toggle() {
-  const next = mode.value === 'light' ? 'dark' : (mode.value === 'dark' ? 'auto' : 'light')
+  const next = mode.value === 'auto' ? 'dark' : (mode.value === 'dark' ? 'light' : 'auto')
   setMode(next)
 }
 

@@ -586,11 +586,11 @@ onMounted(() => {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="label">Mulai</label>
-              <input type="date" v-model="createForm.starts_at" class="input" />
+              <AppDatePicker  v-model="createForm.starts_at" class="input" />
             </div>
             <div>
               <label class="label">Berakhir</label>
-              <input type="date" v-model="createForm.ends_at" class="input" />
+              <AppDatePicker  v-model="createForm.ends_at" class="input" />
             </div>
           </div>
           <p class="text-xs text-gray-500">

@@ -12,7 +12,15 @@ final class PrivilegedActionApprovalService
     public function __construct(private readonly ?BaseConnection $connection=null, ?callable $approvalStarter=null) { $this->approvalStarter=$approvalStarter; }
 
     /** @return array{state:string,request:array<string,mixed>,approval?:array<string,mixed>} */
-    public function authorizeOrSubmit(int $companyId, int $userId, string $group, string $method, string $path, string $requestHash): array
+    public function authorizeOrSubmit(
+        int $companyId,
+        int $userId,
+        string $group,
+        string $method,
+        string $path,
+        string $requestHash,
+        ?string $requestPayload = null
+    ): array
     {
         $db=$this->db(); $existing=$db->table('privileged_action_requests')->where('company_id',$companyId)->where('submitted_by',$userId)->where('request_hash',$requestHash)->where('deleted_at IS NULL')->orderBy('id','DESC')->get()->getRowArray();
         if ($existing && $existing['status']==='APPROVED' && empty($existing['used_at']) && !empty($existing['expires_at']) && $existing['expires_at'] >= date('Y-m-d H:i:s')) {
@@ -28,7 +36,28 @@ final class PrivilegedActionApprovalService
         if($employeeId<=0) throw new \RuntimeException('Tenant target belum memiliki employee aktif sebagai subject approval');
         $now=date('Y-m-d H:i:s'); $db->transBegin();
         try {
-            $db->table('privileged_action_requests')->insert(['company_id'=>$companyId,'request_number'=>'PAR-'.date('YmdHis').'-'.strtoupper(substr(hash('sha256',$requestHash.'|'.microtime(true)),0,8)),'action_group'=>$group,'http_method'=>$method,'request_path'=>$path,'request_hash'=>$requestHash,'status'=>'PENDING_APPROVAL','submitted_by'=>$userId,'submitted_at'=>$now,'created_at'=>$now,'updated_at'=>$now]);
+            $insert = [
+                'company_id' => $companyId,
+                'request_number' => 'PAR-' . date('YmdHis') . '-' . strtoupper(substr(hash('sha256', $requestHash . '|' . microtime(true)), 0, 8)),
+                'action_group' => $group,
+                'http_method' => $method,
+                'request_path' => $path,
+                'request_hash' => $requestHash,
+                'status' => 'PENDING_APPROVAL',
+                'submitted_by' => $userId,
+                'submitted_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+            if ($group === 'RBAC'
+                && $requestPayload !== null
+                && $db->fieldExists('request_payload', 'privileged_action_requests')
+            ) {
+                // Payload RBAC hanya berisi metadata role + permission ID.
+                // Batasi ukuran sebagai defense-in-depth terhadap body abnormal.
+                $insert['request_payload'] = mb_substr($requestPayload, 0, 262144);
+            }
+            $db->table('privileged_action_requests')->insert($insert);
             $id=(int)$db->insertID(); $params=['company_id'=>$companyId,'module'=>'PRIVILEGED_ACTION','entity_table'=>'privileged_action_requests','entity_id'=>$id,'employee_id'=>$employeeId,'meta'=>['submitted_by'=>$userId,'action_group'=>$group,'http_method'=>$method,'request_path'=>$path,'request_hash'=>$requestHash,'is_rbac'=>$group==='RBAC'?1:0,'is_pii_export'=>$group==='PII_EXPORT'?1:0,'is_integration_secret'=>$group==='INTEGRATION'?1:0]];
             $approval=$this->approvalStarter?($this->approvalStarter)($params):Services::approval()->start($params);
             if(!$db->transStatus()) throw new \RuntimeException('Gagal membuat approval privileged action'); $db->transCommit();

@@ -373,7 +373,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
               <option v-for="c in CONDITIONS" :key="c" :value="c">{{ c }}</option>
             </select>
           </div>
-          <div><label class="label">Tgl Pembelian</label><input type="date" v-model="editing.purchase_date" class="input" /></div>
+          <div><label class="label">Tgl Pembelian</label><AppDatePicker  v-model="editing.purchase_date" class="input" /></div>
           <div><label class="label">Harga Beli</label><input type="number" v-model="editing.purchase_price" class="input" /></div>
           <div class="md:col-span-2">
             <label class="label">Catatan</label>
@@ -411,7 +411,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </div>
           <div>
             <label class="label">Diharapkan kembali (opsional)</label>
-            <input type="date" v-model="formAssign.expected_return" class="input" />
+            <AppDatePicker  v-model="formAssign.expected_return" class="input" />
           </div>
           <div>
             <label class="label">Tujuan / catatan</label>
@@ -469,7 +469,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
         <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label class="label">Tanggal retirement *</label>
-            <input v-model="formRetire.retirement_date" type="date" class="input" />
+            <AppDatePicker v-model="formRetire.retirement_date"  class="input" />
           </div>
           <div>
             <label class="label">Metode disposal *</label>

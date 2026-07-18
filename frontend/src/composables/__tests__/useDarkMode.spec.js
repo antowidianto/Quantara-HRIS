@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  *   - Mode default 'auto' dan resolve ke 'light'/'dark' sesuai OS preference
  *   - `setMode()` valid mode di-persist ke localStorage
  *   - Mode invalid di-ignore (defensive)
- *   - `toggle()` cycle: light → dark → auto → light
+ *   - `toggle()` cycle: auto → dark → light → auto
  *   - `<html>` mendapat class 'dark' / colorScheme yang benar
  *
  * Catatan: composable pakai module-level state (singleton). Untuk
@@ -36,6 +36,7 @@ describe('useDarkMode', () => {
 
     // Reset html state
     document.documentElement.classList.remove('dark')
+    delete document.documentElement.dataset.theme
     document.documentElement.style.colorScheme = ''
   })
 
@@ -66,6 +67,7 @@ describe('useDarkMode', () => {
     expect(mode.value).toBe('auto')
     expect(effective.value).toBe('light')
     expect(document.documentElement.classList.contains('dark')).toBe(false)
+    expect(document.documentElement.dataset.theme).toBe('light')
     expect(document.documentElement.style.colorScheme).toBe('light')
   })
 
@@ -77,6 +79,7 @@ describe('useDarkMode', () => {
     expect(mode.value).toBe('auto')
     expect(effective.value).toBe('dark')
     expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(document.documentElement.dataset.theme).toBe('dark')
     expect(document.documentElement.style.colorScheme).toBe('dark')
   })
 
@@ -128,15 +131,12 @@ describe('useDarkMode', () => {
     expect(mode.value).toBe(before)
   })
 
-  it('toggle cycles light → dark → auto → light', async () => {
+  it('toggle cycles auto → dark → light → auto', async () => {
     stubMatchMedia(false)
     const { useDarkMode } = await import('../useDarkMode')
-    const { mode, setMode, toggle } = useDarkMode()
+    const { mode, toggle } = useDarkMode()
 
-    // Mulai dari light supaya cycle deterministik
-    setMode('light')
-    await Promise.resolve()
-    expect(mode.value).toBe('light')
+    expect(mode.value).toBe('auto')
 
     toggle()
     await Promise.resolve()
@@ -144,11 +144,11 @@ describe('useDarkMode', () => {
 
     toggle()
     await Promise.resolve()
-    expect(mode.value).toBe('auto')
+    expect(mode.value).toBe('light')
 
     toggle()
     await Promise.resolve()
-    expect(mode.value).toBe('light')
+    expect(mode.value).toBe('auto')
   })
 
   it('switching to light forces light even when OS prefers dark', async () => {

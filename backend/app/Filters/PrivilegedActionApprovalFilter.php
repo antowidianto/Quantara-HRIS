@@ -18,7 +18,41 @@ final class PrivilegedActionApprovalFilter implements FilterInterface
         if($companyId<=0)return $this->fail('Company target wajib untuk privileged action',422);
         $method=strtoupper($request->getMethod());$path='/'.ltrim((string)$request->getUri()->getPath(),'/');$query=(string)$request->getUri()->getQuery();$body=(string)$request->getBody();
         $hash=hash('sha256',$companyId.'|'.$tenant->getUserId().'|'.$group.'|'.$method.'|'.$path.'|'.$query.'|'.$body);
-        try{$result=(new PrivilegedActionApprovalService())->authorizeOrSubmit($companyId,(int)$tenant->getUserId(),$group,$method,$path,$hash);}
+        // Simpan snapshot before + proposed hanya untuk RBAC agar checker
+        // melihat diff historis yang tetap akurat setelah perubahan diterapkan.
+        // Group lain dapat membawa secret/PII dan tidak dipersist mentah.
+        $payload = null;
+        if ($group === 'RBAC') {
+            $proposed = json_decode($body, true);
+            $before = null;
+            if (is_array($proposed) && preg_match('#/roles/(\d+)$#', $path, $matches)) {
+                $roleId = (int) $matches[1];
+                $db = \Config\Database::connect();
+                $role = $db->table('roles')
+                    ->select('id, slug, name, description')
+                    ->where('id', $roleId)
+                    ->get()->getRowArray();
+                if ($role) {
+                    $role['permissions'] = array_map(
+                        'intval',
+                        array_column(
+                            $db->table('role_permissions')
+                                ->select('permission_id')
+                                ->where('role_id', $roleId)
+                                ->get()->getResultArray(),
+                            'permission_id'
+                        )
+                    );
+                    $before = $role;
+                }
+            }
+            $payload = json_encode([
+                'schema_version' => 1,
+                'before' => $before,
+                'proposed' => is_array($proposed) ? $proposed : [],
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+        try{$result=(new PrivilegedActionApprovalService())->authorizeOrSubmit($companyId,(int)$tenant->getUserId(),$group,$method,$path,$hash,$payload);}
         catch(\Throwable $e){return $this->fail($e->getMessage(),409);}
         if($result['state']==='AUTHORIZED')return;
         return Services::response()->setStatusCode(202)->setJSON(['status'=>'success','message'=>'Aksi berisiko diajukan dan menunggu approval checker. Ulangi aksi yang sama setelah disetujui.','data'=>['approval_state'=>'PENDING','request_id'=>(int)$result['request']['id'],'request_number'=>$result['request']['request_number']]]);

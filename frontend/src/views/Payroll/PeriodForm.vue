@@ -127,10 +127,10 @@ async function submit() {
         </div>
         <div><label class="label">{{ t('payroll.period_form.year') }}</label><input v-model.number="form.period_year" type="number" class="input" required /></div>
         <div><label class="label">{{ t('payroll.period_form.month') }}</label><input v-model.number="form.period_month" type="number" min="1" max="12" class="input" required /></div>
-        <div><label class="label">{{ t('payroll.period_form.cutoff') }}</label><input v-model="form.cutoff_attendance_date" type="date" class="input" /></div>
-        <div><label class="label">{{ t('payroll.period_form.start_date') }}</label><input v-model="form.start_date" type="date" class="input" required /></div>
-        <div><label class="label">{{ t('payroll.period_form.end_date') }}</label><input v-model="form.end_date" type="date" class="input" required /></div>
-        <div class="md:col-span-2"><label class="label">{{ t('payroll.period_form.pay_date') }}</label><input v-model="form.pay_date" type="date" class="input" required /></div>
+        <div><label class="label">{{ t('payroll.period_form.cutoff') }}</label><AppDatePicker v-model="form.cutoff_attendance_date"  class="input" /></div>
+        <div><label class="label">{{ t('payroll.period_form.start_date') }}</label><AppDatePicker v-model="form.start_date"  class="input" required /></div>
+        <div><label class="label">{{ t('payroll.period_form.end_date') }}</label><AppDatePicker v-model="form.end_date"  class="input" required /></div>
+        <div class="md:col-span-2"><label class="label">{{ t('payroll.period_form.pay_date') }}</label><AppDatePicker v-model="form.pay_date"  class="input" required /></div>
       </div>
       <div class="card-body border-t flex justify-end gap-2">
         <button type="button" class="btn-secondary" @click="$router.back()">{{ t('payroll.period_form.cancel') }}</button>

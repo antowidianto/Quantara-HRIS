@@ -195,6 +195,18 @@ const changeTypeLabel = computed(() => ({
 
 // Ringkasan situasi hari yang dipilih untuk menentukan tombol-tombol apa
 // yang masuk akal ditawarkan (mis. ABSENT → tombol Sakit / Cuti).
+const requestHistoryRoute = computed(() => {
+  if (selectedDay.value?.change_request) {
+    return '/attendance/my-changes'
+  }
+
+  return '/leaves?scope=mine'
+})
+
+const requestHistoryIcon = computed(() =>
+  selectedDay.value?.change_request ? PencilSquareIcon : DocumentTextIcon
+)
+
 const dayContext = computed(() => {
   const d = selectedDay.value
   if (! d) return null
@@ -472,7 +484,7 @@ onMounted(fetchData)
               <strong>{{ t('attendance.my.reviewer_note') }}</strong> {{ selectedDay.leave.review_note }}
             </div>
             <div class="mt-2 text-right">
-              <RouterLink :to="`/leaves`" class="text-xs text-primary-600 hover:underline inline-flex items-center gap-1">
+              <RouterLink to="/leaves?scope=mine" class="text-xs text-primary-600 hover:underline inline-flex items-center gap-1">
                 {{ t('attendance.my.view_in_leaves') }} <ArrowTopRightOnSquareIcon class="w-3 h-3" />
               </RouterLink>
             </div>
@@ -569,9 +581,10 @@ onMounted(fetchData)
               {{ t('attendance.my.leave_approved') }}
             </div>
 
-            <RouterLink to="/attendance/my-changes"
+            <RouterLink :to="requestHistoryRoute"
               class="btn-secondary w-full justify-center mt-2">
-              <DocumentTextIcon class="w-4 h-4" /> {{ t('attendance.my.my_requests') }}
+              <component :is="requestHistoryIcon" class="w-4 h-4" />
+              {{ t('attendance.my.my_requests') }}
             </RouterLink>
           </div>
         </div>

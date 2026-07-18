@@ -86,7 +86,7 @@
           </div>
           <div>
             <label class="block text-sm">Expires At (opsional)</label>
-            <input v-model="form.expires_at" type="date" class="w-full border rounded px-2 py-1" />
+            <AppDatePicker v-model="form.expires_at"  class="w-full border rounded px-2 py-1" />
           </div>
           <div class="flex justify-end gap-2 pt-2">
             <button type="button" class="px-3 py-1 text-sm" @click="showCreate = false">Batal</button>

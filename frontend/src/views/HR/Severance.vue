@@ -441,7 +441,7 @@ watch(() => [
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="label">Tanggal PHK *</label>
-                <input type="date" v-model="calcInput.termination_date" class="input" />
+                <AppDatePicker  v-model="calcInput.termination_date" class="input" />
               </div>
               <div>
                 <label class="label">Alasan PHK *</label>

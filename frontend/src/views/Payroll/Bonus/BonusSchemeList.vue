@@ -516,7 +516,7 @@ const formulaPlaceholder = computed(() => {
             </div>
             <div>
               <label class="label">Reference Date</label>
-              <input v-model="previewForm.reference_date" type="date" class="input" />
+              <AppDatePicker v-model="previewForm.reference_date"  class="input" />
             </div>
           </div>
           <button @click="runPreview" :disabled="previewLoading" class="btn-primary">

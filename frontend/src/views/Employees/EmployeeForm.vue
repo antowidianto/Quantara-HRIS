@@ -159,7 +159,7 @@ function employmentTypeLabel(type) {
           </div>
           <div>
             <label class="label">{{ t('employee_form.birth_date') }}</label>
-            <input v-model="form.date_of_birth" type="date" class="input" />
+            <AppDatePicker v-model="form.date_of_birth"  class="input" />
           </div>
           <div>
             <label class="label">{{ t('employee_form.nik') }}</label>
@@ -255,15 +255,15 @@ function employmentTypeLabel(type) {
           </div>
           <div>
             <label class="label">{{ t('employee_form.join_date') }}</label>
-            <input v-model="form.join_date" type="date" class="input" required />
+            <AppDatePicker v-model="form.join_date"  class="input" required />
           </div>
           <div>
             <label class="label">{{ t('employee_form.probation_end') }}</label>
-            <input v-model="form.probation_end_date" type="date" class="input" />
+            <AppDatePicker v-model="form.probation_end_date"  class="input" />
           </div>
           <div>
             <label class="label">{{ t('employee_form.contract_end') }}</label>
-            <input v-model="form.contract_end_date" type="date" class="input" />
+            <AppDatePicker v-model="form.contract_end_date"  class="input" />
           </div>
         </div>
       </div>

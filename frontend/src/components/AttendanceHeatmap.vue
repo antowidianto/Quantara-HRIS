@@ -25,13 +25,12 @@
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <input
-          type="month"
-          :value="month"
+        <AppDatePicker mode="month"
+          v-model="month"
           @change="onMonthChange"
           class="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1
                  bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-        >
+         />
       </div>
     </div>
 
@@ -152,8 +151,7 @@ async function load() {
   }
 }
 
-function onMonthChange(e) {
-  month.value = e.target.value
+function onMonthChange() {
   load()
 }
 

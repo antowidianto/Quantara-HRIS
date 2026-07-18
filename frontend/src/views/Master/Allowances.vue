@@ -536,8 +536,8 @@ async function recomputeAll() {
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="label">{{ t('master.allowances.f_effective_from') }}</label><input v-model="rateForm.effective_from" type="date" class="input" /></div>
-            <div><label class="label">{{ t('master.allowances.f_effective_to') }}</label><input v-model="rateForm.effective_to" type="date" class="input" /></div>
+            <div><label class="label">{{ t('master.allowances.f_effective_from') }}</label><AppDatePicker v-model="rateForm.effective_from"  class="input" /></div>
+            <div><label class="label">{{ t('master.allowances.f_effective_to') }}</label><AppDatePicker v-model="rateForm.effective_to"  class="input" /></div>
           </div>
           <div><label class="label">{{ t('master.allowances.f_notes') }}</label><textarea v-model="rateForm.notes" class="input" rows="2"></textarea></div>
           <div class="flex justify-end gap-2 pt-2">

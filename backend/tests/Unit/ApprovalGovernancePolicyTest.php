@@ -90,14 +90,87 @@ final class ApprovalGovernancePolicyTest extends TestCase
         $this->assertStringNotContainsString('leaveWorkflow()->reject(', $source);
     }
 
+    public function testOvertimePlanUsesStableIdAndSupportsMultiStatusListing(): void
+    {
+        $source = file_get_contents(APPPATH . 'Controllers/Api/V1/Attendance/OvertimeController.php');
+        $migration = file_get_contents(APPPATH . 'Database/Migrations/2024-01-01-000004_CreateLeaveOvertimeTables.php');
+
+        $this->assertIsString($source);
+        $this->assertIsString($migration);
+        $this->assertStringContainsString("explode(',', \$status)", $source);
+        $this->assertStringContainsString("->whereIn('o.status', \$statuses)", $source);
+        $this->assertStringContainsString("\$responseBody['data']['id']", $source);
+        $this->assertStringNotContainsString('$newId = (int) $db->insertID();', $source);
+        $this->assertStringContainsString("'status'        => 'PLANNED'", $source);
+        $this->assertMatchesRegularExpression(
+            "/'start_time'\\s*=> \\['type' => 'VARCHAR', 'constraint' => 19\\]/",
+            $migration
+        );
+        $this->assertMatchesRegularExpression(
+            "/'end_time'\\s*=> \\['type' => 'VARCHAR', 'constraint' => 19\\]/",
+            $migration
+        );
+    }
+
+    public function testOvertimeDetailIncludesTenantScopedApprovalTimeline(): void
+    {
+        $source = file_get_contents(APPPATH . 'Controllers/Api/V1/Attendance/OvertimeController.php');
+
+        $this->assertIsString($source);
+        $this->assertStringContainsString("\$db->table('approval_requests ar')", $source);
+        $this->assertStringContainsString("->where('ar.company_id', \$companyId)", $source);
+        $this->assertStringContainsString("->where('ar.module', 'OVERTIME')", $source);
+        $this->assertStringContainsString("->where('ar.entity_table', 'overtimes')", $source);
+        $this->assertStringContainsString("->where('ar.entity_id', (int) \$id)", $source);
+        $this->assertStringContainsString("\$db->table('approval_decisions ad')", $source);
+        $this->assertStringContainsString("->where('ad.company_id', \$companyId)", $source);
+        $this->assertStringContainsString("\$approval['workflow_snapshot']", $source);
+        $this->assertStringContainsString("\$snapshot['steps']", $source);
+        $this->assertStringContainsString("'condition_matched'", $source);
+        $this->assertStringContainsString("'expected_approver_user_ids'", $source);
+        $this->assertStringContainsString("'WAITING_APPROVAL'", $source);
+        $this->assertStringContainsString("\$approval['timeline'] = \$timeline;", $source);
+        $this->assertStringContainsString("\$row['approval'] = \$approval;", $source);
+    }
+
     public function testOvertimePublicEndpointsUseApprovalEngine(): void
     {
         $source = file_get_contents(APPPATH . 'Controllers/Api/V1/Attendance/OvertimeController.php');
         $this->assertIsString($source);
         $this->assertStringContainsString("public function approve", $source);
-        $this->assertStringContainsString("approveEntity(\n                'OVERTIME'", $source);
+        $this->assertMatchesRegularExpression("/approveEntity\\(\\s*'OVERTIME'/", $source);
         $this->assertStringContainsString("public function reject", $source);
-        $this->assertStringContainsString("rejectEntity(\n                'OVERTIME'", $source);
+        $this->assertMatchesRegularExpression("/rejectEntity\\(\\s*'OVERTIME'/", $source);
+    }
+
+    public function testAttendanceChangeDetailIncludesTenantScopedApprovalTimeline(): void
+    {
+        $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Attendance/AttendanceChangeRequestController.php');
+        $timeline = file_get_contents(APPPATH . 'Libraries/Approval/ApprovalTimelineService.php');
+
+        $this->assertIsString($controller);
+        $this->assertIsString($timeline);
+        $this->assertStringContainsString("->where('cr.company_id', \$companyId)", $controller);
+        $this->assertStringContainsString('new ApprovalTimelineService()', $controller);
+        $this->assertStringContainsString("'ATTENDANCE_CHANGE'", $controller);
+        $this->assertStringContainsString("'attendance_change_requests'", $controller);
+        $this->assertStringContainsString("\$snapshot['steps']", $timeline);
+        $this->assertStringContainsString("'expected_approver_user_ids'", $timeline);
+        $this->assertStringContainsString("'WAITING_APPROVAL'", $timeline);
+        $this->assertStringContainsString("\$approval['timeline'] = \$timeline;", $timeline);
+    }
+
+    public function testAttendanceCalendarRoutesRequestHistoryByRequestType(): void
+    {
+        $source = file_get_contents(dirname(ROOTPATH) . '/frontend/src/views/Attendance/MyAttendance.vue');
+
+        $this->assertIsString($source);
+        $this->assertStringContainsString('const requestHistoryRoute = computed(', $source);
+        $this->assertStringContainsString('selectedDay.value?.change_request', $source);
+        $this->assertStringContainsString("return '/attendance/my-changes'", $source);
+        $this->assertStringContainsString("return '/leaves?scope=mine'", $source);
+        $this->assertStringContainsString(':to="requestHistoryRoute"', $source);
+        $this->assertStringNotContainsString('<RouterLink to="/leaves"', $source);
     }
 
     public function testAttendanceChangeUsesApprovalEngineAndStartsWorkflow(): void

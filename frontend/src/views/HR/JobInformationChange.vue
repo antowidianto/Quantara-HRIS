@@ -468,11 +468,11 @@ function canConsentFor(row) {
       </div>
       <div>
         <label class="label">Efektif dari</label>
-        <input type="date" v-model="filters.effective_from" class="input" />
+        <AppDatePicker  v-model="filters.effective_from" class="input" />
       </div>
       <div>
         <label class="label">s/d</label>
-        <input type="date" v-model="filters.effective_to" class="input" />
+        <AppDatePicker  v-model="filters.effective_to" class="input" />
       </div>
       <div v-if="canViewAll">
         <label class="label">Tampilkan</label>
@@ -615,7 +615,7 @@ function canConsentFor(row) {
           </div>
           <div>
             <label class="label">Tanggal Efektif <span class="text-red-500">*</span></label>
-            <input type="date" v-model="editing.effective_date" class="input" />
+            <AppDatePicker  v-model="editing.effective_date" class="input" />
           </div>
 
           <div class="md:col-span-2">

@@ -821,7 +821,7 @@ function lifecycleTaskTypeLabel(type) {
                   </div>
                   <div class="field">
                     <label class="label">{{ t('employee_modal.birth_date') }}</label>
-                    <input v-if="isEditing" v-model="form.date_of_birth" type="date" class="input" />
+                    <AppDatePicker v-if="isEditing" v-model="form.date_of_birth"  class="input" />
                     <div v-else class="value">{{ employee?.date_of_birth ? fmtDate(employee.date_of_birth) : '—' }}</div>
                   </div>
                   <div class="field">
@@ -1135,12 +1135,12 @@ function lifecycleTaskTypeLabel(type) {
                   </div>
                   <div class="field">
                     <label class="label">{{ t('employee_modal.join_date') }}</label>
-                    <input v-if="isEditing" v-model="form.join_date" type="date" class="input" required />
+                    <AppDatePicker v-if="isEditing" v-model="form.join_date"  class="input" required />
                     <div v-else class="value">{{ employee?.join_date ? fmtDate(employee.join_date) : '—' }}</div>
                   </div>
                   <div class="field">
                     <label class="label">{{ t('employee_modal.probation_end') }}</label>
-                    <input v-if="isEditing" v-model="form.probation_end_date" type="date" class="input" />
+                    <AppDatePicker v-if="isEditing" v-model="form.probation_end_date"  class="input" />
                     <div v-else>
                       <div class="value">{{ employee?.probation_end_date ? fmtDate(employee.probation_end_date) : '—' }}</div>
                       <!-- Sprint 2 / HIRE-1: probation status badge & quick link -->
@@ -1165,7 +1165,7 @@ function lifecycleTaskTypeLabel(type) {
                   </div>
                   <div class="field">
                     <label class="label">{{ t('employee_modal.contract_end') }}</label>
-                    <input v-if="isEditing" v-model="form.contract_end_date" type="date" class="input" />
+                    <AppDatePicker v-if="isEditing" v-model="form.contract_end_date"  class="input" />
                     <div v-else class="value">{{ employee?.contract_end_date ? fmtDate(employee.contract_end_date) : '—' }}</div>
                   </div>
                 </div>

@@ -265,11 +265,11 @@ onMounted(initializeFromNotification)
         </div>
         <div>
           <label class="label">{{ t('attendance.wfh.filter_from') }}</label>
-          <input type="date" v-model="filters.from" class="input" @change="fetchList" />
+          <AppDatePicker  v-model="filters.from" class="input" @change="fetchList" />
         </div>
         <div>
           <label class="label">{{ t('attendance.wfh.filter_to') }}</label>
-          <input type="date" v-model="filters.to" class="input" @change="fetchList" />
+          <AppDatePicker  v-model="filters.to" class="input" @change="fetchList" />
         </div>
       </div>
     </div>
@@ -351,7 +351,7 @@ onMounted(initializeFromNotification)
         <div class="p-5 space-y-3">
           <div>
             <label class="label">{{ t('attendance.wfh.form_date') }} <span class="text-red-500">*</span></label>
-            <input type="date" v-model="form.work_date" class="input" :min="today" :max="maxDate" />
+            <AppDatePicker  v-model="form.work_date" class="input" :min="today" :max="maxDate" />
             <p class="text-xs text-gray-500 mt-1">
               <ClockIcon class="w-3 h-3 inline" />
               {{ t('attendance.wfh.form_date_hint') }}

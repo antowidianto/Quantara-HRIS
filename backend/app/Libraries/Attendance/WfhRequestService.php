@@ -125,7 +125,7 @@ class WfhRequestService
                         substr($reason, 0, 120),
                     ),
                     ['wfh_request_id' => $id, 'employee_id' => $employeeId],
-                    '/attendance/wfh?scope=inbox&request_id=' . $id, true
+                    '/approvals/inbox?wfh_request_id=' . $id, true
                 );
             } catch (\Throwable $e) { /* skip */ }
         }

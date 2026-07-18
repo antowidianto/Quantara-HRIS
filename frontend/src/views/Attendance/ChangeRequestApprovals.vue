@@ -134,8 +134,8 @@ onMounted(async () => {
             :placeholder="t('attendance.approvals.all_branches')"
           />
         </div>
-        <input v-model="filters.start_date" type="date" class="input w-40" />
-        <input v-model="filters.end_date" type="date" class="input w-40" />
+        <AppDatePicker v-model="filters.start_date"  class="input w-40" />
+        <AppDatePicker v-model="filters.end_date"  class="input w-40" />
         <div class="w-56">
           <EmployeeSearchSelect
             v-model="filters.employee_id"

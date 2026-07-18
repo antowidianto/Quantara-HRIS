@@ -94,18 +94,18 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Mulai *</label>
-              <input v-model="form.start_date" type="date" required
+              <AppDatePicker v-model="form.start_date"  required
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Selesai *</label>
-              <input v-model="form.end_date" type="date" required
+              <AppDatePicker v-model="form.end_date"  required
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
             </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Deadline Set Goal</label>
-            <input v-model="form.goal_setting_deadline" type="date"
+            <AppDatePicker v-model="form.goal_setting_deadline"
               :max="form.end_date || undefined"
               class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
             <p class="text-xs text-gray-500 mt-1">Opsional. Tidak boleh setelah tanggal selesai cycle.</p>
@@ -113,13 +113,13 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Periode Review (Mulai)</label>
-              <input v-model="form.review_start_date" type="date"
+              <AppDatePicker v-model="form.review_start_date"
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
               <p class="text-xs text-gray-500 mt-1">Opsional.</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Periode Review (Selesai)</label>
-              <input v-model="form.review_end_date" type="date"
+              <AppDatePicker v-model="form.review_end_date"
                 :min="form.review_start_date || undefined"
                 class="w-full px-3 py-2 rounded border border-gray-300 focus:ring-1 focus:ring-primary-500 focus:border-primary-500" />
               <p class="text-xs text-gray-500 mt-1">Opsional. Harus >= tanggal mulai review.</p>
@@ -242,7 +242,7 @@ function openCreate() {
 }
 
 /**
- * Kirim payload bersih ke backend. HTML <input type="date"> yang
+ * Kirim payload bersih ke backend. AppDatePicker yang
  * dikosongkan akan jadi string '' — MySQL DATE column tidak terima itu
  * untuk kolom nullable, jadi kita ubah '' menjadi null sebelum submit.
  * Backend juga punya guard yang sama sebagai safety net.

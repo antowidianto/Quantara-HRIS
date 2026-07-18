@@ -28,7 +28,7 @@ import AnnouncementsModal from '@/components/AnnouncementsModal.vue'
 import { useDarkMode } from '@/composables/useDarkMode'
 import { useI18n } from '@/locales'
 
-// Sprint 5-6 item S — toggle dark mode di topbar.
+// Satu tombol dengan siklus: desktop/OS → malam → siang.
 const { mode: darkMode, toggle: toggleDarkMode } = useDarkMode()
 
 // i18n — language switcher di topbar.
@@ -47,6 +47,35 @@ const companyMenuOpen = ref(false)
 const unreadCount = ref(0)
 const notifications = ref([])
 const isNotificationUnread = (notification) => Number(notification?.is_read) === 0
+
+const approvalNotificationTypes = new Set([
+  'approval.request',
+  'leave.requested',
+  'overtime.requested',
+  'attendance.change.requested',
+  'attendance.correction.requested',
+  'wfh.request',
+])
+
+function notificationLink(notification) {
+  const type = String(notification?.type || '')
+  if (! approvalNotificationTypes.has(type)) {
+    return notification?.link_url || '/notifications'
+  }
+
+  let data = notification?.data || notification?.metadata || {}
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data) } catch (_) { data = {} }
+  }
+
+  const requestId = Number(data?.request_id || 0)
+  if (requestId > 0) return `/approvals/inbox?request_id=${requestId}`
+
+  const wfhRequestId = Number(data?.wfh_request_id || 0)
+  if (wfhRequestId > 0) return `/approvals/inbox?wfh_request_id=${wfhRequestId}`
+
+  return '/approvals/inbox'
+}
 
 // Tree dari MenuStore — sudah ter-filter sesuai permission user di backend.
 const menuTree = computed(() => menuStore.tree)
@@ -283,7 +312,7 @@ watch(() => auth.user?.id, (newId, oldId) => {
               </div>
               <div class="max-h-80 overflow-y-auto">
                 <div v-if="notifications.length === 0" class="px-4 py-6 text-center text-sm text-gray-500">{{ t('nav.no_notifications') }}</div>
-                <RouterLink v-for="n in notifications" :key="n.id" :to="n.link_url || '/notifications'"
+                <RouterLink v-for="n in notifications" :key="n.id" :to="notificationLink(n)"
                   class="block px-4 py-3 border-b border-gray-100 border-l-4 hover:bg-gray-50 last:border-b-0"
                   :class="isNotificationUnread(n) ? 'bg-blue-50/80 border-l-primary-500' : 'bg-white border-l-transparent'"
                   @click="markNotificationRead(n)">
@@ -323,16 +352,16 @@ watch(() => auth.user?.id, (newId, oldId) => {
             </div>
           </div>
 
-          <!-- Dark mode toggle (Sprint 5-6 item S) -->
+          <!-- Theme toggle: desktop/OS → malam → siang. -->
           <button
             @click="toggleDarkMode"
             class="p-2 rounded-md hover:bg-gray-100 text-gray-600"
             :title="`${t('theme.title')}: ${darkMode === 'auto' ? t('theme.auto') : (darkMode === 'dark' ? t('theme.dark') : t('theme.light'))}. ${t('theme.click_to_change')}.`"
-            aria-label="Toggle theme"
+            :aria-label="`${t('theme.title')}: ${darkMode === 'auto' ? t('theme.auto') : (darkMode === 'dark' ? t('theme.dark') : t('theme.light'))}`"
           >
-            <SunIcon v-if="darkMode === 'light'" class="w-5 h-5" />
+            <ComputerDesktopIcon v-if="darkMode === 'auto'" class="w-5 h-5" />
             <MoonIcon v-else-if="darkMode === 'dark'" class="w-5 h-5" />
-            <ComputerDesktopIcon v-else class="w-5 h-5" />
+            <SunIcon v-else class="w-5 h-5" />
           </button>
 
           <!-- User menu -->

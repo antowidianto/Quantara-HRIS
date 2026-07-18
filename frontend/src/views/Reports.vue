@@ -42,7 +42,7 @@ onMounted(loadAll)
     <div class="card mb-6">
       <div class="card-header gap-3">
         <span class="font-semibold">{{ t('reports.attendance_summary') }}</span>
-        <input v-model="month" type="month" class="input w-44" @change="loadAll" />
+        <AppDatePicker mode="month" v-model="month"  class="input w-44" @change="loadAll" />
       </div>
       <div class="overflow-x-auto">
         <table class="table">

@@ -65,26 +65,31 @@ class EmailSettingsController extends ApiController
         ];
 
         $hasPassword = ! empty($cfg['email.password_enc']);
+        $isDevelopment = $this->isDevelopment();
+        $effective = $this->applyDevelopmentMailpit([
+            'host'         => $cfg['email.host']         ?? $envFallback['host'],
+            'port'         => isset($cfg['email.port']) ? (int) $cfg['email.port'] : $envFallback['port'],
+            'username'     => $cfg['email.username']     ?? $envFallback['username'],
+            'encryption'   => $cfg['email.encryption']   ?? $envFallback['encryption'],
+            'from_address' => $cfg['email.from_address'] ?? $envFallback['from_address'],
+            'from_name'    => $cfg['email.from_name']    ?? $envFallback['from_name'],
+            'password'     => '',
+        ]);
 
         return $this->ok([
             'config' => [
-                'host'         => $cfg['email.host']         ?? $envFallback['host'],
-                'port'         => isset($cfg['email.port']) ? (int) $cfg['email.port'] : $envFallback['port'],
-                'username'     => $cfg['email.username']     ?? $envFallback['username'],
-                'encryption'   => $cfg['email.encryption']   ?? $envFallback['encryption'],
-                'from_address' => $cfg['email.from_address'] ?? $envFallback['from_address'],
-                'from_name'    => $cfg['email.from_name']    ?? $envFallback['from_name'],
+                ...$effective,
                 // Password TIDAK pernah dikembalikan plain text. Frontend
                 // pakai placeholder dan submit empty kalau tidak ganti.
-                'password'     => '',
                 'has_password' => $hasPassword,
+                'is_mailpit'   => $isDevelopment,
             ],
             'source' => [
-                // Setiap field: 'db' = override per-company, 'env' = fallback
-                'host'         => isset($cfg['email.host'])         ? 'db' : 'env',
-                'port'         => isset($cfg['email.port'])         ? 'db' : 'env',
-                'username'     => isset($cfg['email.username'])     ? 'db' : 'env',
-                'encryption'   => isset($cfg['email.encryption'])   ? 'db' : 'env',
+                // Development selalu dipaksa ke Mailpit; selain itu DB → ENV.
+                'host'         => $isDevelopment ? 'mailpit (development)' : (isset($cfg['email.host']) ? 'db' : 'env'),
+                'port'         => $isDevelopment ? 'mailpit (development)' : (isset($cfg['email.port']) ? 'db' : 'env'),
+                'username'     => $isDevelopment ? 'mailpit (development)' : (isset($cfg['email.username']) ? 'db' : 'env'),
+                'encryption'   => $isDevelopment ? 'mailpit (development)' : (isset($cfg['email.encryption']) ? 'db' : 'env'),
                 'from_address' => isset($cfg['email.from_address']) ? 'db' : 'env',
                 'from_name'    => isset($cfg['email.from_name'])    ? 'db' : 'env',
                 'password'     => $hasPassword ? 'db' : 'env',
@@ -289,7 +294,31 @@ class EmailSettingsController extends ApiController
                 }
             }
         }
+        return $this->applyDevelopmentMailpit($cfg);
+    }
+
+    /**
+     * Development safety net: semua email ditangkap Mailpit, termasuk jika
+     * tenant punya SMTP production tersimpan di DB.
+     */
+    private function applyDevelopmentMailpit(array $cfg): array
+    {
+        if (! $this->isDevelopment()) {
+            return $cfg;
+        }
+
+        $cfg['host'] = (string) env('mail.mailpitHost', 'localhost');
+        $cfg['port'] = (int) env('mail.mailpitPort', 1025);
+        $cfg['username'] = '';
+        $cfg['password'] = '';
+        $cfg['encryption'] = 'none';
+
         return $cfg;
+    }
+
+    private function isDevelopment(): bool
+    {
+        return strtolower((string) env('CI_ENVIRONMENT', ENVIRONMENT)) === 'development';
     }
 
     private function sendDirectly(array $cfg, string $to, string $subject, string $bodyHtml): void

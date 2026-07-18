@@ -311,6 +311,55 @@ class ApprovalEngine
         return $out;
     }
 
+    /**
+     * Daftar keputusan approval yang sudah diproses oleh user.
+     *
+     * Satu request dapat memiliki beberapa tahap. Hasil dibatasi pada keputusan
+     * APPROVED/REJECTED yang benar-benar dibuat oleh $userId, bukan seluruh
+     * request selesai yang kebetulan berada dalam tenant yang sama.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function processedForUser(int $userId, ?string $module = null, int $limit = 100): array
+    {
+        $db = \Config\Database::connect();
+        $builder = $db->table('approval_decisions ad')
+            ->select(
+                'ar.*, e.full_name AS employee_name, e.employee_number, c.name AS chain_name,'
+                . ' ad.decision AS my_decision, ad.note AS decision_note,'
+                . ' ad.decided_at AS decision_at, ad.step_order AS decided_step_order,'
+                . ' s.name AS step_name'
+            )
+            ->join('approval_requests ar', 'ar.id = ad.approval_request_id')
+            ->join('employees e', 'e.id = ar.employee_id', 'left')
+            ->join('approval_chains c', 'c.id = ar.chain_id', 'left')
+            ->join('approval_chain_steps s', 's.id = ad.chain_step_id', 'left')
+            ->where('ad.approver_user_id', $userId)
+            ->whereIn('ad.decision', ['APPROVED', 'REJECTED'])
+            ->orderBy('ad.decided_at', 'DESC')
+            ->orderBy('ad.id', 'DESC')
+            ->limit($limit);
+
+        $companyId = Services::tenant()->getCompanyId();
+        if ($companyId > 0) $builder->where('ar.company_id', $companyId);
+        if ($module) $builder->where('ar.module', $module);
+
+        $rows = $builder->get()->getResultArray();
+
+        // Defensive dedupe: legacy data dapat memuat lebih dari satu decision
+        // user yang sama pada request yang sama. Tampilkan keputusan terbaru.
+        $seen = [];
+        $out = [];
+        foreach ($rows as $row) {
+            $requestId = (int) $row['id'];
+            if (isset($seen[$requestId])) continue;
+            $seen[$requestId] = true;
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
     // ────────────────────────────────────────────────────────────────
     // Private
     // ────────────────────────────────────────────────────────────────
@@ -1055,21 +1104,10 @@ class ApprovalEngine
                 $title,
                 $msg,
                 ['request_id' => (int) $request['id'], 'module' => $request['module']],
-                $this->moduleLink($request['module'], (int) $request['entity_id']),
+                '/approvals/inbox?request_id=' . (int) $request['id'],
                 true
             );
         }
     }
 
-    private function moduleLink(string $module, int $entityId): string
-    {
-        return match ($module) {
-            'LEAVE' => "/leaves/{$entityId}",
-            'OVERTIME' => "/overtimes/{$entityId}",
-            'ATTENDANCE_CHANGE' => "/attendance/change-requests/approvals",
-            'REIMBURSEMENT' => "/reimbursements",
-            'LOAN' => "/loans",
-            default => "/notifications",
-        };
-    }
 }

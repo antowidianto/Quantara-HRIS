@@ -790,7 +790,7 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </div>
           <div>
             <label class="label">Target Mulai Bekerja</label>
-            <input type="date" v-model="editing.target_start_date" class="input" />
+            <AppDatePicker  v-model="editing.target_start_date" class="input" />
           </div>
 
           <div>
@@ -1183,11 +1183,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           </div>
           <div>
             <label class="label">Tgl Buka</label>
-            <input type="date" v-model="fulfillForm.opened_at" class="input" />
+            <AppDatePicker  v-model="fulfillForm.opened_at" class="input" />
           </div>
           <div>
             <label class="label">Tgl Tutup (Deadline)</label>
-            <input type="date" v-model="fulfillForm.closed_at" class="input" />
+            <AppDatePicker  v-model="fulfillForm.closed_at" class="input" />
           </div>
           <div>
             <label class="label">Salary Min (Rp)</label>

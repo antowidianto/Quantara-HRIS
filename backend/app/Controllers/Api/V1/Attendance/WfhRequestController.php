@@ -47,7 +47,7 @@ class WfhRequestController extends ApiController
 
     /**
      * GET /wfh-requests
-     * Query: scope=mine|inbox|all (default: mine)
+     * Query: scope=mine|inbox|processed|all (default: mine)
      *        status, month=YYYY-MM, employee_id (HR only)
      */
     public function index()
@@ -75,6 +75,10 @@ class WfhRequestController extends ApiController
             // Pending request yang harus saya approve sebagai supervisor
             $b->where('w.status', 'PENDING')
               ->where('e.supervisor_id IN (SELECT id FROM employees WHERE user_id = ' . (int) $this->userId() . ')', null, false);
+        } elseif ($scope === 'processed') {
+            // History keputusan yang benar-benar dibuat user saat ini.
+            $b->whereIn('w.status', ['APPROVED', 'REJECTED'])
+              ->where('w.approver_user_id', (int) $this->userId());
         } elseif ($scope === 'all') {
             // HR view — boleh kalau punya permission attendance.view atau super admin
             if (! $this->tenant()->isSuperAdmin()

@@ -487,7 +487,7 @@ onMounted(loadCompa)
           </div>
           <div>
             <label class="label">Effective Date</label>
-            <input type="date" v-model="benchForm.effective_date" class="input" />
+            <AppDatePicker  v-model="benchForm.effective_date" class="input" />
           </div>
         </div>
         <div class="px-5 py-3 border-t flex justify-end gap-2">

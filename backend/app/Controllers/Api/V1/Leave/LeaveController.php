@@ -231,8 +231,15 @@ class LeaveController extends ApiController
                     'leave.requested',
                     'Pengajuan cuti baru',
                     "{$employee['full_name']} mengajukan {$leaveType['name']} dari {$data['start_date']} sampai {$data['end_date']} ({$days} hari)",
-                    ['leave_id' => $id],
-                    '/leaves/' . $id,
+                    [
+                        'leave_id' => $id,
+                        'request_id' => isset($approval['request_id'])
+                            ? (int) $approval['request_id']
+                            : null,
+                    ],
+                    isset($approval['request_id'])
+                        ? '/approvals/inbox?request_id=' . (int) $approval['request_id']
+                        : '/leaves/' . $id,
                     true,
                 );
             }

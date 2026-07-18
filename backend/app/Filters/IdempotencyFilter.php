@@ -51,8 +51,17 @@ class IdempotencyFilter implements FilterInterface
     /** Methods yang reservasi key. */
     private const ELIGIBLE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
+    /**
+     * ID reservasi untuk request aktif. CI4 memakai instance filter yang sama
+     * pada pass `before` dan `after`.
+     */
+    private ?int $idempotencyKeyId = null;
+
     public function before(RequestInterface $request, $arguments = null)
     {
+        // Hindari state request sebelumnya terbawa pada long-running worker.
+        $this->idempotencyKeyId = null;
+
         $method = strtoupper($request->getMethod());
         if (! in_array($method, self::ELIGIBLE_METHODS, true)) {
             return; // GET/HEAD/OPTIONS — biarkan
@@ -166,14 +175,16 @@ class IdempotencyFilter implements FilterInterface
             return $this->conflict('Concurrent request with same Idempotency-Key');
         }
 
-        // Stash id ke request supaya `after` bisa update response
-        $request->idempotencyKeyId = $newId;
+        // Simpan pada filter; jangan membuat dynamic property pada request CI4.
+        $this->idempotencyKeyId = $newId;
     }
 
     public function after(RequestInterface $request, ResponseInterface $response, $arguments = null)
     {
-        $id = $request->idempotencyKeyId ?? null;
-        if (! $id) {
+        $id = $this->idempotencyKeyId;
+        $this->idempotencyKeyId = null;
+
+        if ($id === null) {
             return;
         }
         $model = new IdempotencyKeyModel();

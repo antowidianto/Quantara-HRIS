@@ -356,7 +356,7 @@ function urgencyClass(emp) {
 
           <div v-if="decisionForm.decision === 'EXTEND'">
             <label class="label">Perpanjang sampai *</label>
-            <input type="date" v-model="decisionForm.extend_to" class="input"
+            <AppDatePicker  v-model="decisionForm.extend_to" class="input"
               :min="showDecisionModal.probation_end_date" />
             <p class="text-xs text-gray-500 mt-1">
               Total probation (asli + extension) tetap max 3 bulan dari join_date

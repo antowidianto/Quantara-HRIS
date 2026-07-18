@@ -395,15 +395,15 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / filters.pe
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="label">Tanggal Kejadian *</label>
-              <input type="date" v-model="editing.incident_date" class="input" />
+              <AppDatePicker  v-model="editing.incident_date" class="input" />
             </div>
             <div>
               <label class="label">Berlaku Sejak *</label>
-              <input type="date" v-model="editing.effective_date" class="input" @change="onLevelChange" />
+              <AppDatePicker  v-model="editing.effective_date" class="input" @change="onLevelChange" />
             </div>
             <div>
               <label class="label">Berlaku Sampai</label>
-              <input type="date" v-model="editing.expires_at" class="input" />
+              <AppDatePicker  v-model="editing.expires_at" class="input" />
             </div>
           </div>
           <div>

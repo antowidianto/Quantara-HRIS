@@ -93,7 +93,7 @@ export default defineConfig(async ({ mode }) => {
             'vendor-axios':  ['axios'],
             'vendor-charts': ['chart.js', 'vue-chartjs'],
             'vendor-icons':  ['@heroicons/vue'],
-            'vendor-date':   ['dayjs'],
+            'vendor-date':   ['dayjs', 'primevue/calendar', 'primevue/config'],
             'vendor-util':   ['@vueuse/core', 'vue-toastification'],
           },
         },

@@ -117,11 +117,11 @@
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-sm">Issued On</label>
-              <input v-model="form.issued_on" type="date" class="w-full border rounded px-2 py-1" required />
+              <AppDatePicker v-model="form.issued_on"  class="w-full border rounded px-2 py-1" required />
             </div>
             <div>
               <label class="block text-sm">Expires On</label>
-              <input v-model="form.expires_on" type="date" class="w-full border rounded px-2 py-1" />
+              <AppDatePicker v-model="form.expires_on"  class="w-full border rounded px-2 py-1" />
               <p class="text-xs text-slate-500 mt-1">Kosong = lifetime</p>
             </div>
           </div>

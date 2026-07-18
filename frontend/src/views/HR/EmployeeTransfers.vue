@@ -554,7 +554,7 @@ function isChanged(oldVal, newVal) {
 
           <div>
             <label class="label">Tanggal Berlaku *</label>
-            <input v-model="editing.effective_date" type="date" class="input" />
+            <AppDatePicker v-model="editing.effective_date"  class="input" />
           </div>
           <div class="flex items-end">
             <label class="flex items-center gap-2 text-sm cursor-pointer">

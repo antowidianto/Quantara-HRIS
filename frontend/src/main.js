@@ -1,17 +1,29 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import Toast, { POSITION } from 'vue-toastification'
+import PrimeVue from 'primevue/config'
 import 'vue-toastification/dist/index.css'
+import 'primevue/resources/themes/lara-light-indigo/theme.css'
+import 'primevue/resources/primevue.min.css'
 
 import App from './App.vue'
+import AppDatePicker from './components/AppDatePicker.vue'
 import router from './router'
 import { useAuthStore } from './stores/auth'
 import { i18nPlugin } from './locales'
+import { useDarkMode } from './composables/useDarkMode'
+import { primeVueLocaleId } from './config/primeVueLocaleId'
 import './assets/main.css'
+
+// Apply the persisted theme before auth bootstrap and before any route is
+// mounted. This also covers guest and public career pages outside AppLayout.
+useDarkMode()
 
 const app = createApp(App)
 const pinia = createPinia()
+app.component('AppDatePicker', AppDatePicker)
 app.use(pinia)
+app.use(PrimeVue, { locale: primeVueLocaleId })
 // i18n — register $t global property dan inject('i18n') untuk composable.
 // Ringan (~1 kB), reactive, persist ke localStorage. Lihat src/locales/index.js.
 app.use(i18nPlugin)
