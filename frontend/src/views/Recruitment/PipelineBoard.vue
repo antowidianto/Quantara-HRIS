@@ -318,6 +318,15 @@ async function moveStage(c, newStage) {
   try {
     await api.post(`/candidates/${c.id}/move-stage`, { stage: newStage })
     toast.success(`Pindah ke ${newStage}`)
+
+    // Memindahkan kandidat ke stage OFFER belum menghasilkan candidate_offer:
+    // salary, status kerja, join date, dan deadline tetap harus diisi TA.
+    // Langsung buka form offer agar alurnya tidak berhenti di kartu OFFER yang
+    // terlihat seolah sudah terkirim ke portal kandidat.
+    if (newStage === 'OFFER') {
+      await openOfferModal({ ...c, current_stage: newStage })
+    }
+
     fetchAll()
     if (showCandDetail.value && showCandDetail.value.id === c.id) {
       const res = await api.get(`/candidates/${c.id}`)
@@ -343,46 +352,63 @@ async function doReject() {
 }
 
 async function openHireModal(c) {
-  let acceptedOffer = null
+  let candidateOffers = []
   try {
     const res = await api.get(`/candidates/${c.id}/offers`)
-    acceptedOffer = (res.data.data || []).find((offer) => offer.status === 'ACCEPTED') || null
+    candidateOffers = res.data.data || []
+    const acceptedOffer = candidateOffers.find((offer) => offer.status === 'ACCEPTED') || null
     if (!acceptedOffer) {
-      toast.error('Hire belum dapat dilakukan. Kandidat harus menerima offer terlebih dahulu.', { timeout: 7000 })
+      if (candidateOffers.length === 0) {
+        toast.warning(
+          'Belum ada offer untuk kandidat ini. Buat dan ajukan offer terlebih dahulu agar tampil di portal kandidat.',
+          { timeout: 8000 },
+        )
+      } else if (candidateOffers.some((offer) => offer.status === 'SENT')) {
+        toast.warning('Offer sudah dikirim dan masih menunggu respon kandidat.', { timeout: 8000 })
+      } else if (candidateOffers.some((offer) => offer.status === 'PENDING_APPROVAL')) {
+        toast.warning('Offer masih menunggu approval internal sebelum dikirim ke kandidat.', { timeout: 8000 })
+      } else if (candidateOffers.some((offer) => ['DRAFT', 'APPROVAL_REJECTED'].includes(offer.status))) {
+        toast.warning('Offer belum berhasil dikirim. Periksa draft atau hasil approval offer.', { timeout: 8000 })
+      } else {
+        toast.warning('Belum ada offer yang diterima kandidat. Periksa riwayat offer sebelum Hire.', { timeout: 8000 })
+      }
+
+      await openOfferModal(c)
       return
     }
+
+    showHireModal.value = c
+    // Reset semua field; pre-fill dari data candidate kalau tersedia.
+    // PTKP di-derive dari marital_status candidate (BELUM_KAWIN→TK0,
+    // KAWIN→K0). Dependent count belum di-track di candidates table
+    // jadi default ke 0.
+    const maritalToPtkp = {
+      BELUM_KAWIN: 'TK0',
+      KAWIN: 'K0',
+      CERAI_HIDUP: 'TK0',
+      CERAI_MATI: 'TK0',
+    }
+    Object.assign(hireForm, {
+      basic_salary: acceptedOffer.basic_salary || c.expected_salary || 0,
+      join_date: acceptedOffer.proposed_join_date || c.available_from || new Date().toISOString().slice(0, 10),
+      employment_status: acceptedOffer.employment_status || 'PKWTT',
+      probation_end_date: '',
+      contract_end_date: '',
+      ptkp_status: maritalToPtkp[c.marital_status] || 'TK0',
+      tax_method: 'GROSS',
+      pph21_method: 'TER',
+      npwp: c.npwp || '',
+      bpjs_kesehatan_no: c.bpjs_kesehatan_no || '',
+      bpjs_kesehatan_class: 1,
+      bpjs_tk_no: c.bpjs_tk_no || '',
+      bank_name: '',
+      bank_account: '',
+      bank_account_holder: c.full_name || '',
+    })
   } catch (e) {
     toast.error(e.response?.data?.message || 'Gagal memeriksa status offer kandidat')
     return
   }
-  showHireModal.value = c
-  // Reset semua field; pre-fill dari data candidate kalau tersedia.
-  // PTKP di-derive dari marital_status candidate (BELUM_KAWIN→TK0,
-  // KAWIN→K0). Dependent count belum di-track di candidates table
-  // jadi default ke 0.
-  const maritalToPtkp = {
-    BELUM_KAWIN: 'TK0',
-    KAWIN: 'K0',
-    CERAI_HIDUP: 'TK0',
-    CERAI_MATI: 'TK0',
-  }
-  Object.assign(hireForm, {
-    basic_salary: acceptedOffer.basic_salary || c.expected_salary || 0,
-    join_date: acceptedOffer.proposed_join_date || c.available_from || new Date().toISOString().slice(0, 10),
-    employment_status: acceptedOffer.employment_status || 'PKWTT',
-    probation_end_date: '',
-    contract_end_date: '',
-    ptkp_status: maritalToPtkp[c.marital_status] || 'TK0',
-    tax_method: 'GROSS',
-    pph21_method: 'TER',
-    npwp: c.npwp || '',
-    bpjs_kesehatan_no: c.bpjs_kesehatan_no || '',
-    bpjs_kesehatan_class: 1,
-    bpjs_tk_no: c.bpjs_tk_no || '',
-    bank_name: '',
-    bank_account: '',
-    bank_account_holder: c.full_name || '',
-  })
 }
 
 async function doHire() {
@@ -723,6 +749,12 @@ function downloadDoc(doc) {
               <StarIcon v-for="n in c.rating" :key="n" class="w-3 h-3 text-amber-400 fill-amber-400" />
             </div>
             <div v-if="canManage" class="flex gap-1 mt-2 pt-2 border-t border-gray-100" @click.stop>
+              <button v-if="c.current_stage === 'OFFER'"
+                class="text-xs px-2 py-1 rounded flex items-center gap-1 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                title="Buat, ajukan, dan pantau offer kandidat"
+                @click="openOfferModal(c)">
+                <BanknotesIcon class="w-3 h-3" /> Kelola Offer
+              </button>
               <button v-if="nextStage(c.current_stage)"
                 :class="[
                   'text-xs px-2 py-1 rounded flex items-center gap-1',
@@ -734,7 +766,8 @@ function downloadDoc(doc) {
                   || `Pindah ke ${nextStage(c.current_stage)}`"
                 :disabled="!! onlineTestBlocker(c, nextStage(c.current_stage))"
                 @click="moveStage(c, nextStage(c.current_stage))">
-                <ArrowRightIcon class="w-3 h-3" /> {{ nextStage(c.current_stage) }}
+                <ArrowRightIcon class="w-3 h-3" />
+                {{ c.current_stage === 'OFFER' ? 'Hire' : nextStage(c.current_stage) }}
               </button>
               <button class="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded ml-auto"
                 title="Reject" @click="openRejectModal(c)">
