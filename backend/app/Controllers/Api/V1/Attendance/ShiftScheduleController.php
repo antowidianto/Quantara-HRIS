@@ -3,7 +3,6 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
-use Config\Services;
 
 class ShiftScheduleController extends ApiController
 {
@@ -20,18 +19,26 @@ class ShiftScheduleController extends ApiController
             ->join('shifts s', 's.id = ss.shift_id', 'left')
             ->join('employees e', 'e.id = ss.employee_id');
         $this->tenant()->applyScope($builder, 'ss.company_id');
-        if ($employeeId) $builder->where('ss.employee_id', $employeeId);
+        if ($employeeId) {
+            $builder->where('ss.employee_id', $employeeId);
+        }
         $builder->where('ss.work_date >=', $start)->where('ss.work_date <=', $end);
 
         $rows = $builder->orderBy('ss.work_date')->get()->getResultArray();
+
         return $this->ok($rows);
     }
 
     public function show($id = null)
     {
         $db = \Config\Database::connect();
-        $row = $db->table('shift_schedules')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row) return $this->fail('Not found', 404);
+        $builder = $db->table('shift_schedules')->where('id', (int) $id);
+        $this->tenant()->applyScope($builder);
+        $row = $builder->get()->getRowArray();
+        if (!$row) {
+            return $this->fail('Not found', 404);
+        }
+
         return $this->ok($row);
     }
 
@@ -46,65 +53,97 @@ class ShiftScheduleController extends ApiController
 
         $valid = $this->validateOrFail($data, [
             'employee_id' => 'required|integer',
-            'work_date'   => 'required|valid_date',
+            'work_date' => 'required|valid_date',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
-        $emp = $db->table('employees')->where('id', $data['employee_id'])->get()->getRowArray();
-        if (! $emp) return $this->fail('Employee not found', 404);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
+        }
+        $emp = $db->table('employees')->where('id', $data['employee_id'])
+            ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (!$emp) {
+            return $this->fail('Employee not found', 404);
+        }
+        if (!empty($data['shift_id']) && $db->table('shifts')->where('id', (int) $data['shift_id'])
+            ->where('company_id', $companyId)->countAllResults() !== 1) {
+            return $this->fail('Shift not found', 404);
+        }
 
         $existing = $db->table('shift_schedules')
+            ->where('company_id', $companyId)
             ->where('employee_id', $data['employee_id'])
             ->where('work_date', $data['work_date'])
             ->get()->getRowArray();
 
         $row = [
-            'company_id'  => $emp['company_id'],
+            'company_id' => $companyId,
             'employee_id' => $data['employee_id'],
-            'shift_id'    => $data['shift_id'] ?? null,
-            'work_date'   => $data['work_date'],
-            'is_off'      => $data['is_off'] ?? 0,
-            'is_holiday'  => $data['is_holiday'] ?? 0,
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'shift_id' => $data['shift_id'] ?? null,
+            'work_date' => $data['work_date'],
+            'is_off' => $data['is_off'] ?? 0,
+            'is_holiday' => $data['is_holiday'] ?? 0,
+            'updated_at' => date('Y-m-d H:i:s'),
         ];
         if ($existing) {
-            $db->table('shift_schedules')->where('id', $existing['id'])->update($row);
+            $db->table('shift_schedules')->where('id', $existing['id'])
+                ->where('company_id', $companyId)->update($row);
+
             return $this->ok(['id' => $existing['id']], 'Updated');
         }
         $row['created_at'] = date('Y-m-d H:i:s');
         $db->table('shift_schedules')->insert($row);
+
         return $this->ok(['id' => $db->insertID()], 'Created', 201);
     }
 
     private function bulkCreate(array $schedules)
     {
         $db = \Config\Database::connect();
-        $companyId = $this->companyId();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
+        }
         $count = 0;
         foreach ($schedules as $s) {
-            if (empty($s['employee_id']) || empty($s['work_date'])) continue;
+            if (empty($s['employee_id']) || empty($s['work_date'])) {
+                continue;
+            }
+            $employeeExists = $db->table('employees')->where('id', (int) $s['employee_id'])
+                ->where('company_id', $companyId)->where('deleted_at IS NULL')->countAllResults() === 1;
+            $shiftExists = empty($s['shift_id']) || $db->table('shifts')->where('id', (int) $s['shift_id'])
+                ->where('company_id', $companyId)->countAllResults() === 1;
+            if (!$employeeExists || !$shiftExists) {
+                continue;
+            }
             $existing = $db->table('shift_schedules')
+                ->where('company_id', $companyId)
                 ->where('employee_id', $s['employee_id'])
                 ->where('work_date', $s['work_date'])
                 ->get()->getRowArray();
             $row = [
-                'company_id'  => $companyId,
+                'company_id' => $companyId,
                 'employee_id' => $s['employee_id'],
-                'shift_id'    => $s['shift_id'] ?? null,
-                'work_date'   => $s['work_date'],
-                'is_off'      => $s['is_off'] ?? 0,
-                'is_holiday'  => $s['is_holiday'] ?? 0,
-                'updated_at'  => date('Y-m-d H:i:s'),
+                'shift_id' => $s['shift_id'] ?? null,
+                'work_date' => $s['work_date'],
+                'is_off' => $s['is_off'] ?? 0,
+                'is_holiday' => $s['is_holiday'] ?? 0,
+                'updated_at' => date('Y-m-d H:i:s'),
             ];
             if ($existing) {
-                $db->table('shift_schedules')->where('id', $existing['id'])->update($row);
+                $db->table('shift_schedules')->where('id', $existing['id'])
+                    ->where('company_id', $companyId)->update($row);
             } else {
                 $row['created_at'] = date('Y-m-d H:i:s');
                 $db->table('shift_schedules')->insert($row);
             }
             $count++;
         }
+
         return $this->ok(['count' => $count], 'Bulk schedule applied');
     }
 
@@ -115,14 +154,26 @@ class ShiftScheduleController extends ApiController
         $data = $this->getJsonInput();
         $update = array_intersect_key($data, array_flip(['shift_id', 'is_off', 'is_holiday']));
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table('shift_schedules')->where('id', $id)->update($update);
+        $builder = $db->table('shift_schedules')->where('id', $id);
+        $this->tenant()->applyScope($builder);
+        $builder->update($update);
+        if ($db->affectedRows() !== 1) {
+            return $this->fail('Not found', 404);
+        }
+
         return $this->ok(null, 'Updated');
     }
 
     public function delete($id = null)
     {
         $db = \Config\Database::connect();
-        $db->table('shift_schedules')->where('id', (int) $id)->delete();
+        $builder = $db->table('shift_schedules')->where('id', (int) $id);
+        $this->tenant()->applyScope($builder);
+        $builder->delete();
+        if ($db->affectedRows() !== 1) {
+            return $this->fail('Not found', 404);
+        }
+
         return $this->ok(null, 'Deleted');
     }
 }

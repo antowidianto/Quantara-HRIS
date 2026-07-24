@@ -46,7 +46,7 @@ class UserModel extends BaseModel
     {
         if ($companyId <= 0) return [];
 
-        return $this->builder('u')
+        return $this->db->table('users u')
             ->select('u.id, u.name, u.email, e.employee_number, p.name AS position_name')
             ->join('employees e', "e.user_id = u.id AND e.company_id = {$companyId} AND e.deleted_at IS NULL", 'left')
             ->join('positions p', "p.id = e.position_id AND p.company_id = {$companyId}", 'left')

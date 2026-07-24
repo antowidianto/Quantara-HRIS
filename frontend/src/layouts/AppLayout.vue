@@ -80,6 +80,11 @@ function notificationLink(notification) {
 // Tree dari MenuStore — sudah ter-filter sesuai permission user di backend.
 const menuTree = computed(() => menuStore.tree)
 const menuLoading = computed(() => menuStore.loading)
+// Remount the active module after an RBAC change so stale data loaded under a
+// wider scope (for example all branches) is discarded immediately.
+const routerViewKey = computed(() =>
+  `${router.currentRoute.value.fullPath}|${auth.authorizationVersion || ''}`
+)
 
 // Cari profil company yg sedang aktif untuk ditampilkan di tombol dropdown.
 // Dipakai super admin saja — user biasa tinggal lihat nama company-nya.
@@ -98,14 +103,23 @@ function pickCompany(id) {
 }
 
 async function loadNotifications() {
-  try {
-    const [count, list] = await Promise.all([
-      api.get('/notifications/unread-count'),
-      api.get('/notifications', { params: { per_page: 8 } }),
-    ])
-    unreadCount.value = count.data.data.count
-    notifications.value = list.data.data
-  } catch (_) {}
+  if (! auth.isAuthenticated || notificationLoadPromise) return notificationLoadPromise
+  notificationLoadPromise = (async () => {
+    try {
+      // Sequential on purpose: when a session has expired, one failed request
+      // is enough to trigger refresh/logout and the list request is never sent.
+      const count = await api.get('/notifications/unread-count')
+      if (! auth.isAuthenticated) return
+      const list = await api.get('/notifications', { params: { per_page: 8 } })
+      unreadCount.value = count.data.data.count
+      notifications.value = list.data.data
+    } catch (error) {
+      if (error?.response?.status === 401) stopNotificationPolling()
+    } finally {
+      notificationLoadPromise = null
+    }
+  })()
+  return notificationLoadPromise
 }
 
 async function markAllRead() {
@@ -132,6 +146,55 @@ async function logout() {
 }
 
 let pollTimer = null
+let notificationLoadPromise = null
+let authorizationTimer = null
+let authorizationSyncPromise = null
+
+function stopNotificationPolling() {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
+}
+
+function currentRouteStillAllowed() {
+  const meta = router.currentRoute.value.meta || {}
+  const required = Array.isArray(meta.permissions)
+    ? meta.permissions
+    : (meta.permission ? [meta.permission] : [])
+  if (required.some(permission => ! auth.can(permission))) return false
+  const any = Array.isArray(meta.permissionAny) ? meta.permissionAny : []
+  return any.length === 0 || any.some(permission => auth.can(permission))
+}
+
+async function syncAuthorization() {
+  if (! auth.isAuthenticated || authorizationSyncPromise) return authorizationSyncPromise
+  authorizationSyncPromise = (async () => {
+    try {
+      const changed = await auth.syncAuthorization()
+      if (! changed) return
+      await menuStore.refresh()
+      if (! currentRouteStillAllowed()) {
+        await router.replace({ name: 'dashboard', query: { access: 'permission_changed' } })
+      }
+    } catch (error) {
+      if (error?.response?.status === 401) stopAuthorizationSync()
+    } finally {
+      authorizationSyncPromise = null
+    }
+  })()
+  return authorizationSyncPromise
+}
+
+function stopAuthorizationSync() {
+  if (authorizationTimer) clearInterval(authorizationTimer)
+  authorizationTimer = null
+  if (typeof window !== 'undefined') window.removeEventListener('focus', syncAuthorization)
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', syncAuthorizationWhenVisible)
+}
+
+function syncAuthorizationWhenVisible() {
+  if (document.visibilityState === 'visible') syncAuthorization()
+}
+
 onMounted(() => {
   // Fetch menu sekali saat layout mount. Kalau gagal, MenuStore set
   // fallback minimal supaya user setidaknya bisa logout & ke dashboard.
@@ -139,13 +202,25 @@ onMounted(() => {
   // deploy/migration, termasuk ketika layout di-remount dalam sesi yang sama.
   menuStore.load(true)
   loadNotifications()
-  pollTimer = setInterval(loadNotifications, 60000)
+  if (auth.isAuthenticated) {
+    pollTimer = setInterval(loadNotifications, 60000)
+    authorizationTimer = setInterval(syncAuthorization, 15000)
+    window.addEventListener('focus', syncAuthorization)
+    document.addEventListener('visibilitychange', syncAuthorizationWhenVisible)
+  }
 })
-onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
+onUnmounted(() => {
+  stopNotificationPolling()
+  stopAuthorizationSync()
+})
 
 // Re-fetch menu kalau user berubah (mis. login user lain di tab yang sama).
 watch(() => auth.user?.id, (newId, oldId) => {
   if (newId && newId !== oldId) menuStore.refresh()
+  if (! newId) {
+    stopNotificationPolling()
+    stopAuthorizationSync()
+  }
 })
 </script>
 
@@ -406,7 +481,7 @@ watch(() => auth.user?.id, (newId, oldId) => {
       <main class="flex-1 p-6">
         <!-- S1.6 SaaS — Banner status subscription (PAST_DUE / SUSPENDED / EXPIRED / TRIAL ≤ 5d) -->
         <SubscriptionStatusBanner class="-mx-6 -mt-6 mb-4" />
-        <RouterView />
+        <RouterView :key="routerViewKey" />
       </main>
     </div>
 

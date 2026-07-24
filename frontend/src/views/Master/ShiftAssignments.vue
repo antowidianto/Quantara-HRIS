@@ -7,9 +7,12 @@ import { confirm as confirmDialog } from '@/composables/useConfirm'
 import { PlusIcon, TrashIcon, ClockIcon, BeakerIcon } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
+const canManage = computed(() => auth.can('shift_schedules.manage'))
 
 const items = ref([])
 const loading = ref(false)
@@ -185,7 +188,7 @@ function sourceLabel(s) {
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <ClockIcon class="w-6 h-6" /> {{ t('master.shift_assignments.title') }}
       </h1>
-      <button type="button" class="btn-primary" @click="openCreate">
+      <button v-if="canManage" type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.shift_assignments.btn_create') }}
       </button>
     </div>
@@ -302,7 +305,7 @@ function sourceLabel(s) {
                 </span>
               </td>
               <td class="text-right">
-                <button type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" :disabled="deletingId !== null" v-bind="{ title: t('master.shift_assignments.delete_ok'), 'aria-label': t('master.shift_assignments.delete_ok') }">
+                <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" :disabled="deletingId !== null" v-bind="{ title: t('master.shift_assignments.delete_ok'), 'aria-label': t('master.shift_assignments.delete_ok') }">
                   <TrashIcon class="w-4 h-4" />
                 </button>
               </td>

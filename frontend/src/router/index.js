@@ -101,7 +101,7 @@ const routes = [
       { path: 'master/cost-centers', name: 'cost-centers', component: () => import('@/views/Master/CostCenters.vue') },
       { path: 'master/regulations', name: 'regulations', component: () => import('@/views/Master/Regulations.vue') },
       { path: 'master/contract-templates', name: 'contract-templates', component: () => import('@/views/Master/ContractTemplates.vue') },
-      { path: 'master/approval-chains', name: 'approval-chains', component: () => import('@/views/Master/ApprovalChains.vue') },
+      { path: 'master/approval-chains', name: 'approval-chains', component: () => import('@/views/Master/ApprovalChains.vue'), meta: { permission: 'approval_chain.view' } },
       { path: 'master/task-templates', name: 'task-templates', component: () => import('@/views/Master/TaskTemplates.vue') },
 
       // Approval inbox
@@ -118,7 +118,7 @@ const routes = [
         query: { request_id: to.params.id },
       }) },
       // ADMS / Physical Devices (Fingerprint)
-      { path: 'attendance/physical-devices', name: 'physical-devices', component: () => import('@/views/Attendance/PhysicalDevices.vue') },
+      { path: 'attendance/physical-devices', name: 'physical-devices', component: () => import('@/views/Attendance/PhysicalDevices.vue'), meta: { permission: 'attendance.manage_devices' } },
       // H1.4 Recruitment Funnel Metrics — bottleneck pipeline + stale candidates
       { path: 'recruitment/funnel', name: 'recruitment-funnel', component: () => import('@/views/Recruitment/FunnelMetrics.vue') },
       // H1.8 THR Planning Dashboard — proyeksi total THR per tahun
@@ -143,7 +143,7 @@ const routes = [
       { path: 'hr/talent-marketplace', name: 'talent-marketplace', component: () => import('@/views/HR/TalentMarketplace.vue') },
 
       // ─── Fase 4: Talent Management ───
-      { path: 'talent/review-360', name: 'talent-review-360', component: () => import('@/views/Talent/Review360.vue') },
+      { path: 'talent/review-360', name: 'talent-review-360', component: () => import('@/views/Talent/Review360.vue'), meta: { permissionAny: ['review.view_team', 'review.conduct'] } },
       { path: 'talent/nine-box', name: 'talent-nine-box', component: () => import('@/views/Talent/NineBox.vue') },
       { path: 'talent/succession', name: 'talent-succession', component: () => import('@/views/Talent/SuccessionPlan.vue') },
 
@@ -236,7 +236,7 @@ const routes = [
       // Performance Management (OKR / KPI / Review)
       { path: 'performance', name: 'performance', component: () => import('@/views/Performance/PerformanceList.vue') },
       { path: 'performance/cycles/:id', name: 'performance-cycle', component: () => import('@/views/Performance/CycleDetail.vue') },
-      { path: 'performance/reviews/:id', name: 'performance-review', component: () => import('@/views/Performance/ReviewDetail.vue') },
+      { path: 'performance/reviews/:id', name: 'performance-review', component: () => import('@/views/Performance/ReviewDetail.vue'), meta: { permissionAny: ['review.view_team', 'review.conduct', 'review.conduct_self'] } },
       { path: 'performance/my', name: 'my-performance', component: () => import('@/views/Performance/MyPerformance.vue') },
 
       // Generated contracts (kontrak yang sudah digenerate dari template)
@@ -263,7 +263,7 @@ const routes = [
       // Payroll
       { path: 'payroll/periods', name: 'payroll-periods', component: () => import('@/views/Payroll/PeriodList.vue'), meta: { permission: 'payroll.view' } },
       { path: 'payroll/periods/new', name: 'payroll-period-new', component: () => import('@/views/Payroll/PeriodForm.vue'), meta: { permission: 'payroll.manage', requiresWritableSubscription: true } },
-      { path: 'payroll/periods/:id', name: 'payroll-period-detail', component: () => import('@/views/Payroll/PeriodDetail.vue') },
+      { path: 'payroll/periods/:id', name: 'payroll-period-detail', component: () => import('@/views/Payroll/PeriodDetail.vue'), meta: { permission: 'payroll.view' } },
       { path: 'payslips', name: 'payslips', component: () => import('@/views/Payroll/PayslipList.vue') },
       { path: 'payslips/my', name: 'my-payslips', component: () => import('@/views/Payroll/MyPayslips.vue') },
       { path: 'payslips/:id', name: 'payslip-detail', component: () => import('@/views/Payroll/PayslipDetail.vue') },
@@ -289,8 +289,8 @@ const routes = [
       { path: 'reports', name: 'reports', component: () => import('@/views/Reports.vue') },
 
       // Admin
-      { path: 'admin/users', name: 'users', component: () => import('@/views/Admin/Users.vue') },
-      { path: 'admin/roles', name: 'roles', component: () => import('@/views/Admin/Roles.vue') },
+      { path: 'admin/users', name: 'users', component: () => import('@/views/Admin/Users.vue'), meta: { permission: 'user.manage' } },
+      { path: 'admin/roles', name: 'roles', component: () => import('@/views/Admin/Roles.vue'), meta: { permission: 'role.manage' } },
       { path: 'admin/audit-logs', name: 'audit-logs', component: () => import('@/views/Admin/AuditLogs.vue') },
       { path: 'admin/companies', name: 'companies', component: () => import('@/views/Admin/Companies.vue') },
       { path: 'admin/settings', name: 'settings', component: () => import('@/views/Admin/Settings.vue') },
@@ -324,6 +324,92 @@ const routes = [
 
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFound.vue') },
 ]
+
+// Route-level RBAC is defense-in-depth for direct URLs. The sidebar already
+// filters menu entries, but hiding a menu alone must never make the page
+// reachable. Detail routes inherit the same read permission as their list.
+const routePermissionByName = Object.freeze({
+  employees: 'employee.view', 'employee-new': 'employee.create', 'employee-detail': 'employee.view',
+  'employee-edit': 'employee.update', 'employee-360': 'employee.view', 'employee-contracts': 'employee.view',
+  'employee-bonus-history': 'bonus.view', attendance: 'attendance.view_all', roster: 'roster.view',
+  'attendance-change-approvals': 'attendance.approve_change', 'attendance-anomalies': 'attendance.review_anomaly',
+  allowances: 'payroll.view', 'org-structure': 'org_structure.view', 'organization-roles': 'org_structure.view',
+  branches: 'branch.view', 'work-locations': 'work_location.view', departments: 'department.view', positions: 'position.view',
+  'job-titles': 'job_title.view', 'job-grades': 'hr.manage', 'recruitment-pipelines': 'recruitment_pipeline.view',
+  'online-test-categories': 'online_test_category.manage', shifts: 'shift.view', 'shift-assignments': 'shift_schedules.view',
+  'shift-patterns': 'shift_pattern.view', 'leave-types': 'leave.manage_types', 'payroll-components': 'payroll.manage',
+  'benefit-policies': 'payroll.manage', 'cost-centers': 'cost_center.view', regulations: 'regulation.view',
+  'contract-templates': 'contract_template.view', 'task-templates': 'onboarding.view',
+  'approval-loans': 'loan.view', 'physical-devices': 'attendance.manage_devices',
+  'recruitment-funnel': 'recruitment.view', 'thr-planning': 'payroll.view', 'turnover-analytics': 'hr_analytics.view',
+  'payroll-simulate': 'payroll.simulate', 'goals-tree': 'performance.view', competencies: 'competency.view',
+  succession: 'succession.view', 'nine-box': 'performance.view',
+  'talent-succession': 'succession.view', 'ai-copilot': 'ai_assistant.use', 'workforce-scenarios': 'workforce_planning.view',
+  'compensation-intel': 'compensation_intelligence.view', 'erp-journal': 'erp.journal.view',
+  'signing-envelopes': 'signing.envelope.view', 'api-keys': 'api_key.view', licenses: 'employee_license.view',
+  'whatsapp-settings': 'settings.manage', 'candidate-scoring': 'recruitment.manage', disciplinary: 'disciplinary.view',
+  jic: 'jic.view', 'employee-transfers': 'employee_transfer.view', severance: 'severance.view',
+  onboarding: 'onboarding.view', probation: 'probation.manage', idp: 'idp.view', terminations: 'termination.view',
+  'exit-interviews': 'exit_interview.view', 'compliance-reports': 'compliance.report.view', resignations: 'resignation.view',
+  assets: 'asset.view', 'business-trips': 'business_trip.view', 'recruitment-mpp': 'mpp.view',
+  'recruitment-jobs': 'recruitment.view', 'recruitment-pipeline': 'recruitment.view', 'career-settings': 'careers.manage',
+  'online-tests': 'online_tests.view', 'online-test-detail': 'online_tests.view', 'online-test-bank': 'online_tests.manage',
+  'online-test-assignments': 'online_tests.view', 'online-test-attempt-review': 'online_tests.view',
+  'helpdesk-tickets': 'helpdesk.view', 'helpdesk-ticket-detail': 'helpdesk.view', training: 'training.view',
+  'training-detail': 'training.view', certificates: 'certificate.view', performance: 'performance.view',
+  'performance-cycle': 'performance.view', 'performance-review': 'performance.view', payslips: 'payslip.view_all',
+  'bonus-schemes': 'bonus.manage', 'bonus-runs': 'bonus.view', 'bonus-run-detail': 'bonus.view',
+  reimbursements: 'reimbursement.view', loans: 'loan.view', reports: 'report.view', 'audit-logs': 'audit.view',
+  settings: 'settings.manage', 'email-settings': 'settings.manage', 'billing-plan': 'billing.manage',
+  'billing-usage': 'billing.manage', 'settings-branding': 'branding.manage', 'settings-data-export': 'data_export.manage',
+  menus: 'menu.manage', 'notification-broadcast': 'notifications.broadcast',
+  'my-team': 'employee.view', 'wfh-requests': 'attendance.view', 'talent-nine-box': 'talent_pool.view',
+  'referral-program': 'referral.create_self', 'peer-review': 'performance.view', 'overtime-plan': 'overtime.create',
+  clock: 'attendance.clock', 'my-attendance': 'attendance.view_self', 'my-attendance-changes': 'attendance.view',
+  leaves: 'leave.view', 'leave-new': 'leave.create', 'leave-balance': 'leave.view',
+  'leave-team-calendar': 'leave.team_calendar', overtimes: 'overtime.view', 'overtime-new': 'overtime.create',
+  'my-payslips': 'payslip.view_self', 'my-bonuses': 'bonus.view_self', 'my-loans': 'loan.view',
+})
+
+const routePermissionAnyByName = Object.freeze({
+  'talent-marketplace': ['internal_job.apply', 'talent_pool.view', 'talent_pool.manage'],
+  timesheet: ['timesheet.submit', 'timesheet.approve', 'timesheet.report'],
+  'my-transfers': ['employee_transfer.view_self', 'employee_transfer.view'],
+  'my-resignation': ['resignation.view_self', 'resignation.view'],
+  'payslip-detail': ['payslip.view_self', 'payslip.view_all'],
+})
+
+const employeeOnlyRouteNames = new Set([
+  'talent-marketplace', 'referral-program', 'my-transfers', 'my-resignation', 'my-performance',
+  'clock', 'my-attendance', 'my-attendance-changes', 'leave-new', 'leave-balance', 'overtime-plan',
+  'overtime-new', 'my-payslips', 'my-bonuses', 'my-loans', 'pulse-survey',
+])
+
+const superAdminRouteNames = new Set([
+  'companies', 'admin-tenants', 'admin-tenant-detail', 'admin-saas-metrics', 'admin-customer-health',
+])
+
+function applyRouteAccessDefaults(routeList) {
+  routeList.forEach((route) => {
+    const permission = routePermissionByName[route.name]
+    if (permission && !route.meta?.permission && !route.meta?.permissionAny) {
+      route.meta = { ...(route.meta || {}), permission }
+    }
+    const permissionAny = routePermissionAnyByName[route.name]
+    if (permissionAny && !route.meta?.permission && !route.meta?.permissionAny) {
+      route.meta = { ...(route.meta || {}), permissionAny }
+    }
+    if (employeeOnlyRouteNames.has(route.name)) {
+      route.meta = { ...(route.meta || {}), requiresEmployee: true }
+    }
+    if (superAdminRouteNames.has(route.name)) {
+      route.meta = { ...(route.meta || {}), superAdminOnly: true }
+    }
+    if (route.children) applyRouteAccessDefaults(route.children)
+  })
+}
+
+applyRouteAccessDefaults(routes)
 
 const router = createRouter({
   history: createWebHistory(),

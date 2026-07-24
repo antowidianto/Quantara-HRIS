@@ -40,6 +40,8 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 const toast = useToast()
 const auth = useAuthStore()
 const { t } = useI18n()
+const canManageStructure = computed(() => auth.can('org_structure.manage'))
+const canManageDepartments = computed(() => auth.can('department.manage'))
 
 // ─── State ─────────────────────────────────────────────────────────
 const loading = ref(false)
@@ -538,10 +540,10 @@ async function deleteDept(dept) {
         <button v-if="viewMode === 'chart'" type="button" class="btn-secondary" @click="resetPan" :disabled="loading || saving">
           <ArrowUturnLeftIcon class="w-4 h-4" /> {{ t('org_structure.center') }}
         </button>
-        <button type="button" class="btn-secondary" @click="recomputeReports" :disabled="loading || saving">
+        <button v-if="canManageStructure" type="button" class="btn-secondary" @click="recomputeReports" :disabled="loading || saving">
           <ArrowsRightLeftIcon class="w-4 h-4" /> {{ t('org_structure.sync_supervisors') }}
         </button>
-        <button type="button" class="btn-primary" @click="openCreateDept()">
+        <button v-if="canManageDepartments" type="button" class="btn-primary" @click="openCreateDept()">
           <PlusIcon class="w-4 h-4" /> {{ t('org_structure.new_department') }}
         </button>
       </div>
@@ -549,7 +551,7 @@ async function deleteDept(dept) {
 
     <!-- ── Sticky bar untuk pending changes ────────────────────────── -->
     <transition name="slide">
-      <div v-if="dirty"
+      <div v-if="dirty && canManageStructure"
         class="sticky top-0 z-30 mb-4 px-4 py-3 rounded-lg border-2 border-amber-400 bg-amber-50 flex items-center justify-between gap-3 shadow-sm">
         <div class="flex items-center gap-2 text-amber-900 text-sm">
           <ArrowsRightLeftIcon class="w-5 h-5" />
@@ -578,7 +580,7 @@ async function deleteDept(dept) {
       <div v-else-if="tree.length === 0" class="text-center py-16">
         <BuildingOffice2Icon class="w-12 h-12 mx-auto text-slate-300 mb-3" />
         <p class="text-slate-500 mb-3">{{ t('org_structure.no_departments') }}</p>
-        <button type="button" class="btn-primary" @click="openCreateDept()">
+        <button v-if="canManageDepartments" type="button" class="btn-primary" @click="openCreateDept()">
           <PlusIcon class="w-4 h-4" /> {{ t('org_structure.create_first') }}
         </button>
       </div>
@@ -641,7 +643,7 @@ async function deleteDept(dept) {
             :key="node.id"
             class="grid grid-cols-12 gap-3 px-4 py-2.5 items-center bg-white hover:bg-primary-50/30 transition-colors"
             :class="dragOverId === node.id ? 'ring-2 ring-primary-200 bg-primary-50' : ''"
-            draggable="true"
+            :draggable="canManageStructure"
             @dragstart.stop="onDragStart($event, 'department', node.id)"
             @dragover.stop="onDragOver($event, node.id)"
             @dragleave.stop="onDragLeave"
@@ -677,15 +679,15 @@ async function deleteDept(dept) {
               </span>
             </div>
             <div class="col-span-2 flex justify-end gap-1">
-              <button type="button" class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
+              <button v-if="canManageStructure" type="button" class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
                 @click.stop="openDeptDetail(node)">
                 {{ t('org_structure.manage') }}
               </button>
-              <button type="button" class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
+              <button v-if="canManageDepartments" type="button" class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
                 @click.stop="openEditDept(node)">
                 {{ t('org_structure.edit') }}
               </button>
-              <button type="button" class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
+              <button v-if="canManageDepartments" type="button" class="px-2 py-1 rounded border border-slate-200 text-xs text-slate-700 hover:bg-white"
                 @click.stop="openCreateDept(node.id)">
                 {{ t('org_structure.sub') }}
               </button>
@@ -712,6 +714,7 @@ async function deleteDept(dept) {
               :level="0"
               :collapsed-ids="collapsedIds"
               :drag-over-id="dragOverId"
+              :can-manage="canManageDepartments"
               @toggle="toggleCollapse"
               @drop-on="onDrop"
               @drag-over="(e, id) => onDragOver(e, id)"
@@ -737,6 +740,7 @@ async function deleteDept(dept) {
       v-if="detailDeptId"
       :department-id="detailDeptId"
       :all-departments="flatDepartments"
+      :can-manage="canManageStructure"
       @close="closeDeptDetail"
       @navigate="navigateToDept"
       @changed="onDetailChanged"

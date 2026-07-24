@@ -10,9 +10,12 @@ import {
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import EmployeeSearchSelect from '@/components/EmployeeSearchSelect.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
+const canManage = computed(() => auth.can('approval_chain.manage'))
 
 const moduleOptions = computed(() => [
   { value: 'LEAVE', label: t('master.approval_chains.mod_leave') },
@@ -22,6 +25,7 @@ const moduleOptions = computed(() => [
   { value: 'LOAN', label: t('master.approval_chains.mod_loan') },
   { value: 'BUSINESS_TRIP', label: 'Perjalanan Dinas / SPPD' },
   { value: 'BONUS', label: 'Bonus' },
+  { value: 'PAYROLL', label: 'Payroll Period' },
   { value: 'PAYROLL_ADJUSTMENT', label: 'Koreksi Payroll' },
   { value: 'COMPENSATION_REVIEW', label: 'Perubahan Kompensasi' },
   { value: 'TRAINING_REGISTRATION', label: 'Registrasi Training' },
@@ -319,7 +323,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <ShieldCheckIcon class="w-6 h-6" /> {{ t('master.approval_chains.title') }}
       </h1>
-      <button type="button" class="btn-primary" @click="openCreate">
+      <button v-if="canManage" type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.approval_chains.btn_create') }}
       </button>
     </div>
@@ -370,8 +374,8 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind="{ title: t('master.approval_chains.edit'), 'aria-label': t('master.approval_chains.edit') }"><PencilIcon class="w-4 h-4" /></button>
-                  <button type="button" class="text-gray-500 hover:text-red-600" @click="remove(item)" v-bind="{ title: t('master.approval_chains.delete'), 'aria-label': t('master.approval_chains.delete') }"><TrashIcon class="w-4 h-4" /></button>
+                  <button v-if="canManage" type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind="{ title: t('master.approval_chains.edit'), 'aria-label': t('master.approval_chains.edit') }"><PencilIcon class="w-4 h-4" /></button>
+                  <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600" @click="remove(item)" v-bind="{ title: t('master.approval_chains.delete'), 'aria-label': t('master.approval_chains.delete') }"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>
@@ -456,7 +460,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     :disabled="i === 0" @click="moveStep(i, -1)" v-bind="{ title: t('common.previous'), 'aria-label': t('common.previous') }"><ArrowUpIcon class="w-4 h-4" /></button>
                   <button type="button" class="text-gray-500 hover:text-primary-600 disabled:opacity-30"
                     :disabled="i === form.steps.length - 1" @click="moveStep(i, 1)" v-bind="{ title: t('common.next'), 'aria-label': t('common.next') }"><ArrowDownIcon class="w-4 h-4" /></button>
-                  <button type="button" class="text-red-500 hover:text-red-700" @click="removeStep(i)"
+                  <button v-if="canManage" type="button" class="text-red-500 hover:text-red-700" @click="removeStep(i)"
                     :disabled="form.steps.length <= 1" v-bind="{ title: t('common.delete'), 'aria-label': t('common.delete') }"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </div>
@@ -539,7 +543,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
               </div>
             </div>
 
-            <button type="button" class="btn-secondary" @click="addStep">
+            <button v-if="canManage" type="button" class="btn-secondary" @click="addStep">
               <PlusIcon class="w-4 h-4" /> {{ t('master.approval_chains.btn_add_step') }}
             </button>
           </div>
@@ -591,7 +595,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                   <input v-model.number="newAssignment.priority" type="number" class="input" />
                 </div>
                 <div class="flex items-end">
-                  <button type="button" class="btn-primary w-full" :disabled="assignmentSaving" @click="addAssignment">
+                  <button v-if="canManage" type="button" class="btn-primary w-full" :disabled="assignmentSaving" @click="addAssignment">
                     <PlusIcon class="w-4 h-4" /> {{ assignmentSaving ? t('common.processing') : t('master.approval_chains.btn_add') }}
                   </button>
                 </div>
@@ -622,7 +626,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
                     <td>{{ a.grade_name || t('master.approval_chains.f_all') }}</td>
                     <td>{{ a.priority }}</td>
                     <td class="text-right">
-                      <button type="button" class="text-gray-500 hover:text-red-600" :disabled="deletingAssignmentId !== null" @click="removeAssignment(a)" v-bind="{ title: t('master.approval_chains.delete'), 'aria-label': t('master.approval_chains.delete') }">
+                      <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600" :disabled="deletingAssignmentId !== null" @click="removeAssignment(a)" v-bind="{ title: t('master.approval_chains.delete'), 'aria-label': t('master.approval_chains.delete') }">
                         <TrashIcon class="w-4 h-4" />
                       </button>
                     </td>
@@ -636,7 +640,7 @@ function moduleLabel(v) { return moduleOptions.value.find(m => m.value === v)?.l
         <!-- Footer -->
         <div class="px-6 py-3 border-t border-gray-200 flex justify-end gap-2 bg-white">
           <button type="button" class="btn-secondary" :disabled="saving" @click="showEditor = false">{{ t('master.approval_chains.btn_close') }}</button>
-          <button type="button" class="btn-primary" :disabled="saving" @click="save">{{ saving ? t('common.saving') : (editing ? t('master.approval_chains.btn_save_changes') : t('master.approval_chains.btn_save')) }}</button>
+          <button v-if="canManage" type="button" class="btn-primary" :disabled="saving" @click="save">{{ saving ? t('common.saving') : (editing ? t('master.approval_chains.btn_save_changes') : t('master.approval_chains.btn_save')) }}</button>
         </div>
       </div>
     </div>

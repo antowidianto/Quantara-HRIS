@@ -26,6 +26,9 @@ const toast = useToast()
 const { t } = useI18n()
 const auth = useAuthStore()
 const isSuperAdmin = computed(() => auth.isSuperAdmin)
+const permissionsReadOnly = computed(() =>
+  viewMode.value || editing.value?.slug === 'super_admin'
+)
 
 const roles = ref([])
 const grouped = ref({})
@@ -164,7 +167,7 @@ const totalSelected = computed(() => form.value.permissions.length)
 const totalAvailable = computed(() => Object.values(grouped.value).reduce((sum, arr) => sum + arr.length, 0))
 
 function toggleGroup(perms) {
-  if (viewMode.value) return
+  if (permissionsReadOnly.value) return
   const ids = perms.map(p => p.id)
   const allSelected = ids.every(id => form.value.permissions.includes(id))
   if (allSelected) {
@@ -360,8 +363,8 @@ function changed(before, after) {
                   @click="open(r, true)">
                   <EyeIcon class="w-4 h-4" />
                 </button>
-                <!-- Edit untuk super admin (termasuk system role; backend
-                     hanya mencegah pengosongan permission super_admin) -->
+                <!-- Edit untuk super admin. Global role selain super_admin
+                     otomatis dibuatkan salinan khusus tenant saat diterapkan. -->
                 <button v-if="isSuperAdmin"
                   class="text-primary-600 hover:text-primary-800"
                   :title="t('roles.edit')"
@@ -543,8 +546,8 @@ function changed(before, after) {
               <div class="font-medium">Anda sedang mengedit role sistem</div>
               <div class="text-xs">
                 Role <span class="font-mono">{{ editing.slug }}</span> adalah role bawaan.
-                Slug tidak bisa diubah, dan jangan kosongkan permission role <span class="font-mono">super_admin</span> karena
-                akan menutup akses Anda sendiri.
+                Slug tidak bisa diubah. Role global selain <span class="font-mono">super_admin</span>
+                otomatis disalin menjadi role khusus tenant agar perubahan tidak berdampak ke perusahaan lain.
               </div>
             </div>
           </div>
@@ -583,7 +586,7 @@ function changed(before, after) {
                   <span class="text-gray-500">
                     {{ groupSelectedCount(perms) }} / {{ perms.length }}
                   </span>
-                  <button v-if="!viewMode" type="button" class="text-primary-600 hover:underline"
+                  <button v-if="!permissionsReadOnly" type="button" class="text-primary-600 hover:underline"
                     @click="toggleGroup(perms)">
                     {{ t('role.toggle_all') }}
                   </button>
@@ -592,9 +595,9 @@ function changed(before, after) {
               <div class="grid grid-cols-1 md:grid-cols-2 gap-1">
                 <label v-for="p in perms" :key="p.id"
                   class="flex items-center gap-2 text-sm py-0.5"
-                  :class="viewMode ? 'cursor-default' : 'cursor-pointer hover:bg-gray-50 rounded px-1'">
+                  :class="permissionsReadOnly ? 'cursor-default' : 'cursor-pointer hover:bg-gray-50 rounded px-1'">
                   <input type="checkbox" :value="p.id" v-model="form.permissions"
-                    :disabled="viewMode" class="w-4 h-4" />
+                    :disabled="permissionsReadOnly" class="w-4 h-4" />
                   <span class="font-mono text-xs text-gray-500">{{ p.slug }}</span>
                   <span class="text-gray-700">— {{ p.name }}</span>
                 </label>

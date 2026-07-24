@@ -24,8 +24,11 @@ class ApprovalChainController extends ApiController
             ->select('c.*, (SELECT COUNT(*) FROM approval_chain_steps s WHERE s.chain_id = c.id) AS step_count')
             ->where('c.deleted_at IS NULL');
         $this->tenant()->applyScope($builder, 'c.company_id');
-        if ($module !== '') $builder->where('c.module', $module);
+        if ($module !== '') {
+            $builder->where('c.module', $module);
+        }
         $rows = $builder->orderBy('c.module', 'ASC')->orderBy('c.name', 'ASC')->get()->getResultArray();
+
         return $this->ok($rows);
     }
 
@@ -33,8 +36,10 @@ class ApprovalChainController extends ApiController
     {
         $db = \Config\Database::connect();
         $chain = $this->findChainForTenant($db, (int) $id);
-        if (! $chain) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $chain['company_id'] !== $this->companyId()) {
+        if (!$chain) {
+            return $this->fail('Not found', 404);
+        }
+        if (!$this->tenant()->isSuperAdmin() && (int) $chain['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
         $steps = $db->table('approval_chain_steps')
@@ -44,15 +49,15 @@ class ApprovalChainController extends ApiController
             ->get()->getResultArray();
         // Resolve nama referensi untuk display di UI.
         foreach ($steps as &$s) {
-            if (! empty($s['approver_role_id'])) {
+            if (!empty($s['approver_role_id'])) {
                 $r = $db->table('roles')->where('id', (int) $s['approver_role_id'])->get()->getRowArray();
                 $s['approver_role_name'] = $r['name'] ?? null;
             }
-            if (! empty($s['approver_user_id'])) {
+            if (!empty($s['approver_user_id'])) {
                 $u = $db->table('users')->where('id', (int) $s['approver_user_id'])->where('company_id', (int) $chain['company_id'])->get()->getRowArray();
                 $s['approver_user_name'] = $u['name'] ?? null;
             }
-            if (! empty($s['approver_employee_id'])) {
+            if (!empty($s['approver_employee_id'])) {
                 $e = $db->table('employees')->where('id', (int) $s['approver_employee_id'])->where('company_id', (int) $chain['company_id'])->get()->getRowArray();
                 $s['approver_employee_name'] = $e['full_name'] ?? null;
             }
@@ -69,6 +74,7 @@ class ApprovalChainController extends ApiController
             ->get()->getResultArray();
         $chain['steps'] = $steps;
         $chain['assignments'] = $assignments;
+
         return $this->ok($chain);
     }
 
@@ -76,21 +82,25 @@ class ApprovalChainController extends ApiController
     {
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
-            'code'   => 'required|max_length[64]',
-            'name'   => 'required|max_length[200]',
+            'code' => 'required|max_length[64]',
+            'name' => 'required|max_length[200]',
             'module' => 'required|max_length[40]',
             'fallback_strategy' => 'permit_empty|in_list[SKIP,BLOCK,HR_FALLBACK]',
             'is_default' => 'permit_empty|in_list[0,1]',
-            'is_active'  => 'permit_empty|in_list[0,1]',
+            'is_active' => 'permit_empty|in_list[0,1]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
         $data['module'] = strtoupper(trim((string) $data['module']));
-        if (! ApprovalModuleCatalog::isSupported($data['module'])) {
+        if (!ApprovalModuleCatalog::isSupported($data['module'])) {
             return $this->fail('Modul approval tidak didukung', 422, 'UNSUPPORTED_APPROVAL_MODULE');
         }
 
         $companyId = $this->requireCompanyId();
-        if ($companyId === null) return null;
+        if ($companyId === null) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
         $exists = $db->table('approval_chains')
@@ -98,20 +108,22 @@ class ApprovalChainController extends ApiController
             ->where('code', $data['code'])
             ->where('deleted_at IS NULL')
             ->countAllResults();
-        if ($exists > 0) return $this->fail('Kode chain sudah ada', 422, 'DUPLICATE_CODE');
+        if ($exists > 0) {
+            return $this->fail('Kode chain sudah ada', 422, 'DUPLICATE_CODE');
+        }
 
         $now = date('Y-m-d H:i:s');
         $insert = [
-            'company_id'        => $companyId,
-            'code'              => $data['code'],
-            'name'              => $data['name'],
-            'module'            => $data['module'],
-            'description'       => $data['description'] ?? null,
-            'is_default'        => (int) ($data['is_default'] ?? 0),
+            'company_id' => $companyId,
+            'code' => $data['code'],
+            'name' => $data['name'],
+            'module' => $data['module'],
+            'description' => $data['description'] ?? null,
+            'is_default' => (int) ($data['is_default'] ?? 0),
             'fallback_strategy' => $data['fallback_strategy'] ?? 'HR_FALLBACK',
-            'is_active'         => (int) ($data['is_active'] ?? 1),
-            'created_at'        => $now,
-            'updated_at'        => $now,
+            'is_active' => (int) ($data['is_active'] ?? 1),
+            'created_at' => $now,
+            'updated_at' => $now,
         ];
 
         // Hanya boleh ada 1 default per modul; matikan default lain bila perlu.
@@ -126,13 +138,14 @@ class ApprovalChainController extends ApiController
         $id = (int) $db->insertID();
 
         // Buat step awal kalau dikirim
-        if (! empty($data['steps']) && is_array($data['steps'])) {
+        if (!empty($data['steps']) && is_array($data['steps'])) {
             $this->replaceSteps($id, $companyId, $data['steps']);
         }
 
         Services::audit()
             ->forModule('MASTER')
             ->logCreate('approval_chain', $id, $insert, "Membuat chain approval: {$insert['name']} ({$insert['module']})");
+
         return $this->ok(['id' => $id], 'Chain dibuat', 201);
     }
 
@@ -141,19 +154,21 @@ class ApprovalChainController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $this->findChainForTenant($db, $id);
-        if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if (!$this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
         $data = $this->getJsonInput();
         if (array_key_exists('module', $data)) {
             $data['module'] = strtoupper(trim((string) $data['module']));
-            if (! ApprovalModuleCatalog::isSupported($data['module'])) {
+            if (!ApprovalModuleCatalog::isSupported($data['module'])) {
                 return $this->fail('Modul approval tidak didukung', 422, 'UNSUPPORTED_APPROVAL_MODULE');
             }
         }
 
-        $update = array_intersect_key($data, array_flip(['name','description','module','is_default','fallback_strategy','is_active']));
+        $update = array_intersect_key($data, array_flip(['name', 'description', 'module', 'is_default', 'fallback_strategy', 'is_active']));
         if ((array_key_exists('steps', $data)
                 || array_key_exists('module', $update)
                 || array_key_exists('fallback_strategy', $update))
@@ -180,8 +195,14 @@ class ApprovalChainController extends ApiController
 
         Services::audit()
             ->forModule('MASTER')
-            ->logUpdate('approval_chain', $id, array_intersect_key($existing, $update), $update,
-                "Mengubah chain approval: {$existing['name']}");
+            ->logUpdate(
+                'approval_chain',
+                $id,
+                array_intersect_key($existing, $update),
+                $update,
+                "Mengubah chain approval: {$existing['name']}"
+            );
+
         return $this->ok(['id' => $id], 'Updated');
     }
 
@@ -190,8 +211,10 @@ class ApprovalChainController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $this->findChainForTenant($db, $id);
-        if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if (!$this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
         if ($this->hasPendingRequests($db, $id, (int) $existing['company_id'])) {
@@ -203,11 +226,12 @@ class ApprovalChainController extends ApiController
         }
         $db->table('approval_chains')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update([
             'deleted_at' => date('Y-m-d H:i:s'),
-            'is_active'  => 0,
+            'is_active' => 0,
         ]);
         Services::audit()
             ->forModule('MASTER')
             ->logDelete('approval_chain', $id, $existing, "Menghapus chain: {$existing['name']}");
+
         return $this->ok(null, 'Deleted');
     }
 
@@ -225,8 +249,11 @@ class ApprovalChainController extends ApiController
             ->join('branches b', 'b.id = ar.branch_id', 'left')
             ->join('job_grades g', 'g.id = ar.job_grade_id', 'left');
         $this->tenant()->applyScope($builder, 'ar.company_id');
-        if ($module !== '') $builder->where('ar.module', $module);
+        if ($module !== '') {
+            $builder->where('ar.module', $module);
+        }
         $rows = $builder->orderBy('ar.priority', 'ASC')->get()->getResultArray();
+
         return $this->ok($rows);
     }
 
@@ -235,20 +262,24 @@ class ApprovalChainController extends ApiController
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'chain_id' => 'required|integer',
-            'module'   => 'required|max_length[40]',
+            'module' => 'required|max_length[40]',
             'priority' => 'permit_empty|integer',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
         $data['module'] = strtoupper(trim((string) $data['module']));
-        if (! ApprovalModuleCatalog::isSupported($data['module'])) {
+        if (!ApprovalModuleCatalog::isSupported($data['module'])) {
             return $this->fail('Modul approval tidak didukung', 422, 'UNSUPPORTED_APPROVAL_MODULE');
         }
         $companyId = $this->requireCompanyId();
-        if ($companyId === null) return null;
+        if ($companyId === null) {
+            return null;
+        }
         $now = date('Y-m-d H:i:s');
         $db = \Config\Database::connect();
         $chain = $this->findChainForTenant($db, (int) $data['chain_id']);
-        if (! $chain || (int) $chain['company_id'] !== $companyId) {
+        if (!$chain || (int) $chain['company_id'] !== $companyId) {
             return $this->fail('Approval chain tidak ditemukan di perusahaan aktif', 422, 'CROSS_TENANT_CHAIN');
         }
         if ((string) $chain['module'] !== $data['module']) {
@@ -259,22 +290,23 @@ class ApprovalChainController extends ApiController
             );
         }
         $insert = [
-            'company_id'    => $companyId,
-            'chain_id'      => (int) $data['chain_id'],
-            'module'        => $data['module'],
+            'company_id' => $companyId,
+            'chain_id' => (int) $data['chain_id'],
+            'module' => $data['module'],
             'department_id' => $data['department_id'] ?? null,
-            'branch_id'     => $data['branch_id'] ?? null,
-            'job_grade_id'  => $data['job_grade_id'] ?? null,
-            'priority'      => (int) ($data['priority'] ?? 100),
-            'is_active'     => (int) ($data['is_active'] ?? 1),
-            'created_at'    => $now,
-            'updated_at'    => $now,
+            'branch_id' => $data['branch_id'] ?? null,
+            'job_grade_id' => $data['job_grade_id'] ?? null,
+            'priority' => (int) ($data['priority'] ?? 100),
+            'is_active' => (int) ($data['is_active'] ?? 1),
+            'created_at' => $now,
+            'updated_at' => $now,
         ];
         $db->table('approval_assignments')->insert($insert);
         $id = (int) $db->insertID();
         Services::audit()
             ->forModule('MASTER')
             ->logCreate('approval_assignment', $id, $insert, "Memetakan chain ke modul {$insert['module']}");
+
         return $this->ok(['id' => $id], 'Assignment created', 201);
     }
 
@@ -283,14 +315,17 @@ class ApprovalChainController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $db->table('approval_assignments')->where('id', $id)->where('company_id', $this->companyId())->get()->getRowArray();
-        if (! $existing) return $this->fail('Not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if (!$this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
             return $this->fail('Forbidden', 403);
         }
         $db->table('approval_assignments')->where('id', $id)->where('company_id', (int) $existing['company_id'])->delete();
         Services::audit()
             ->forModule('MASTER')
             ->logDelete('approval_assignment', $id, $existing, 'Menghapus assignment chain');
+
         return $this->ok(null, 'Deleted');
     }
 
@@ -301,6 +336,7 @@ class ApprovalChainController extends ApiController
     {
         $module = trim((string) $this->request->getGet('module'));
         $rows = Services::approval()->pendingForUser((int) $this->userId(), $module ?: null, 100);
+
         return $this->ok($rows);
     }
 
@@ -311,6 +347,7 @@ class ApprovalChainController extends ApiController
     {
         $module = trim((string) $this->request->getGet('module'));
         $rows = Services::approval()->processedForUser((int) $this->userId(), $module ?: null, 100);
+
         return $this->ok($rows);
     }
 
@@ -327,7 +364,9 @@ class ApprovalChainController extends ApiController
             ->where('ar.id', (int) $id)
             ->where('ar.company_id', $this->companyId())
             ->get()->getRowArray();
-        if (! $req) return $this->fail('Not found', 404);
+        if (!$req) {
+            return $this->fail('Not found', 404);
+        }
         $decisions = $db->table('approval_decisions ad')
             ->select('ad.*, u.name AS approver_user_name, s.name AS step_name, s.approver_type')
             ->join('users u', 'u.id = ad.approver_user_id', 'left')
@@ -391,7 +430,7 @@ class ApprovalChainController extends ApiController
         $moduleConfig = $config[$module] ?? null;
         if ($moduleConfig === null
             || (string) ($request['entity_table'] ?? '') !== $moduleConfig['table']
-            || ! $db->tableExists($moduleConfig['table'])
+            || !$db->tableExists($moduleConfig['table'])
         ) {
             return [
                 'detail' => is_array($request['meta']) ? $request['meta'] : [],
@@ -411,13 +450,15 @@ class ApprovalChainController extends ApiController
             ->where('company_id', (int) $request['company_id'])
             ->get()->getRowArray();
 
-        if (! $row) {
+        if (!$row) {
             return ['detail' => [], 'submitter_note' => null, 'attachment' => null];
         }
 
         $detail = [];
         foreach ($moduleConfig['fields'] as $field) {
-            if (array_key_exists($field, $row)) $detail[$field] = $row[$field];
+            if (array_key_exists($field, $row)) {
+                $detail[$field] = $row[$field];
+            }
         }
 
         $attachment = null;
@@ -441,7 +482,9 @@ class ApprovalChainController extends ApiController
     private function approvalTimeline(array $request, array $decisions): array
     {
         $snapshot = $request['workflow_snapshot'] ?? null;
-        if (is_string($snapshot)) $snapshot = json_decode($snapshot, true);
+        if (is_string($snapshot)) {
+            $snapshot = json_decode($snapshot, true);
+        }
         $steps = is_array($snapshot) ? (array) ($snapshot['steps'] ?? []) : [];
         $decisionByStep = [];
         foreach ($decisions as $decision) {
@@ -457,7 +500,7 @@ class ApprovalChainController extends ApiController
                 'step_name' => (string) ($step['name'] ?? "Step {$order}"),
                 'approver_type' => $step['approver_type'] ?? null,
                 'status' => $decision['decision']
-                    ?? (! empty($step['condition_matched']) ? 'WAITING_APPROVAL' : 'SKIPPED'),
+                    ?? (!empty($step['condition_matched']) ? 'WAITING_APPROVAL' : 'SKIPPED'),
                 'approver_user_name' => $decision['approver_user_name'] ?? null,
                 'decided_at' => $decision['decided_at'] ?? null,
                 'note' => $decision['note'] ?? null,
@@ -489,8 +532,18 @@ class ApprovalChainController extends ApiController
     public function approveRequest($id = null)
     {
         $id = (int) $id;
-        if (! $this->approvalRequestBelongsToTenant($id)) return $this->fail('Not found', 404);
+        if (!$this->approvalRequestBelongsToTenant($id)) {
+            return $this->fail('Not found', 404);
+        }
+        if ($this->isPayrollApprovalRequest($id)) {
+            return $this->fail(
+                'Approval payroll wajib dilakukan dari tabel Periode Payroll dengan validasi ganda.',
+                422,
+                'PAYROLL_TABLE_APPROVAL_REQUIRED'
+            );
+        }
         $note = (string) ($this->getJsonInput()['note'] ?? '');
+
         try {
             $res = Services::approval()->approve($id, (int) $this->userId(), $note);
         } catch (\Throwable $e) {
@@ -503,15 +556,21 @@ class ApprovalChainController extends ApiController
         Services::audit()
             ->forModule('APPROVAL')
             ->logApprove('approval_request', $id, $res, "Approve approval_request #{$id}");
+
         return $this->ok($res, 'Approved');
     }
 
     public function rejectRequest($id = null)
     {
         $id = (int) $id;
-        if (! $this->approvalRequestBelongsToTenant($id)) return $this->fail('Not found', 404);
+        if (!$this->approvalRequestBelongsToTenant($id)) {
+            return $this->fail('Not found', 404);
+        }
         $note = (string) ($this->getJsonInput()['note'] ?? '');
-        if ($note === '') return $this->fail('Alasan penolakan wajib diisi', 422, 'REASON_REQUIRED');
+        if ($note === '') {
+            return $this->fail('Alasan penolakan wajib diisi', 422, 'REASON_REQUIRED');
+        }
+
         try {
             $res = Services::approval()->reject($id, (int) $this->userId(), $note);
         } catch (\Throwable $e) {
@@ -520,6 +579,7 @@ class ApprovalChainController extends ApiController
         Services::audit()
             ->forModule('APPROVAL')
             ->logReject('approval_request', $id, $res, $note);
+
         return $this->ok($res, 'Rejected');
     }
 
@@ -553,10 +613,10 @@ class ApprovalChainController extends ApiController
     private function bulkDecide(string $decision)
     {
         $data = $this->getJsonInput();
-        $ids  = $data['approval_ids'] ?? [];
+        $ids = $data['approval_ids'] ?? [];
         $note = trim((string) ($data['note'] ?? ''));
 
-        if (! is_array($ids) || empty($ids)) {
+        if (!is_array($ids) || empty($ids)) {
             return $this->fail('approval_ids wajib berupa array tidak kosong', 422, 'INVALID_INPUT');
         }
         if (count($ids) > 50) {
@@ -573,12 +633,17 @@ class ApprovalChainController extends ApiController
         $userId = (int) $this->userId();
         $service = Services::approval();
         $success = [];
-        $failed  = [];
+        $failed = [];
 
         foreach ($ids as $id) {
             try {
-                if (! $this->approvalRequestBelongsToTenant($id)) {
+                if (!$this->approvalRequestBelongsToTenant($id)) {
                     throw new \RuntimeException('Approval request not found');
+                }
+                if ($decision === 'APPROVED' && $this->isPayrollApprovalRequest($id)) {
+                    throw new \RuntimeException(
+                        'Approval payroll wajib dilakukan dari tabel Periode Payroll dengan validasi ganda.'
+                    );
                 }
                 if ($decision === 'APPROVED') {
                     $res = $service->approve($id, $userId, $note);
@@ -600,27 +665,28 @@ class ApprovalChainController extends ApiController
                 entityId: 0,
                 after: [
                     'requested' => count($ids),
-                    'success'   => count($success),
-                    'failed'    => count($failed),
-                    'note'      => $note,
+                    'success' => count($success),
+                    'failed' => count($failed),
+                    'note' => $note,
                     'success_ids' => array_column($success, 'id'),
-                    'failed_ids'  => array_column($failed, 'id'),
+                    'failed_ids' => array_column($failed, 'id'),
                 ],
                 description: sprintf(
                     'Bulk %s: %d/%d berhasil',
                     $decision === 'APPROVED' ? 'approve' : 'reject',
-                    count($success), count($ids)
+                    count($success),
+                    count($ids)
                 ),
                 severity: 'NOTICE',
             );
 
         return $this->ok([
             'success' => $success,
-            'failed'  => $failed,
+            'failed' => $failed,
             'summary' => [
                 'requested' => count($ids),
-                'success'   => count($success),
-                'failed'    => count($failed),
+                'success' => count($success),
+                'failed' => count($failed),
             ],
         ], sprintf('%d berhasil, %d gagal', count($success), count($failed)));
     }
@@ -657,27 +723,27 @@ class ApprovalChainController extends ApiController
                 }
             }
             $db->table('approval_chain_steps')->insert([
-                'company_id'           => $companyId,
-                'chain_id'             => $chainId,
-                'step_order'           => (int) ($s['step_order'] ?? ($i + 1)),
-                'name'                 => (string) ($s['name'] ?? ('Step ' . ($i + 1))),
-                'approver_type'        => $s['approver_type'] ?? 'SUPERVISOR',
-                'approver_role_id'     => $s['approver_role_id'] ?? null,
-                'approver_user_id'     => $s['approver_user_id'] ?? null,
+                'company_id' => $companyId,
+                'chain_id' => $chainId,
+                'step_order' => (int) ($s['step_order'] ?? ($i + 1)),
+                'name' => (string) ($s['name'] ?? ('Step ' . ($i + 1))),
+                'approver_type' => $s['approver_type'] ?? 'SUPERVISOR',
+                'approver_role_id' => $s['approver_role_id'] ?? null,
+                'approver_user_id' => $s['approver_user_id'] ?? null,
                 'approver_employee_id' => $s['approver_employee_id'] ?? null,
-                'condition_field'      => $s['condition_field'] ?? null,
-                'condition_op'         => $s['condition_op'] ?? null,
-                'condition_value'      => isset($s['condition_value']) ? (float) $s['condition_value'] : null,
+                'condition_field' => $s['condition_field'] ?? null,
+                'condition_op' => $s['condition_op'] ?? null,
+                'condition_value' => isset($s['condition_value']) ? (float) $s['condition_value'] : null,
                 // Kondisi baru (H1.3)
-                'condition_type'       => $conditionType ?: null,
+                'condition_type' => $conditionType ?: null,
                 'condition_value_json' => $conditionConfig !== null
                     ? (is_string($conditionConfig) ? $conditionConfig : json_encode($conditionConfig))
                     : null,
-                'is_required'          => (int) ($s['is_required'] ?? 1),
-                'allow_skip_if_self'   => (int) ($s['allow_skip_if_self'] ?? 1),
-                'sla_hours'            => isset($s['sla_hours']) ? (int) $s['sla_hours'] : null,
-                'created_at'           => $now,
-                'updated_at'           => $now,
+                'is_required' => (int) ($s['is_required'] ?? 1),
+                'allow_skip_if_self' => (int) ($s['allow_skip_if_self'] ?? 1),
+                'sla_hours' => isset($s['sla_hours']) ? (int) $s['sla_hours'] : null,
+                'created_at' => $now,
+                'updated_at' => $now,
             ]);
         }
     }
@@ -685,7 +751,9 @@ class ApprovalChainController extends ApiController
     private function findChainForTenant(\CodeIgniter\Database\BaseConnection $db, int $id): ?array
     {
         $companyId = $this->companyId();
-        if ($companyId <= 0) return null;
+        if ($companyId <= 0) {
+            return null;
+        }
 
         return $db->table('approval_chains')
             ->where('id', $id)
@@ -698,12 +766,28 @@ class ApprovalChainController extends ApiController
     private function approvalRequestBelongsToTenant(int $id): bool
     {
         $companyId = $this->companyId();
-        if ($companyId <= 0) return false;
+        if ($companyId <= 0) {
+            return false;
+        }
 
-        return \Config\Database::connect()->table('approval_requests')
+        return $this->approvalRequestExists($id);
+    }
+
+    private function isPayrollApprovalRequest(int $id): bool
+    {
+        return $this->approvalRequestExists($id, 'PAYROLL');
+    }
+
+    private function approvalRequestExists(int $id, ?string $module = null): bool
+    {
+        $builder = \Config\Database::connect()->table('approval_requests')
             ->where('id', $id)
-            ->where('company_id', $companyId)
-            ->countAllResults() === 1;
+            ->where('company_id', $this->companyId());
+        if ($module !== null) {
+            $builder->where('module', $module);
+        }
+
+        return $builder->countAllResults() === 1;
     }
 
     private function hasPendingRequests(

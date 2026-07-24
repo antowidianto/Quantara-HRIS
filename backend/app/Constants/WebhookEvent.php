@@ -16,33 +16,33 @@ namespace App\Constants;
 final class WebhookEvent
 {
     // ─── Employee lifecycle ──────────────────────────────────────────
-    public const EMPLOYEE_CREATED   = 'employee.created';
-    public const EMPLOYEE_UPDATED   = 'employee.updated';
-    public const EMPLOYEE_RESIGNED  = 'employee.resigned';
-    public const EMPLOYEE_REJOINED  = 'employee.rejoined';
+    public const EMPLOYEE_CREATED = 'employee.created';
+    public const EMPLOYEE_UPDATED = 'employee.updated';
+    public const EMPLOYEE_RESIGNED = 'employee.resigned';
+    public const EMPLOYEE_REJOINED = 'employee.rejoined';
 
     // ─── Payroll ─────────────────────────────────────────────────────
     public const PAYROLL_PERIOD_FINALIZED = 'payroll.period_finalized';
-    public const PAYROLL_PAID             = 'payroll.paid';
-    public const PAYSLIP_PUBLISHED        = 'payslip.published';
-    public const THR_GENERATED            = 'thr.generated';
+    public const PAYROLL_PAID = 'payroll.paid';
+    public const PAYSLIP_PUBLISHED = 'payslip.published';
+    public const THR_GENERATED = 'thr.generated';
 
     // ─── Leave ───────────────────────────────────────────────────────
     public const LEAVE_REQUESTED = 'leave.requested';
-    public const LEAVE_APPROVED  = 'leave.approved';
-    public const LEAVE_REJECTED  = 'leave.rejected';
-    public const LEAVE_CANCELED  = 'leave.canceled';
+    public const LEAVE_APPROVED = 'leave.approved';
+    public const LEAVE_REJECTED = 'leave.rejected';
+    public const LEAVE_CANCELED = 'leave.canceled';
 
     // ─── Overtime ────────────────────────────────────────────────────
     public const OVERTIME_REQUESTED = 'overtime.requested';
-    public const OVERTIME_APPROVED  = 'overtime.approved';
-    public const OVERTIME_REJECTED  = 'overtime.rejected';
+    public const OVERTIME_APPROVED = 'overtime.approved';
+    public const OVERTIME_REJECTED = 'overtime.rejected';
 
     // ─── Attendance ──────────────────────────────────────────────────
-    public const ATTENDANCE_LATE_ABSENT      = 'attendance.late_absent';
-    public const ATTENDANCE_ANOMALY_FLAGGED  = 'attendance.anomaly_flagged';
-    public const ATTENDANCE_CHANGE_APPROVED  = 'attendance.change_approved';
-    public const ATTENDANCE_CHANGE_REJECTED  = 'attendance.change_rejected';
+    public const ATTENDANCE_LATE_ABSENT = 'attendance.late_absent';
+    public const ATTENDANCE_ANOMALY_FLAGGED = 'attendance.anomaly_flagged';
+    public const ATTENDANCE_CHANGE_APPROVED = 'attendance.change_approved';
+    public const ATTENDANCE_CHANGE_REJECTED = 'attendance.change_rejected';
 
     public const REIMBURSEMENT_APPROVED = 'reimbursement.approved';
     public const REIMBURSEMENT_REJECTED = 'reimbursement.rejected';
@@ -52,7 +52,7 @@ final class WebhookEvent
     public const BUSINESS_TRIP_REJECTED = 'business_trip.rejected';
 
     // ─── Recruitment ─────────────────────────────────────────────────
-    public const CANDIDATE_HIRED  = 'recruitment.candidate_hired';
+    public const CANDIDATE_HIRED = 'recruitment.candidate_hired';
     public const POSTING_PUBLISHED = 'recruitment.posting_published';
     public const CANDIDATE_REGISTERED = 'recruitment.candidate_registered';
     public const CANDIDATE_HIRE_REJECTED = 'recruitment.candidate_hire_rejected';
@@ -60,20 +60,22 @@ final class WebhookEvent
     public const ONLINE_TEST_COMPLETED = 'recruitment.online_test_completed';
 
     // ─── Disciplinary ────────────────────────────────────────────────
-    public const SP_ISSUED  = 'disciplinary.sp_issued';
+    public const SP_ISSUED = 'disciplinary.sp_issued';
     public const SP_REVOKED = 'disciplinary.sp_revoked';
 
     // ─── Severance / PHK ─────────────────────────────────────────────
     public const SEVERANCE_FINALIZED = 'severance.finalized';
-    public const SEVERANCE_PAID      = 'severance.paid';
+    public const SEVERANCE_PAID = 'severance.paid';
 
     // ─── Bonus Engine (Sprint 16+) ───────────────────────────────────
     public const BONUS_RUN_CALCULATED = 'bonus.run_calculated';
-    public const BONUS_RUN_APPROVED   = 'bonus.run_approved';
-    public const BONUS_RUN_REJECTED   = 'bonus.run_rejected';
-    public const BONUS_RUN_PAID       = 'bonus.run_paid';
+    public const BONUS_RUN_APPROVED = 'bonus.run_approved';
+    public const BONUS_RUN_REJECTED = 'bonus.run_rejected';
+    public const BONUS_RUN_PAID = 'bonus.run_paid';
     public const PAYROLL_ADJUSTMENT_APPROVED = 'payroll_adjustment.approved';
     public const PAYROLL_ADJUSTMENT_REJECTED = 'payroll_adjustment.rejected';
+    public const PAYROLL_PERIOD_APPROVED = 'payroll.period_approved';
+    public const PAYROLL_PERIOD_REJECTED = 'payroll.period_rejected';
     public const COMPENSATION_REVIEW_APPROVED = 'compensation_review.approved';
     public const COMPENSATION_REVIEW_REJECTED = 'compensation_review.rejected';
     public const TRAINING_REGISTRATION_APPROVED = 'training.registration_approved';
@@ -140,6 +142,8 @@ final class WebhookEvent
         self::BONUS_RUN_PAID,
         self::PAYROLL_ADJUSTMENT_APPROVED,
         self::PAYROLL_ADJUSTMENT_REJECTED,
+        self::PAYROLL_PERIOD_APPROVED,
+        self::PAYROLL_PERIOD_REJECTED,
         self::COMPENSATION_REVIEW_APPROVED,
         self::COMPENSATION_REVIEW_REJECTED,
         self::TRAINING_REGISTRATION_APPROVED,
@@ -171,7 +175,9 @@ final class WebhookEvent
 
     /**
      * Filter list event yang valid (drop yang tidak dikenal).
+     *
      * @param string[] $events
+     *
      * @return string[]
      */
     public static function filterValid(array $events): array

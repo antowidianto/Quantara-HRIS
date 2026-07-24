@@ -11,6 +11,7 @@ final class AuthRoutes
         // Auth (authenticated)
         $routes->post('auth/logout', 'Auth\AuthController::logout', ['filter' => 'ownership:account']);
         $routes->get('auth/me', 'Auth\AuthController::me', ['filter' => 'ownership:account']);
+        $routes->get('auth/authorization', 'Auth\AuthController::authorization', ['filter' => 'ownership:account']);
         $routes->post('auth/change-password', 'Auth\AuthController::changePassword', ['filter' => 'ownership:account']);
         $routes->post('auth/2fa/enable', 'Auth\AuthController::enableTwoFactor', ['filter' => 'ownership:account']);
         $routes->post('auth/2fa/disable', 'Auth\AuthController::disableTwoFactor', ['filter' => 'ownership:account']);

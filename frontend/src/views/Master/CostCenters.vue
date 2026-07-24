@@ -25,9 +25,12 @@ import {
 import CostCenterNode from './CostCenterNode.vue'
 import EmployeePicker from '@/components/EmployeePicker.vue'
 import ExcelImporter from '@/components/ExcelImporter.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const toast = useToast()
 const { t, locale } = useI18n()
+const auth = useAuthStore()
+const canManage = computed(() => auth.can('cost_center.manage'))
 
 // ─── State ──────────────────────────────────────────────────────
 const tab = ref('list') // 'list' | 'tree' | 'budget'
@@ -429,16 +432,16 @@ watch(tab, async (val) => {
         </p>
       </div>
       <div class="flex gap-2 flex-wrap">
-        <ExcelImporter
+        <ExcelImporter v-if="canManage"
           resource="cost_centers"
           :button-label="t('cost_centers.import_excel')"
           @committed="fetchList(); fetchTree()"
         />
-        <button type="button" class="btn-secondary" @click="backfillEmployees">
+        <button v-if="canManage" type="button" class="btn-secondary" @click="backfillEmployees">
           <ArrowPathIcon class="w-4 h-4" />
           {{ t('cost_centers.backfill') }}
         </button>
-        <button type="button" class="btn-primary" @click="openCreate">
+        <button v-if="canManage" type="button" class="btn-primary" @click="openCreate">
           <PlusIcon class="w-4 h-4" />
           {{ t('cost_centers.add') }}
         </button>
@@ -535,11 +538,11 @@ watch(tab, async (val) => {
                   >
                     <ChartBarIcon class="w-4 h-4" />
                   </button>
-                  <button type="button" class="text-gray-500 hover:text-primary-600" v-bind="{ title: t('cost_centers.edit'), 'aria-label': t('cost_centers.edit') }" @click="openEdit(item)">
+                  <button v-if="canManage" type="button" class="text-gray-500 hover:text-primary-600" v-bind="{ title: t('cost_centers.edit'), 'aria-label': t('cost_centers.edit') }" @click="openEdit(item)">
                     <PencilIcon class="w-4 h-4" />
                   </button>
                   <button
-                    v-if="item.code !== 'DEFAULT'"
+                    v-if="canManage && item.code !== 'DEFAULT'"
                     type="button" class="text-gray-500 hover:text-red-600"
                     v-bind="{ title: t('cost_centers.delete_action'), 'aria-label': t('cost_centers.delete_action') }"
                     @click="remove(item)"
@@ -575,6 +578,7 @@ watch(tab, async (val) => {
             <CostCenterNode
               :node="node"
               :expanded="treeExpanded"
+              :can-manage="canManage"
               @toggle="toggleNode"
               @edit="openEdit"
               @view-budget="(id) => { tab = 'budget'; selectCostCenterForBudget(id) }"
@@ -611,7 +615,7 @@ watch(tab, async (val) => {
             :max="2100"
           />
 
-          <button v-if="selectedCcId" type="button" class="btn-primary ml-auto" @click="openBudgetForm">
+          <button v-if="selectedCcId && canManage" type="button" class="btn-primary ml-auto" @click="openBudgetForm">
             <PlusIcon class="w-4 h-4" />
             {{ t('cost_centers.add_budget') }}
           </button>
@@ -765,7 +769,7 @@ watch(tab, async (val) => {
                 <td class="text-right tabular-nums">{{ fmtCurrency(row.amount) }}</td>
                 <td class="text-xs text-gray-500">{{ row.notes || '—' }}</td>
                 <td class="text-right">
-                  <button type="button" class="text-gray-500 hover:text-red-600" v-bind="{ title: t('cost_centers.delete_action'), 'aria-label': t('cost_centers.delete_action') }" @click="removeBudget(row)">
+                  <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600" v-bind="{ title: t('cost_centers.delete_action'), 'aria-label': t('cost_centers.delete_action') }" @click="removeBudget(row)">
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </td>

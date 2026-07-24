@@ -29,13 +29,13 @@ use CodeIgniter\CLI\CLI;
  */
 class SecurityScanTenantLeaks extends BaseCommand
 {
-    protected $group       = 'Security';
-    protected $name        = 'security:scan-tenant-leaks';
+    protected $group = 'Security';
+    protected $name = 'security:scan-tenant-leaks';
     protected $description = 'Static scan untuk multi-tenant isolation leaks (S2.2 Roadmap SaaS)';
-    protected $usage       = 'security:scan-tenant-leaks [--strict] [--json] [--update-baseline]';
-    protected $options     = [
+    protected $usage = 'security:scan-tenant-leaks [--strict] [--json] [--update-baseline]';
+    protected $options = [
         '--strict' => 'Exit code 1 kalau ada finding non-baseline (untuk CI gate)',
-        '--json'   => 'Output hanya path JSON report (suppress stdout summary)',
+        '--json' => 'Output hanya path JSON report (suppress stdout summary)',
         '--update-baseline' => 'Replace the version-controlled baseline with current findings',
     ];
 
@@ -77,25 +77,25 @@ class SecurityScanTenantLeaks extends BaseCommand
 
     public function run(array $params)
     {
-        $strict   = $this->optionEnabled('strict', $params);
+        $strict = $this->optionEnabled('strict', $params);
         $jsonOnly = $this->optionEnabled('json', $params);
         $updateBaseline = $this->optionEnabled('update-baseline', $params);
 
         $base = ROOTPATH; // backend/
 
         $findings = [];
-        $scanned  = 0;
+        $scanned = 0;
 
         foreach ($this->targetDirs as $rel) {
             $dir = $base . $rel;
-            if (! is_dir($dir)) {
+            if (!is_dir($dir)) {
                 continue;
             }
             $iterator = new \RecursiveIteratorIterator(
                 new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
             );
             foreach ($iterator as $file) {
-                if (! $file->isFile() || $file->getExtension() !== 'php') {
+                if (!$file->isFile() || $file->getExtension() !== 'php') {
                     continue;
                 }
                 $scanned++;
@@ -107,7 +107,7 @@ class SecurityScanTenantLeaks extends BaseCommand
         $baselinePath = ROOTPATH . 'security/tenant-leak-baseline.json';
         if ($updateBaseline) {
             $baselineDir = dirname($baselinePath);
-            if (! is_dir($baselineDir)) {
+            if (!is_dir($baselineDir)) {
                 mkdir($baselineDir, 0750, true);
             }
             file_put_contents($baselinePath, json_encode([
@@ -124,26 +124,29 @@ class SecurityScanTenantLeaks extends BaseCommand
 
         // Tulis report JSON
         $reportDir = WRITEPATH . 'security';
-        if (! is_dir($reportDir)) {
+        if (!is_dir($reportDir)) {
             @mkdir($reportDir, 0750, true);
         }
         $reportPath = $reportDir . '/tenant-leak-audit.json';
         $report = [
-            'scanned_at'        => date('Y-m-d H:i:s'),
-            'files_scanned'     => $scanned,
-            'total_findings'    => count($findings),
-            'baseline_skipped'  => count($findings) - count($newFindings),
-            'new_findings'      => count($newFindings),
-            'findings_by_rule'  => $this->groupByRule($findings),
-            'new'               => $newFindings,
-            'all'               => $findings,
+            'scanned_at' => date('Y-m-d H:i:s'),
+            'files_scanned' => $scanned,
+            'total_findings' => count($findings),
+            'baseline_skipped' => count($findings) - count($newFindings),
+            'new_findings' => count($newFindings),
+            'findings_by_rule' => $this->groupByRule($findings),
+            'new' => $newFindings,
+            'all' => $findings,
         ];
         file_put_contents($reportPath, json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         if (\Config\Database::connect()->tableExists('business_job_runs')) {
             $monitor = new \App\Libraries\System\BusinessJobMonitor();
             $runId = $monitor->start('security.tenant_leak_scan', null, null, ['files_scanned' => $scanned]);
-            if ($newFindings === []) $monitor->succeed($runId, $scanned, ['findings' => count($findings), 'new' => 0]);
-            else $monitor->fail($runId, 'TENANT_LEAK_FINDINGS', count($newFindings), ['findings' => count($findings), 'new' => count($newFindings)]);
+            if ($newFindings === []) {
+                $monitor->succeed($runId, $scanned, ['findings' => count($findings), 'new' => 0]);
+            } else {
+                $monitor->fail($runId, 'TENANT_LEAK_FINDINGS', count($newFindings), ['findings' => count($findings), 'new' => count($newFindings)]);
+            }
         }
 
         if ($jsonOnly) {
@@ -151,6 +154,7 @@ class SecurityScanTenantLeaks extends BaseCommand
             if ($strict && count($newFindings) > 0) {
                 exit(1);
             }
+
             return;
         }
 
@@ -160,13 +164,15 @@ class SecurityScanTenantLeaks extends BaseCommand
         CLI::write('Files scanned        : ' . $scanned, 'white');
         CLI::write('Total findings       : ' . count($findings), 'white');
         CLI::write('Baseline-skipped     : ' . (count($findings) - count($newFindings)), 'yellow');
-        CLI::write('New findings         : ' . count($newFindings),
-            count($newFindings) > 0 ? 'red' : 'green');
+        CLI::write(
+            'New findings         : ' . count($newFindings),
+            count($newFindings) > 0 ? 'red' : 'green'
+        );
         CLI::write('Report file          : ' . $reportPath, 'white');
         CLI::write('Baseline file        : ' . $baselinePath, 'white');
         CLI::write('');
 
-        if (! empty($report['findings_by_rule'])) {
+        if (!empty($report['findings_by_rule'])) {
             CLI::write('Findings by rule:', 'cyan');
             foreach ($report['findings_by_rule'] as $rule => $count) {
                 CLI::write("  • {$rule}: {$count}", 'white');
@@ -175,7 +181,7 @@ class SecurityScanTenantLeaks extends BaseCommand
         }
 
         // Tampilkan top 20 finding terbaru saja
-        if (! empty($newFindings)) {
+        if (!empty($newFindings)) {
             CLI::write('Top new findings (first 20):', 'red');
             foreach (array_slice($newFindings, 0, 20) as $f) {
                 CLI::write(sprintf(
@@ -232,6 +238,14 @@ class SecurityScanTenantLeaks extends BaseCommand
                 continue;
             }
 
+            // A suppression is allowed only on the immediately preceding line.
+            // It is intended for tenant-less junction/global child tables whose
+            // parent ownership has already been checked in the same method.
+            $previousLine = $i > 0 ? $lines[$i - 1] : '';
+            if (str_contains($previousLine, '@tenant-scope-reviewed')) {
+                continue;
+            }
+
             // Pattern: ->table('xxx')
             if (preg_match("/->table\(\s*['\"]([a-z_]+)['\"]\s*\)/i", $line, $m)) {
                 $tableName = $m[1];
@@ -251,15 +265,34 @@ class SecurityScanTenantLeaks extends BaseCommand
                         $methodPrefix,
                     );
                 }
-                if (! $this->hasTenantGuard($window) && ! $guardedInsert) {
+                if (!$this->hasTenantGuard($window) && !$guardedInsert) {
                     $found[] = [
-                        'rule'     => 'TABLE_NO_COMPANY_FILTER',
+                        'rule' => 'TABLE_NO_COMPANY_FILTER',
                         'severity' => 'HIGH',
-                        'file'     => $relPath,
-                        'line'     => $lineNo,
-                        'context'  => $context,
-                        'table'    => $tableName,
-                        'snippet'  => trim($line),
+                        'file' => $relPath,
+                        'line' => $lineNo,
+                        'context' => $context,
+                        'table' => $tableName,
+                        'snippet' => trim($line),
+                    ];
+                }
+            }
+
+            // Dynamic table names previously escaped Rule 1 entirely. They
+            // are common in generic CRUD/import code, so require the same
+            // visible tenant guard as literal table names.
+            if (preg_match("/->table\(\s*(?!['\"])([^)]+)\)/i", $line, $dynamicMatch)) {
+                $window = implode("\n", array_slice($lines, $i, 12))
+                    . "\n" . $this->queryScopeWindow($lines, $i);
+                if (!$this->hasTenantGuard($window)) {
+                    $found[] = [
+                        'rule' => 'DYNAMIC_TABLE_NO_TENANT_FILTER',
+                        'severity' => 'HIGH',
+                        'file' => $relPath,
+                        'line' => $lineNo,
+                        'context' => $context,
+                        'table' => trim($dynamicMatch[1]),
+                        'snippet' => trim($line),
                     ];
                 }
             }
@@ -268,15 +301,15 @@ class SecurityScanTenantLeaks extends BaseCommand
             if (preg_match("/->query\(\s*['\"](SELECT[^'\"]+)['\"]/i", $line, $m)) {
                 $sql = strtolower($m[1]);
                 if (str_contains($sql, ' from ')
-                    && ! str_contains($sql, 'company_id')
-                    && ! preg_match('/from\s+(' . implode('|', $this->reviewedGlobalTables()) . ')/', $sql)) {
+                    && !str_contains($sql, 'company_id')
+                    && !preg_match('/from\s+(' . implode('|', $this->reviewedGlobalTables()) . ')/', $sql)) {
                     $found[] = [
-                        'rule'     => 'RAW_QUERY_NO_COMPANY_FILTER',
+                        'rule' => 'RAW_QUERY_NO_COMPANY_FILTER',
                         'severity' => 'HIGH',
-                        'file'     => $relPath,
-                        'line'     => $lineNo,
-                        'context'  => $context,
-                        'snippet'  => trim($line),
+                        'file' => $relPath,
+                        'line' => $lineNo,
+                        'context' => $context,
+                        'snippet' => trim($line),
                     ];
                 }
             }
@@ -285,17 +318,17 @@ class SecurityScanTenantLeaks extends BaseCommand
             // Hanya warning di Controller (untuk Service biasanya internal call)
             if (str_contains($relPath, 'app/Controllers/')) {
                 if (preg_match('/->find\(\s*\$[a-z_]+\s*\)/i', $line)
-                    && ! preg_match('/findScoped|findChild|findInBatch/', $line)) {
+                    && !preg_match('/findScoped|findChild|findInBatch/', $line)) {
                     // Skip kalau di line yang sama ada $tenantContext / scope check
                     $window = implode("\n", array_slice($lines, max(0, $i - 3), 6));
-                    if (! preg_match('/findScoped|forTenant|company_id|scoped\(/', $window)) {
+                    if (!preg_match('/findScoped|forTenant|company_id|scoped\(/', $window)) {
                         $found[] = [
-                            'rule'     => 'MODEL_FIND_NO_SCOPE',
+                            'rule' => 'MODEL_FIND_NO_SCOPE',
                             'severity' => 'MEDIUM',
-                            'file'     => $relPath,
-                            'line'     => $lineNo,
-                            'context'  => $context,
-                            'snippet'  => trim($line),
+                            'file' => $relPath,
+                            'line' => $lineNo,
+                            'context' => $context,
+                            'snippet' => trim($line),
                         ];
                     }
                 }
@@ -304,12 +337,12 @@ class SecurityScanTenantLeaks extends BaseCommand
             // Rule 4: setTable() — bypass model table; suspicious
             if (preg_match('/->setTable\(/', $line)) {
                 $found[] = [
-                    'rule'     => 'MODEL_SET_TABLE_DYNAMIC',
+                    'rule' => 'MODEL_SET_TABLE_DYNAMIC',
                     'severity' => 'LOW',
-                    'file'     => $relPath,
-                    'line'     => $lineNo,
-                    'context'  => $context,
-                    'snippet'  => trim($line),
+                    'file' => $relPath,
+                    'line' => $lineNo,
+                    'context' => $context,
+                    'snippet' => trim($line),
                 ];
             }
         }
@@ -334,7 +367,7 @@ class SecurityScanTenantLeaks extends BaseCommand
      */
     private function filterBaseline(array $findings, array $baseline): array
     {
-        if (empty($baseline['fingerprints']) || ! is_array($baseline['fingerprints'])) {
+        if (empty($baseline['fingerprints']) || !is_array($baseline['fingerprints'])) {
             return $findings;
         }
         $remaining = $baseline['fingerprints'];
@@ -347,12 +380,14 @@ class SecurityScanTenantLeaks extends BaseCommand
             }
             $new[] = $finding;
         }
+
         return $new;
     }
 
     private function fingerprint(array $f): string
     {
         $snippet = preg_replace('/\s+/', ' ', trim((string) ($f['snippet'] ?? '')));
+
         return hash('sha256', implode('|', [
             $f['rule'] ?? '',
             $f['file'] ?? '',
@@ -420,6 +455,7 @@ class SecurityScanTenantLeaks extends BaseCommand
             $this->globalTables,
             array_keys($classification['global'] ?? []),
         )));
+
         return $tables;
     }
 
@@ -436,6 +472,7 @@ class SecurityScanTenantLeaks extends BaseCommand
             $counts[$fingerprint] = ($counts[$fingerprint] ?? 0) + 1;
         }
         ksort($counts);
+
         return $counts;
     }
 
@@ -445,6 +482,7 @@ class SecurityScanTenantLeaks extends BaseCommand
             return true;
         }
         $value = CLI::getOption($name);
+
         return $value !== null && $value !== false;
     }
 
@@ -456,6 +494,7 @@ class SecurityScanTenantLeaks extends BaseCommand
             $out[$r] = ($out[$r] ?? 0) + 1;
         }
         arsort($out);
+
         return $out;
     }
 }

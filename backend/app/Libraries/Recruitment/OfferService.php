@@ -58,9 +58,13 @@ class OfferService
                 ->where('company_id', $companyId)
                 ->where('offer_number', $candidate)
                 ->countAllResults();
-            if ($exists === 0) return $candidate;
-            $count++; $tries++;
+            if ($exists === 0) {
+                return $candidate;
+            }
+            $count++;
+            $tries++;
         }
+
         return $prefix . str_pad((string) ($count + 1), 5, '0', STR_PAD_LEFT);
     }
 
@@ -86,17 +90,18 @@ class OfferService
 
         $cand = $db->table('candidates')
             ->where('id', $candidateId)
+            ->where('company_id', (int) ($data['company_id'] ?? 0))
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
-        if (! $cand) {
+        if (!$cand) {
             throw new \InvalidArgumentException("Candidate #{$candidateId} tidak ditemukan");
         }
 
         // Stage harus OFFER (atau lebih tinggi — tapi HR biasanya buat
         // offer di stage OFFER. Kalau sudah HIRED, offer tidak relevan)
-        if (! in_array($cand['current_stage'], ['OFFER', 'INTERVIEW_USER'], true)) {
+        if (!in_array($cand['current_stage'], ['OFFER', 'INTERVIEW_USER'], true)) {
             throw new \RuntimeException(
-                "Offer hanya bisa dibuat di stage OFFER atau INTERVIEW_USER. "
+                'Offer hanya bisa dibuat di stage OFFER atau INTERVIEW_USER. '
                 . "Stage saat ini: {$cand['current_stage']}"
             );
         }
@@ -121,7 +126,7 @@ class OfferService
 
         $employmentStatus = strtoupper((string) ($data['employment_status'] ?? 'PKWTT'));
         $validStatus = ['PKWTT', 'PKWT', 'PROBATION', 'MAGANG', 'OUTSOURCING'];
-        if (! in_array($employmentStatus, $validStatus, true)) {
+        if (!in_array($employmentStatus, $validStatus, true)) {
             throw new \InvalidArgumentException(
                 'employment_status harus salah satu: ' . implode(', ', $validStatus)
             );
@@ -144,29 +149,29 @@ class OfferService
 
         $now = date('Y-m-d H:i:s');
         $insert = [
-            'company_id'         => (int) $cand['company_id'],
-            'candidate_id'       => $candidateId,
-            'offer_number'       => $this->nextOfferNumber((int) $cand['company_id']),
-            'job_posting_id'     => (int) ($cand['job_posting_id'] ?? 0) ?: null,
-            'position_id'        => isset($data['position_id']) ? (int) $data['position_id'] : null,
-            'department_id'      => isset($data['department_id']) ? (int) $data['department_id'] : null,
-            'branch_id'          => isset($data['branch_id']) ? (int) $data['branch_id'] : null,
-            'employment_status'  => $employmentStatus,
+            'company_id' => (int) $cand['company_id'],
+            'candidate_id' => $candidateId,
+            'offer_number' => $this->nextOfferNumber((int) $cand['company_id']),
+            'job_posting_id' => (int) ($cand['job_posting_id'] ?? 0) ?: null,
+            'position_id' => isset($data['position_id']) ? (int) $data['position_id'] : null,
+            'department_id' => isset($data['department_id']) ? (int) $data['department_id'] : null,
+            'branch_id' => isset($data['branch_id']) ? (int) $data['branch_id'] : null,
+            'employment_status' => $employmentStatus,
             'proposed_join_date' => $data['proposed_join_date'] ?? null,
-            'probation_months'   => $probationMonths,
-            'basic_salary'       => $basicSalary,
-            'allowances_json'    => $this->normalizeAllowances($data['allowances'] ?? []),
-            'joining_bonus'      => (float) ($data['joining_bonus'] ?? 0),
-            'benefits_json'      => isset($data['benefits']) && is_array($data['benefits'])
+            'probation_months' => $probationMonths,
+            'basic_salary' => $basicSalary,
+            'allowances_json' => $this->normalizeAllowances($data['allowances'] ?? []),
+            'joining_bonus' => (float) ($data['joining_bonus'] ?? 0),
+            'benefits_json' => isset($data['benefits']) && is_array($data['benefits'])
                 ? json_encode($data['benefits'], JSON_UNESCAPED_UNICODE)
                 : null,
-            'currency'           => strtoupper((string) ($data['currency'] ?? 'IDR')),
-            'status'             => 'DRAFT',
-            'response_deadline'  => $data['response_deadline'] ?? null,
-            'internal_notes'     => $data['internal_notes'] ?? null,
-            'created_by'         => $userId,
-            'created_at'         => $now,
-            'updated_at'         => $now,
+            'currency' => strtoupper((string) ($data['currency'] ?? 'IDR')),
+            'status' => 'DRAFT',
+            'response_deadline' => $data['response_deadline'] ?? null,
+            'internal_notes' => $data['internal_notes'] ?? null,
+            'created_by' => $userId,
+            'created_at' => $now,
+            'updated_at' => $now,
         ];
 
         $db->table('candidate_offers')->insert($insert);
@@ -174,11 +179,14 @@ class OfferService
 
         try {
             Services::audit()->forModule('RECRUITMENT')->logCreate(
-                'candidate_offer', $offerId, $insert,
+                'candidate_offer',
+                $offerId,
+                $insert,
                 "Buat offer DRAFT {$insert['offer_number']} untuk {$cand['full_name']} "
-                . "({$employmentStatus}, basic " . number_format($basicSalary, 0, ',', '.') . ")"
+                . "({$employmentStatus}, basic " . number_format($basicSalary, 0, ',', '.') . ')'
             );
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         return $this->loadOffer($offerId);
     }
@@ -190,20 +198,27 @@ class OfferService
      */
     private function normalizeAllowances(array $input): ?string
     {
-        if (empty($input)) return null;
+        if (empty($input)) {
+            return null;
+        }
         $clean = [];
         foreach ($input as $a) {
-            if (! is_array($a)) continue;
+            if (!is_array($a)) {
+                continue;
+            }
             $label = trim((string) ($a['label'] ?? ''));
             $amount = (float) ($a['amount'] ?? 0);
-            if ($label === '' || $amount <= 0) continue;
+            if ($label === '' || $amount <= 0) {
+                continue;
+            }
             $clean[] = [
-                'label'      => $label,
-                'amount'     => $amount,
-                'type'       => strtolower((string) ($a['type'] ?? 'fixed')),
+                'label' => $label,
+                'amount' => $amount,
+                'type' => strtolower((string) ($a['type'] ?? 'fixed')),
                 'is_taxable' => (bool) ($a['is_taxable'] ?? true),
             ];
         }
+
         return empty($clean) ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
     }
 
@@ -215,10 +230,10 @@ class OfferService
     {
         $db = Database::connect();
         $offer = $this->loadOffer($offerId);
-        if (! in_array($offer['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
+        if (!in_array($offer['status'], ['DRAFT', 'APPROVAL_REJECTED'], true)) {
             throw new \RuntimeException(
                 "Offer tidak bisa diedit di status {$offer['status']}. Hanya DRAFT/APPROVAL_REJECTED yang bisa diedit. "
-                . "Untuk perubahan setelah SENT, withdraw offer & buat baru."
+                . 'Untuk perubahan setelah SENT, withdraw offer & buat baru.'
             );
         }
 
@@ -235,7 +250,9 @@ class OfferService
         }
         if (array_key_exists('basic_salary', $data)) {
             $bs = (float) $data['basic_salary'];
-            if ($bs <= 0) throw new \InvalidArgumentException('basic_salary harus > 0');
+            if ($bs <= 0) {
+                throw new \InvalidArgumentException('basic_salary harus > 0');
+            }
             $update['basic_salary'] = $bs;
         }
         if (array_key_exists('joining_bonus', $data)) {
@@ -243,7 +260,7 @@ class OfferService
         }
         if (array_key_exists('employment_status', $data)) {
             $es = strtoupper((string) $data['employment_status']);
-            if (! in_array($es, ['PKWTT', 'PKWT', 'PROBATION', 'MAGANG', 'OUTSOURCING'], true)) {
+            if (!in_array($es, ['PKWTT', 'PKWT', 'PROBATION', 'MAGANG', 'OUTSOURCING'], true)) {
                 throw new \InvalidArgumentException('employment_status invalid');
             }
             $update['employment_status'] = $es;
@@ -283,9 +300,13 @@ class OfferService
 
         try {
             Services::audit()->forModule('RECRUITMENT')->logUpdate(
-                'candidate_offer', $offerId, $offer, $update
+                'candidate_offer',
+                $offerId,
+                $offer,
+                $update
             );
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         return $this->loadOffer($offerId);
     }
@@ -298,10 +319,14 @@ class OfferService
     {
         $offer = $this->loadOffer($offerId);
         $result = (new CandidateOfferApprovalWorkflowService())->submit(
-            $offerId, (int) $offer['company_id'], $userId, $note
+            $offerId,
+            (int) $offer['company_id'],
+            $userId,
+            $note
         );
         $submitted = $result['offer'];
         $submitted['approval'] = $result['approval'];
+
         return $submitted;
     }
 
@@ -325,7 +350,7 @@ class OfferService
         ?string $rejectionReason = null,
     ): array {
         $decision = strtoupper($decision);
-        if (! in_array($decision, ['ACCEPTED', 'REJECTED'], true)) {
+        if (!in_array($decision, ['ACCEPTED', 'REJECTED'], true)) {
             throw new \InvalidArgumentException('decision harus ACCEPTED atau REJECTED');
         }
 
@@ -334,25 +359,26 @@ class OfferService
         if ($offer['status'] !== 'SENT') {
             throw new \RuntimeException(
                 "Offer tidak bisa di-respond di status {$offer['status']}. "
-                . "Hanya SENT yang bisa direspon."
+                . 'Hanya SENT yang bisa direspon.'
             );
         }
 
         // Cek deadline — kalau lewat, auto-set EXPIRED dulu
         if ($offer['response_deadline'] && strtotime($offer['response_deadline'] . ' 23:59:59') < time()) {
             $this->expire($offerId, 'system');
+
             throw new \RuntimeException(
                 "Offer sudah expired (deadline {$offer['response_deadline']}). "
-                . "Hubungi HR untuk re-issue offer baru."
+                . 'Hubungi HR untuk re-issue offer baru.'
             );
         }
 
         $now = date('Y-m-d H:i:s');
         $update = [
-            'status'         => $decision,
-            'responded_at'   => $now,
-            'response_note'  => $responseNote,
-            'updated_at'     => $now,
+            'status' => $decision,
+            'responded_at' => $now,
+            'response_note' => $responseNote,
+            'updated_at' => $now,
         ];
         if ($decision === 'REJECTED' && $rejectionReason) {
             $update['rejection_reason'] = $rejectionReason;
@@ -376,7 +402,9 @@ class OfferService
             }
 
             // Notifikasi HR untuk lanjut hire convertion
-            $this->notifyHr($offer['company_id'], 'offer.accepted',
+            $this->notifyHr(
+                $offer['company_id'],
+                'offer.accepted',
                 'Offer diterima — siap di-hire',
                 "Kandidat menerima offer {$offer['offer_number']}. "
                 . "Silakan klik tombol 'Hire' di pipeline untuk convert ke employee."
@@ -392,7 +420,8 @@ class OfferService
                     . ($responseNote ? ': ' . mb_substr($responseNote, 0, 100) : ''),
                 severity: $decision === 'REJECTED' ? 'WARNING' : 'NOTICE',
             );
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         return $this->loadOffer($offerId);
     }
@@ -424,7 +453,7 @@ class OfferService
         ?string $userAgent = null,
     ): array {
         $decision = strtoupper($decision);
-        if (! in_array($decision, ['ACCEPTED', 'REJECTED'], true)) {
+        if (!in_array($decision, ['ACCEPTED', 'REJECTED'], true)) {
             throw new \InvalidArgumentException('decision harus ACCEPTED atau REJECTED');
         }
 
@@ -433,23 +462,24 @@ class OfferService
         if ($offer['status'] !== 'SENT') {
             throw new \RuntimeException(
                 "Offer tidak bisa di-respond di status {$offer['status']}. "
-                . "Hanya SENT yang bisa direspon."
+                . 'Hanya SENT yang bisa direspon.'
             );
         }
         if ($offer['response_deadline'] && strtotime($offer['response_deadline'] . ' 23:59:59') < time()) {
             $this->expire($offerId, 'system');
+
             throw new \RuntimeException(
                 "Offer sudah expired (deadline {$offer['response_deadline']}). "
-                . "Hubungi HR untuk re-issue offer baru."
+                . 'Hubungi HR untuk re-issue offer baru.'
             );
         }
 
         $now = date('Y-m-d H:i:s');
         $update = [
-            'status'         => $decision,
-            'responded_at'   => $now,
-            'response_note'  => $responseNote,
-            'updated_at'     => $now,
+            'status' => $decision,
+            'responded_at' => $now,
+            'response_note' => $responseNote,
+            'updated_at' => $now,
         ];
         if ($decision === 'REJECTED' && $rejectionReason) {
             $update['rejection_reason'] = $rejectionReason;
@@ -470,14 +500,18 @@ class OfferService
                     log_message('warning', 'Auto-progress to HIRED after candidate self-accept failed: ' . $e->getMessage());
                 }
             }
-            $this->notifyHr($offer['company_id'], 'offer.accepted',
+            $this->notifyHr(
+                $offer['company_id'],
+                'offer.accepted',
                 'Offer diterima oleh kandidat (self-service)',
                 "Kandidat {$offer['candidate_name']} menerima offer {$offer['offer_number']} via Career Portal. "
                 . "Silakan klik tombol 'Hire' di pipeline untuk convert ke employee."
             );
         } else {
             // REJECTED — kabari HR juga supaya bisa re-engage atau cari kandidat lain
-            $this->notifyHr($offer['company_id'], 'offer.rejected',
+            $this->notifyHr(
+                $offer['company_id'],
+                'offer.rejected',
                 'Offer ditolak oleh kandidat',
                 "Kandidat {$offer['candidate_name']} menolak offer {$offer['offer_number']} via Career Portal."
                 . ($rejectionReason ? "\n\nAlasan: {$rejectionReason}" : '')
@@ -498,13 +532,13 @@ class OfferService
                         . ($responseNote ? ': ' . mb_substr($responseNote, 0, 100) : ''),
                     severity: $decision === 'REJECTED' ? 'WARNING' : 'NOTICE',
                     metadata: [
-                        'actor'                => 'candidate',
+                        'actor' => 'candidate',
                         'candidate_account_id' => $candidateAccountId,
-                        'candidate_name'       => $offer['candidate_name'] ?? null,
-                        'candidate_email'      => $offer['candidate_email'] ?? null,
-                        'ip_address'           => $ipAddress,
-                        'user_agent'           => $userAgent ? mb_substr($userAgent, 0, 255) : null,
-                        'rejection_reason'     => $decision === 'REJECTED' ? $rejectionReason : null,
+                        'candidate_name' => $offer['candidate_name'] ?? null,
+                        'candidate_email' => $offer['candidate_email'] ?? null,
+                        'ip_address' => $ipAddress,
+                        'user_agent' => $userAgent ? mb_substr($userAgent, 0, 255) : null,
+                        'rejection_reason' => $decision === 'REJECTED' ? $rejectionReason : null,
                     ],
                 );
         } catch (\Throwable $e) {
@@ -525,16 +559,20 @@ class OfferService
         }
         $db = Database::connect();
         $offer = $this->loadOffer($offerId);
-        if (! in_array($offer['status'], ['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'SENT'], true)) {
+        if (!in_array($offer['status'], ['DRAFT', 'PENDING_APPROVAL', 'APPROVAL_REJECTED', 'SENT'], true)) {
             throw new \RuntimeException("Offer tidak bisa di-withdraw di status {$offer['status']}");
         }
 
         $now = date('Y-m-d H:i:s');
         $db->transBegin();
+
         try {
             if ($offer['status'] === 'PENDING_APPROVAL') {
                 Services::approval()->cancelEntity(
-                    'CANDIDATE_OFFER', 'candidate_offers', $offerId, (int) $offer['company_id']
+                    'CANDIDATE_OFFER',
+                    'candidate_offers',
+                    $offerId,
+                    (int) $offer['company_id']
                 );
             }
             $db->table('candidate_offers')->where('id', $offerId)
@@ -542,12 +580,13 @@ class OfferService
                     'status' => 'WITHDRAWN', 'response_note' => '[WITHDRAWN by HR] ' . $reason,
                     'responded_at' => $now, 'updated_at' => $now,
                 ]);
-            if ($db->affectedRows() !== 1 || ! $db->transStatus()) {
+            if ($db->affectedRows() !== 1 || !$db->transStatus()) {
                 throw new \RuntimeException('Offer berubah; muat ulang data');
             }
             $db->transCommit();
         } catch (\Throwable $exception) {
             $db->transRollback();
+
             throw $exception;
         }
 
@@ -559,7 +598,8 @@ class OfferService
                 description: "Withdraw offer {$offer['offer_number']}: {$reason}",
                 severity: 'WARNING',
             );
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         return $this->loadOffer($offerId);
     }
@@ -572,11 +612,13 @@ class OfferService
     {
         $db = Database::connect();
         $offer = $db->table('candidate_offers')->where('id', $offerId)->get()->getRowArray();
-        if (! $offer || $offer['status'] !== 'SENT') return;
+        if (!$offer || $offer['status'] !== 'SENT') {
+            return;
+        }
 
         $now = date('Y-m-d H:i:s');
         $db->table('candidate_offers')->where('id', $offerId)->update([
-            'status'     => 'EXPIRED',
+            'status' => 'EXPIRED',
             'updated_at' => $now,
         ]);
 
@@ -588,10 +630,13 @@ class OfferService
                 description: "Auto-expire offer {$offer['offer_number']} ({$actor})",
                 severity: 'NOTICE',
             );
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
 
         // Notifikasi HR
-        $this->notifyHr((int) $offer['company_id'], 'offer.expired',
+        $this->notifyHr(
+            (int) $offer['company_id'],
+            'offer.expired',
             'Offer kadaluarsa tanpa respon',
             "Offer {$offer['offer_number']} kadaluarsa pada {$offer['response_deadline']} tanpa respon kandidat."
         );
@@ -612,8 +657,11 @@ class OfferService
             ->where('response_deadline IS NOT NULL')
             ->where('response_deadline <', $today)
             ->where('deleted_at IS NULL');
-        if ($companyId) $b->where('company_id', $companyId);
+        if ($companyId) {
+            $b->where('company_id', $companyId);
+        }
         $rows = $b->get()->getResultArray();
+
         return array_map(static fn ($r) => (int) $r['id'], $rows);
     }
 
@@ -634,7 +682,7 @@ class OfferService
             ->where('o.id', $offerId)
             ->where('o.deleted_at IS NULL')
             ->get()->getRowArray();
-        if (! $row) {
+        if (!$row) {
             throw new \InvalidArgumentException("Offer #{$offerId} tidak ditemukan");
         }
 
@@ -668,26 +716,43 @@ class OfferService
 
         return [
             'offer' => [
-                'number'             => $offer['offer_number'],
-                'sent_at'            => $offer['sent_at'],
-                'response_deadline'  => $offer['response_deadline'],
-                'basic_salary'       => (float) $offer['basic_salary'],
-                'basic_salary_id'    => 'Rp ' . number_format((float) $offer['basic_salary'], 0, ',', '.'),
-                'joining_bonus'      => (float) $offer['joining_bonus'],
-                'allowances'         => is_string($offer['allowances_json'] ?? null)
+                'number' => $offer['offer_number'],
+                'sent_at' => $offer['sent_at'],
+                'response_deadline' => $offer['response_deadline'],
+                'basic_salary' => (float) $offer['basic_salary'],
+                'basic_salary_id' => 'Rp ' . number_format((float) $offer['basic_salary'], 0, ',', '.'),
+                'joining_bonus' => (float) $offer['joining_bonus'],
+                'allowances' => is_string($offer['allowances_json'] ?? null)
                     ? (json_decode($offer['allowances_json'], true) ?: [])
                     : [],
-                'employment_status'  => $offer['employment_status'],
+                'employment_status' => $offer['employment_status'],
                 'proposed_join_date' => $offer['proposed_join_date'],
-                'probation_months'   => (int) $offer['probation_months'],
+                'probation_months' => (int) $offer['probation_months'],
             ],
             'candidate' => [
-                'full_name'  => $cand['full_name'] ?? '',
-                'email'      => $cand['email'] ?? '',
-                'phone'      => $cand['phone'] ?? '',
+                'full_name' => $cand['full_name'] ?? '',
+                'email' => $cand['email'] ?? '',
+                'phone' => $cand['phone'] ?? '',
             ],
             'company' => $company,
         ];
+    }
+
+    public function softDeleteDraft(int $offerId, int $companyId): void
+    {
+        $db = Database::connect();
+        $db->table('candidate_offers')
+            ->where('id', $offerId)
+            ->where('company_id', $companyId)
+            ->where('status', 'DRAFT')
+            ->where('deleted_at IS NULL')
+            ->update([
+                'deleted_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        if ($db->affectedRows() !== 1) {
+            throw new \RuntimeException('Offer DRAFT tidak ditemukan di perusahaan aktif');
+        }
     }
 
     private function notifyCandidate(int $candidateId, int $offerId, string $type, string $title, string $message): void
@@ -695,7 +760,9 @@ class OfferService
         try {
             $db = Database::connect();
             $cand = $db->table('candidates')->where('id', $candidateId)->get()->getRowArray();
-            if (! $cand || empty($cand['user_id'])) return;
+            if (!$cand || empty($cand['user_id'])) {
+                return;
+            }
 
             // Kandidat punya user account terpisah (candidate_user_id),
             // notifikasi via NotificationService dengan flag email = true.

@@ -11,18 +11,14 @@ final class NormalizeLegacyMenuPermissions extends Migration
 {
     public function up(): void
     {
-        if (! $this->db->tableExists('menus')) return;
+        if (!$this->db->tableExists('menus')) {
+            return;
+        }
 
         $service = new RbacMenuCatalogService($this->db);
         $service->syncPermissionRequirements();
-        $audit = $service->audit();
-        if ($audit['missing_codes'] !== []
-            || $audit['conflicting_codes'] !== []
-            || $audit['unknown_permissions'] !== []
-            || $audit['unmapped_codes'] !== []
-        ) {
-            throw new \RuntimeException('Menu permissions are not aligned with the RBAC master');
-        }
+        // The catalog continues to evolve in later migrations. The final
+        // resync migration performs the complete strict audit.
     }
 
     public function down(): void

@@ -2,11 +2,11 @@
 
 namespace App\Libraries\Payroll;
 
-use Config\Services;
-
 use App\Libraries\Attendance\OvertimeCalculator;
 use App\Libraries\Employee\EmployeeEffectiveHistoryService;
 use App\Repositories\Payroll\PayrollRepository;
+use Config\Services;
+
 /**
  * PayrollService - Orchestrates payroll calculation per period.
  *
@@ -115,10 +115,10 @@ class PayrollService
         $repository = new PayrollRepository();
         $db = $repository->connection();
         $period = $repository->findPeriod($payrollPeriodId, $activeCompanyId);
-        if (! $period) {
+        if (!$period) {
             throw new \InvalidArgumentException('Payroll period not found');
         }
-        if (! in_array($period['status'], ['DRAFT', 'CALCULATED'], true)) {
+        if (!in_array($period['status'], ['DRAFT', 'CALCULATED'], true)) {
             throw new \RuntimeException('Approved or finalized payroll cannot be recalculated');
         }
 
@@ -132,110 +132,136 @@ class PayrollService
         $pendingService = new PayrollPendingApprovalService($db);
         $pending = $pendingService->scan($payrollPeriodId, $activeCompanyId, $period);
         $warnings = [];
-        if (! empty($pending['items'])) {
+        if (!empty($pending['items'])) {
             $warnings = $pendingService->warnings($pending);
             $this->logPendingApprovals($payrollPeriodId, $period, $pending, $warnings);
         }
 
-        // Clear existing payslips for THIS period (re-calculation flow).
-        // Defensive: also clear orphan payslips with the same slip_number
-        // prefix (`PS-{period_code}-...`) yang dimiliki perusahaan ini.
-        // Skenario yang menyebabkan UNIQUE constraint error sebelumnya:
-        //   1. User bikin period dengan code "2024-01", calculate, lalu
-        //      delete period itu (soft / hard).
-        //   2. Bikin period baru dengan code yang sama lagi → calculate
-        //      → insert nubrak payslip lama yang masih ada di DB karena
-        //      delete cascade tidak terkonfigurasi di SQLite.
-        //   3. INSERT gagal: "UNIQUE constraint failed: payslips.slip_number".
-        // Cleanup berbasis slip_number prefix mencegah ini tanpa
-        // mengubah format nomor slip.
-        $repository->clearCalculatedPayslips($period, $activeCompanyId);
-        $employees = $repository->employeesForPeriod($period, $activeCompanyId);
+        // Calculate the entire period atomically. A failed employee calculation
+        // must restore the previous payslips and period totals instead of
+        // leaving a partially rebuilt payroll register behind.
+        $db->transBegin();
 
-        $totalGross = 0;
-        $totalDeduction = 0;
-        $totalNet = 0;
-        $count = 0;
-
-        $bpjsCalc = Services::bpjs();
-        $pphCalc  = Services::pph21();
-        $otCalc   = new OvertimeCalculator();
-
-        // Sprint 5-6 — magic numbers ke setting per-company
-        $cfg = Services::payrollSettings();
-        $workingDaysPerMonth = $cfg->workingDaysPerMonth((int) $period['company_id']);
-        $overtimeHoursPerMonth = $cfg->overtimeHoursPerMonth((int) $period['company_id']);
-        $absentDeductionEnabled = $cfg->absentDeductionEnabled((int) $period['company_id']);
-
-        // Sprint 17+ — Lookup bonus yang sudah di-link ke period ini
-        // (status APPROVED/PAID). Map: employee_id => {amount, breakdown}.
-        // Hanya queried sekali per period untuk efisiensi.
         try {
-            $bonusByEmp = (new BonusService($db))->bonusesForPayrollPeriod(
-                $payrollPeriodId,
-                (int) $period['company_id'],
-            );
-        } catch (\Throwable $e) {
-            log_message('warning', 'BonusService lookup failed: ' . $e->getMessage());
-            $bonusByEmp = [];
-        }
+            // Clear existing payslips for THIS period (re-calculation flow).
+            // Defensive: also clear orphan payslips with the same slip_number
+            // prefix (`PS-{period_code}-...`) yang dimiliki perusahaan ini.
+            // Skenario yang menyebabkan UNIQUE constraint error sebelumnya:
+            //   1. User bikin period dengan code "2024-01", calculate, lalu
+            //      delete period itu (soft / hard).
+            //   2. Bikin period baru dengan code yang sama lagi → calculate
+            //      → insert nubrak payslip lama yang masih ada di DB karena
+            //      delete cascade tidak terkonfigurasi di SQLite.
+            //   3. INSERT gagal: "UNIQUE constraint failed: payslips.slip_number".
+            // Cleanup berbasis slip_number prefix mencegah ini tanpa
+            // mengubah format nomor slip.
+            $repository->clearCalculatedPayslips($period, $activeCompanyId);
+            $employees = $repository->employeesForPeriod($period, $activeCompanyId);
 
-        // H1.12 — Lookup kompensasi PKWT yang akan jatuh tempo di
-        // periode ini (per PP 35/2021). Map: employee_id => earning entry.
-        // Persist ke `pkwt_compensation_paid` di-handle saat finalize().
-        try {
-            $pkwtByEmp = (new \App\Libraries\Lifecycle\PkwtCompensationService())
-                ->earningEntriesForPayrollPeriod($payrollPeriodId);
-        } catch (\Throwable $e) {
-            log_message('warning', 'PkwtCompensationService lookup failed: ' . $e->getMessage());
-            $pkwtByEmp = [];
-        }
+            $totalGross = 0;
+            $totalDeduction = 0;
+            $totalNet = 0;
+            $count = 0;
 
-        $adjustmentsByEmp = $repository->adjustmentsByEmployee($payrollPeriodId, $activeCompanyId);
-        $oneTimeByEmp = $repository->oneTimeComponentsByEmployee($payrollPeriodId, $activeCompanyId);
+            $bpjsCalc = Services::bpjs();
+            $pphCalc = Services::pph21();
+            $otCalc = new OvertimeCalculator();
 
-        $employeeCalculator = new PayrollEmployeeCalculationService($db);
-        foreach ($employees as $emp) {
-            if ($db->tableExists('employee_master_history')) {
-                $snapshot = (new EmployeeEffectiveHistoryService($db))->asOf(
-                    (int) $period['company_id'], (int) $emp['id'], (string) $period['end_date'],
+            // Sprint 5-6 — magic numbers ke setting per-company
+            $cfg = Services::payrollSettings();
+            $workingDaysPerMonth = $cfg->workingDaysPerMonth((int) $period['company_id']);
+            $overtimeHoursPerMonth = $cfg->overtimeHoursPerMonth((int) $period['company_id']);
+            $absentDeductionEnabled = $cfg->absentDeductionEnabled((int) $period['company_id']);
+
+            // Sprint 17+ — Lookup bonus yang sudah di-link ke period ini
+            // (status APPROVED/PAID). Map: employee_id => {amount, breakdown}.
+            // Hanya queried sekali per period untuk efisiensi.
+            try {
+                $bonusByEmp = (new BonusService($db))->bonusesForPayrollPeriod(
+                    $payrollPeriodId,
+                    (int) $period['company_id'],
                 );
-                if ($snapshot !== null) {
-                    foreach (['position_id', 'manager_id', 'supervisor_id', 'department_id', 'branch_id', 'cost_center_id', 'job_grade_id', 'work_location_id', 'basic_salary', 'fixed_allowance', 'employment_status', 'employment_type', 'contract_end_date'] as $field) {
-                        $emp[$field] = $snapshot[$field] ?? null;
+            } catch (\Throwable $e) {
+                log_message('warning', 'BonusService lookup failed: ' . $e->getMessage());
+                $bonusByEmp = [];
+            }
+
+            // H1.12 — Lookup kompensasi PKWT yang akan jatuh tempo di
+            // periode ini (per PP 35/2021). Map: employee_id => earning entry.
+            // Persist ke `pkwt_compensation_paid` di-handle saat finalize().
+            try {
+                $pkwtByEmp = (new \App\Libraries\Lifecycle\PkwtCompensationService())
+                    ->earningEntriesForPayrollPeriod($payrollPeriodId);
+            } catch (\Throwable $e) {
+                log_message('warning', 'PkwtCompensationService lookup failed: ' . $e->getMessage());
+                $pkwtByEmp = [];
+            }
+
+            $adjustmentsByEmp = $repository->adjustmentsByEmployee($payrollPeriodId, $activeCompanyId);
+            $oneTimeByEmp = $repository->oneTimeComponentsByEmployee($payrollPeriodId, $activeCompanyId);
+
+            $employeeCalculator = new PayrollEmployeeCalculationService($db);
+            foreach ($employees as $emp) {
+                if ($db->tableExists('employee_master_history')) {
+                    $snapshot = (new EmployeeEffectiveHistoryService($db))->asOf(
+                        (int) $period['company_id'],
+                        (int) $emp['id'],
+                        (string) $period['end_date'],
+                    );
+                    if ($snapshot !== null) {
+                        foreach (['position_id', 'manager_id', 'supervisor_id', 'department_id', 'branch_id', 'cost_center_id', 'job_grade_id', 'work_location_id', 'basic_salary', 'fixed_allowance', 'employment_status', 'employment_type', 'contract_end_date'] as $field) {
+                            $emp[$field] = $snapshot[$field] ?? null;
+                        }
                     }
                 }
+                $result = $employeeCalculator->calculate(
+                    $emp,
+                    $period,
+                    $bpjsCalc,
+                    $pphCalc,
+                    $otCalc,
+                    $workingDaysPerMonth,
+                    $overtimeHoursPerMonth,
+                    $absentDeductionEnabled,
+                    $bonusByEmp[(int) $emp['id']] ?? null,
+                    $pkwtByEmp[(int) $emp['id']] ?? null,
+                    $adjustmentsByEmp[(int) $emp['id']] ?? [],
+                    $oneTimeByEmp[(int) $emp['id']] ?? [],
+                );
+                $totalGross += $result['gross_earning'];
+                $totalDeduction += $result['total_deduction'];
+                $totalNet += $result['take_home_pay'];
+                $count++;
             }
-            $result = $employeeCalculator->calculate(
-                $emp, $period, $bpjsCalc, $pphCalc, $otCalc,
-                $workingDaysPerMonth, $overtimeHoursPerMonth, $absentDeductionEnabled,
-                $bonusByEmp[(int) $emp['id']] ?? null,
-                $pkwtByEmp[(int) $emp['id']] ?? null,
-                $adjustmentsByEmp[(int) $emp['id']] ?? [],
-                $oneTimeByEmp[(int) $emp['id']] ?? [],
+
+            $repository->completeCalculation(
+                $payrollPeriodId,
+                $activeCompanyId,
+                Services::tenant()->getUserId(),
+                ['total_gross' => $totalGross, 'total_deduction' => $totalDeduction, 'total_net' => $totalNet],
             );
-            $totalGross     += $result['gross_earning'];
-            $totalDeduction += $result['total_deduction'];
-            $totalNet       += $result['take_home_pay'];
-            $count++;
+
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Payroll calculation transaction failed');
+            }
+            if (!$db->transCommit()) {
+                throw new \RuntimeException('Unable to commit payroll calculation');
+            }
+
+            return [
+                'period_id' => $payrollPeriodId,
+                'employee_count' => $count,
+                'total_gross' => $totalGross,
+                'total_deduction' => $totalDeduction,
+                'total_net' => $totalNet,
+                'warnings' => $warnings,
+                'pending_approvals' => $pending,
+            ];
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+
+            throw $exception;
         }
-
-        $repository->completeCalculation(
-            $payrollPeriodId,
-            $activeCompanyId,
-            Services::tenant()->getUserId(),
-            ['total_gross' => $totalGross, 'total_deduction' => $totalDeduction, 'total_net' => $totalNet],
-        );
-
-        return [
-            'period_id'        => $payrollPeriodId,
-            'employee_count'   => $count,
-            'total_gross'      => $totalGross,
-            'total_deduction'  => $totalDeduction,
-            'total_net'        => $totalNet,
-            'warnings'         => $warnings,
-            'pending_approvals'=> $pending,
-        ];
     }
 
     /**
@@ -263,6 +289,7 @@ class PayrollService
      *
      * @param int        $payrollPeriodId
      * @param array|null $period Pre-loaded period row (optimization).
+     *
      * @return array{
      *   total_count:int,
      *   items:array<string, list<array<string,mixed>>>,
@@ -277,9 +304,10 @@ class PayrollService
         if ($period === null) {
             $period = (new PayrollRepository())->findPeriod($payrollPeriodId, $companyId);
         }
-        if (! $period) {
+        if (!$period) {
             return ['total_count' => 0, 'items' => [], 'counts' => []];
         }
+
         return (new PayrollPendingApprovalService())->scan(
             $payrollPeriodId,
             $companyId,
@@ -336,10 +364,10 @@ class PayrollService
                     metadata: [
                         'period_code' => $period['code'] ?? null,
                         'period_name' => $period['name'] ?? null,
-                        'start_date'  => $period['start_date'] ?? null,
-                        'end_date'    => $period['end_date'] ?? null,
-                        'counts'      => $pending['counts'],
-                        'warnings'    => $warnings,
+                        'start_date' => $period['start_date'] ?? null,
+                        'end_date' => $period['end_date'] ?? null,
+                        'counts' => $pending['counts'],
+                        'warnings' => $warnings,
                     ],
                 );
         } catch (\Throwable $e) {
@@ -371,7 +399,9 @@ class PayrollService
         $period = $result['period'];
         $notifier = Services::notification();
         foreach ($result['recipients'] as $recipient) {
-            if (empty($recipient['user_id'])) continue;
+            if (empty($recipient['user_id'])) {
+                continue;
+            }
             $notifier->send(
                 (int) $recipient['user_id'],
                 $companyId,

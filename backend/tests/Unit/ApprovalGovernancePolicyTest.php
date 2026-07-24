@@ -10,15 +10,15 @@ final class ApprovalGovernancePolicyTest extends TestCase
     public function testCatalogContainsAllEngineModules(): void
     {
         $this->assertSame(
-            ['LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN', 'BUSINESS_TRIP', 'BONUS', 'PAYROLL_ADJUSTMENT', 'COMPENSATION_REVIEW', 'TRAINING_REGISTRATION', 'TIMESHEET', 'CANDIDATE_OFFER', 'GENERATED_CONTRACT', 'ASSET_TRANSACTION', 'HIRE_CONVERSION', 'PERFORMANCE_GOAL', 'IDP_ACTIVATION', 'EMPLOYEE_SENSITIVE_CHANGE', 'MASTER_RATE_CHANGE', 'PRIVILEGED_ACTION', 'GENERIC'],
+            ['LEAVE', 'OVERTIME', 'ATTENDANCE_CHANGE', 'REIMBURSEMENT', 'LOAN', 'BUSINESS_TRIP', 'BONUS', 'PAYROLL', 'PAYROLL_ADJUSTMENT', 'COMPENSATION_REVIEW', 'TRAINING_REGISTRATION', 'TIMESHEET', 'CANDIDATE_OFFER', 'GENERATED_CONTRACT', 'ASSET_TRANSACTION', 'HIRE_CONVERSION', 'PERFORMANCE_GOAL', 'IDP_ACTIVATION', 'EMPLOYEE_SENSITIVE_CHANGE', 'MASTER_RATE_CHANGE', 'PRIVILEGED_ACTION', 'GENERIC'],
             ApprovalModuleCatalog::modules(),
         );
     }
 
-    public function testCatalogRejectsUnknownModule(): void
+    public function testCatalogAcceptsPayrollPeriodModule(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
         ApprovalModuleCatalog::assertEntityTable('PAYROLL', 'payroll_periods');
+        $this->addToAssertionCount(1);
     }
 
     public function testCatalogRejectsMismatchedEntityTable(): void
@@ -43,9 +43,9 @@ final class ApprovalGovernancePolicyTest extends TestCase
     {
         $source = file_get_contents(APPPATH . 'Libraries/Approval/ApprovalEngine.php');
         $this->assertIsString($source);
-        $this->assertStringContainsString("Self-approval tidak diizinkan", $source);
-        $this->assertStringContainsString("Employee tidak ditemukan di tenant aktif", $source);
-        $this->assertStringContainsString("Entitas approval tidak ditemukan di tenant aktif", $source);
+        $this->assertStringContainsString('Self-approval tidak diizinkan', $source);
+        $this->assertStringContainsString('Employee tidak ditemukan di tenant aktif', $source);
+        $this->assertStringContainsString('Entitas approval tidak ditemukan di tenant aktif', $source);
         $this->assertStringContainsString('roleIdsForSlugs', $source);
         $this->assertStringContainsString("'hr_director'", $source);
         $this->assertStringContainsString('decideWithinTransaction', $source);
@@ -137,9 +137,9 @@ final class ApprovalGovernancePolicyTest extends TestCase
     {
         $source = file_get_contents(APPPATH . 'Controllers/Api/V1/Attendance/OvertimeController.php');
         $this->assertIsString($source);
-        $this->assertStringContainsString("public function approve", $source);
+        $this->assertStringContainsString('public function approve', $source);
         $this->assertMatchesRegularExpression("/approveEntity\\(\\s*'OVERTIME'/", $source);
-        $this->assertStringContainsString("public function reject", $source);
+        $this->assertStringContainsString('public function reject', $source);
         $this->assertMatchesRegularExpression("/rejectEntity\\(\\s*'OVERTIME'/", $source);
     }
 
@@ -261,7 +261,7 @@ final class ApprovalGovernancePolicyTest extends TestCase
         $this->assertIsString($routes);
         $this->assertStringNotContainsString('function approveRun', $controller);
         $this->assertStringNotContainsString('function approveRun', $workflow);
-        $this->assertStringNotContainsString("bonus-runs/(:num)/approve", $routes);
+        $this->assertStringNotContainsString('bonus-runs/(:num)/approve', $routes);
         $this->assertStringContainsString("'module' => 'BONUS'", $approval);
         $this->assertStringContainsString("'entity_table' => 'bonus_runs'", $approval);
         $this->assertStringContainsString("'status' => 'PENDING_APPROVAL'", $approval);
@@ -298,11 +298,11 @@ final class ApprovalGovernancePolicyTest extends TestCase
         $controller = file_get_contents(APPPATH . 'Controllers/Api/V1/Training/TrainingController.php');
         $adapter = file_get_contents(APPPATH . 'Libraries/Approval/Adapters/TrainingRegistrationApprovalDomainAdapter.php');
 
-        $this->assertStringContainsString("'TRAINING_REGISTRATION'=> 'training_registrations'", $catalog);
+        $this->assertStringContainsString("'TRAINING_REGISTRATION' => 'training_registrations'", $catalog);
         $this->assertStringContainsString("'module' => 'TRAINING_REGISTRATION'", $service);
-        $this->assertStringContainsString("Services::approval()->approveEntity(", $controller);
-        $this->assertStringContainsString("Services::approval()->rejectEntity(", $controller);
-        $this->assertStringContainsString("Services::approval()->cancelEntity(", $service);
+        $this->assertStringContainsString('Services::approval()->approveEntity(', $controller);
+        $this->assertStringContainsString('Services::approval()->rejectEntity(', $controller);
+        $this->assertStringContainsString('Services::approval()->cancelEntity(', $service);
         $this->assertStringContainsString('reserveBudget(', $service);
         $this->assertStringContainsString("where('status', 'REGISTERED')->update", $service);
         $this->assertStringContainsString("return 'TRAINING_REGISTRATION';", $adapter);

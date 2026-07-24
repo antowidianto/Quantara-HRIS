@@ -50,11 +50,15 @@ class AssetService
                 ->where('company_id', $companyId)
                 ->where('asset_number', $candidate)
                 ->countAllResults();
-            if ($exists === 0) return $candidate;
-            $tries++; $count++;
+            if ($exists === 0) {
+                return $candidate;
+            }
+            $tries++;
+            $count++;
             $seq = str_pad((string) ($count + 1), 5, '0', STR_PAD_LEFT);
             $candidate = $prefix . $seq;
         }
+
         return $candidate;
     }
 
@@ -67,14 +71,14 @@ class AssetService
     {
         $db = $this->db();
         $asset = $db->table('assets')->where('id', $assetId)->where('deleted_at IS NULL')->get()->getRowArray();
-        if (! $asset) {
+        if (!$asset) {
             throw new \InvalidArgumentException("Asset #{$assetId} tidak ditemukan");
         }
         if ($asset['status'] !== 'AVAILABLE') {
             throw new \RuntimeException("Asset {$asset['asset_number']} status='{$asset['status']}', hanya AVAILABLE yang bisa di-assign");
         }
         $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
-        if (! $emp) {
+        if (!$emp) {
             throw new \InvalidArgumentException("Employee #{$employeeId} tidak ditemukan");
         }
         if ((int) $emp['company_id'] !== (int) $asset['company_id']) {
@@ -83,35 +87,41 @@ class AssetService
 
         $now = date('Y-m-d H:i:s');
         $insert = [
-            'company_id'       => (int) $asset['company_id'],
-            'asset_id'         => $assetId,
-            'employee_id'      => $employeeId,
-            'assigned_at'      => $params['assigned_at'] ?? $now,
-            'expected_return'  => $params['expected_return'] ?? null,
-            'purpose'          => $params['purpose'] ?? null,
+            'company_id' => (int) $asset['company_id'],
+            'asset_id' => $assetId,
+            'employee_id' => $employeeId,
+            'assigned_at' => $params['assigned_at'] ?? $now,
+            'expected_return' => $params['expected_return'] ?? null,
+            'purpose' => $params['purpose'] ?? null,
             'condition_when_assigned' => $params['condition_when_assigned'] ?? $asset['condition'] ?? 'GOOD',
-            'assigned_by'      => $params['assigned_by'] ?? null,
-            'created_at'       => $now,
-            'updated_at'       => $now,
+            'assigned_by' => $params['assigned_by'] ?? null,
+            'created_at' => $now,
+            'updated_at' => $now,
         ];
         $db->table('asset_assignments')->insert($insert);
         $assignmentId = (int) $db->insertID();
 
         // Update cached pointer & status
-        $db->table('assets')->where('id', $assetId)->update([
-            'status'                => 'ASSIGNED',
-            'current_assignment_id' => $assignmentId,
-            'current_employee_id'   => $employeeId,
-            'updated_at'            => $now,
-        ]);
+        $db->table('assets')
+            ->where('id', $assetId)
+            ->where('company_id', (int) $asset['company_id'])
+            ->update([
+                'status' => 'ASSIGNED',
+                'current_assignment_id' => $assignmentId,
+                'current_employee_id' => $employeeId,
+                'updated_at' => $now,
+            ]);
 
         // Render BAST snapshot
         $insert['id'] = $assignmentId;
         $bast = $this->renderBastHtml($insert, $asset, $emp, 'ASSIGN');
-        $db->table('asset_assignments')->where('id', $assignmentId)->update([
-            'bast_html'  => $bast,
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        $db->table('asset_assignments')
+            ->where('id', $assignmentId)
+            ->where('company_id', (int) $asset['company_id'])
+            ->update([
+                'bast_html' => $bast,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
 
         return $assignmentId;
     }
@@ -123,43 +133,45 @@ class AssetService
     {
         $db = $this->db();
         $assignment = $db->table('asset_assignments')->where('id', $assignmentId)->get()->getRowArray();
-        if (! $assignment) {
+        if (!$assignment) {
             throw new \InvalidArgumentException("Assignment #{$assignmentId} tidak ditemukan");
         }
-        if (! empty($assignment['returned_at'])) {
+        if (!empty($assignment['returned_at'])) {
             throw new \RuntimeException("Assignment ini sudah closed pada {$assignment['returned_at']}");
         }
 
         $asset = $db->table('assets')->where('id', $assignment['asset_id'])->get()->getRowArray();
-        $emp   = $db->table('employees')->where('id', $assignment['employee_id'])->get()->getRowArray();
+        $emp = $db->table('employees')->where('id', $assignment['employee_id'])->get()->getRowArray();
 
         $now = date('Y-m-d H:i:s');
         $cond = strtoupper((string) ($params['condition_when_returned'] ?? 'GOOD'));
-        $validConds = ['NEW','GOOD','FAIR','POOR','DAMAGED','LOST'];
-        if (! in_array($cond, $validConds, true)) $cond = 'GOOD';
+        $validConds = ['NEW', 'GOOD', 'FAIR', 'POOR', 'DAMAGED', 'LOST'];
+        if (!in_array($cond, $validConds, true)) {
+            $cond = 'GOOD';
+        }
 
         $update = [
-            'returned_at'             => $params['returned_at'] ?? $now,
+            'returned_at' => $params['returned_at'] ?? $now,
             'condition_when_returned' => $cond,
-            'damage_note'             => $params['damage_note'] ?? null,
-            'returned_by'             => $params['returned_by'] ?? null,
-            'returned_acknowledged_at'=> $now,
-            'updated_at'              => $now,
+            'damage_note' => $params['damage_note'] ?? null,
+            'returned_by' => $params['returned_by'] ?? null,
+            'returned_acknowledged_at' => $now,
+            'updated_at' => $now,
         ];
         $db->table('asset_assignments')->where('id', $assignmentId)->update($update);
 
         // Tentukan status asset baru
         $newStatus = match ($cond) {
-            'LOST'    => 'LOST',
+            'LOST' => 'LOST',
             'DAMAGED' => 'REPAIR',
-            default   => 'AVAILABLE',
+            default => 'AVAILABLE',
         };
         // Update asset condition utama (hanya kalau bukan LOST/REPAIR)
         $assetUpdate = [
-            'status'                => $newStatus,
+            'status' => $newStatus,
             'current_assignment_id' => null,
-            'current_employee_id'   => null,
-            'updated_at'            => $now,
+            'current_employee_id' => null,
+            'updated_at' => $now,
         ];
         if ($newStatus === 'AVAILABLE') {
             // Update kondisi dasar ke kondisi pengembalian (dropdown utama)
@@ -178,7 +190,7 @@ class AssetService
         $bast = $this->renderBastHtml($assignment, $asset, $emp, 'RETURN');
         $db->table('asset_assignments')->where('id', $assignmentId)->update([
             'bast_return_html' => $bast,
-            'updated_at'       => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
     }
 
@@ -189,22 +201,25 @@ class AssetService
     {
         $db = $this->db();
         $company = $db->table('companies')->where('id', $assignment['company_id'])->get()->getRowArray() ?: [];
-        $position = ! empty($employee['position_id'])
+        $position = !empty($employee['position_id'])
             ? ($db->table('positions')->where('id', (int) $employee['position_id'])->get()->getRowArray() ?: [])
             : [];
-        $department = ! empty($employee['department_id'])
+        $department = !empty($employee['department_id'])
             ? ($db->table('departments')->where('id', (int) $employee['department_id'])->get()->getRowArray() ?: [])
             : [];
 
         $title = $mode === 'RETURN' ? 'BERITA ACARA PENGEMBALIAN BARANG' : 'BERITA ACARA SERAH TERIMA BARANG';
-        $verb  = $mode === 'RETURN' ? 'mengembalikan kepada' : 'menyerahkan kepada';
+        $verb = $mode === 'RETURN' ? 'mengembalikan kepada' : 'menyerahkan kepada';
         $verbAck = $mode === 'RETURN' ? 'menerima kembali' : 'menerima dengan baik';
 
         $months = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-                   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
         $fmtDate = function ($d) use ($months) {
-            if (! $d) return '-';
+            if (!$d) {
+                return '-';
+            }
             $ts = strtotime($d);
+
             return date('j', $ts) . ' ' . $months[(int) date('n', $ts)] . ' ' . date('Y', $ts);
         };
 
@@ -250,23 +265,23 @@ class AssetService
         $h .= '<tr><td style="width:30%">No. Aset</td><td>: <strong>' . htmlspecialchars((string) ($asset['asset_number'] ?? '-'), ENT_QUOTES) . '</strong></td></tr>';
         $h .= '<tr><td>Nama</td><td>: ' . htmlspecialchars((string) ($asset['name'] ?? '-'), ENT_QUOTES) . '</td></tr>';
         $h .= '<tr><td>Kategori</td><td>: ' . htmlspecialchars((string) ($asset['category'] ?? '-'), ENT_QUOTES) . '</td></tr>';
-        if (! empty($asset['brand']) || ! empty($asset['model'])) {
+        if (!empty($asset['brand']) || !empty($asset['model'])) {
             $h .= '<tr><td>Merek / Model</td><td>: ' . htmlspecialchars(($asset['brand'] ?? '') . ' ' . ($asset['model'] ?? ''), ENT_QUOTES) . '</td></tr>';
         }
-        if (! empty($asset['serial_number'])) {
+        if (!empty($asset['serial_number'])) {
             $h .= '<tr><td>Serial Number</td><td>: ' . htmlspecialchars((string) $asset['serial_number'], ENT_QUOTES) . '</td></tr>';
         }
         $cond = $mode === 'RETURN'
             ? ($assignment['condition_when_returned'] ?? '-')
             : ($assignment['condition_when_assigned'] ?? '-');
         $h .= '<tr><td>Kondisi saat ' . ($mode === 'RETURN' ? 'pengembalian' : 'penyerahan') . '</td><td>: <strong>' . $cond . '</strong></td></tr>';
-        if ($mode === 'RETURN' && ! empty($assignment['damage_note'])) {
+        if ($mode === 'RETURN' && !empty($assignment['damage_note'])) {
             $h .= '<tr><td>Catatan kerusakan</td><td>: ' . htmlspecialchars((string) $assignment['damage_note'], ENT_QUOTES) . '</td></tr>';
         }
-        if ($mode === 'ASSIGN' && ! empty($assignment['purpose'])) {
+        if ($mode === 'ASSIGN' && !empty($assignment['purpose'])) {
             $h .= '<tr><td>Tujuan penggunaan</td><td>: ' . htmlspecialchars((string) $assignment['purpose'], ENT_QUOTES) . '</td></tr>';
         }
-        if ($mode === 'ASSIGN' && ! empty($assignment['expected_return'])) {
+        if ($mode === 'ASSIGN' && !empty($assignment['expected_return'])) {
             $h .= '<tr><td>Diharapkan kembali</td><td>: ' . $fmtDate($assignment['expected_return']) . '</td></tr>';
         }
         $h .= '</tbody></table>';
@@ -288,11 +303,13 @@ class AssetService
             . '</tr></table>';
 
         $h .= '</body></html>';
+
         return $h;
     }
 
     /**
      * Aset yang sedang dipegang seorang karyawan.
+     *
      * @return array<int,array>
      */
     public function listForEmployee(int $employeeId, bool $includeReturned = false): array
@@ -303,7 +320,10 @@ class AssetService
             ->join('assets a', 'a.id = aa.asset_id')
             ->where('aa.employee_id', $employeeId)
             ->orderBy('aa.assigned_at', 'DESC');
-        if (! $includeReturned) $builder->where('aa.returned_at IS NULL');
+        if (!$includeReturned) {
+            $builder->where('aa.returned_at IS NULL');
+        }
+
         return $builder->get()->getResultArray();
     }
 

@@ -167,7 +167,6 @@ final class RecruitmentRepository
             ->join('recruitment_pipeline_templates t', 't.id = s.template_id')
             ->where('s.template_id', $templateId)
             ->where('t.company_id', $companyId)
-            ->where('s.deleted_at IS NULL')
             ->orderBy('s.order_index', 'ASC')
             ->orderBy('s.id', 'ASC')
             ->select('s.*')

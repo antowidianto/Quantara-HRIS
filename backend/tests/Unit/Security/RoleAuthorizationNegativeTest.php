@@ -69,6 +69,20 @@ final class RoleAuthorizationNegativeTest extends CIUnitTestCase
         self::assertNull((new PermissionFilter())->before(Services::request(), ['employee.manage']));
     }
 
+    public function testGlobalRoleEditsAreLocalizedPerTenant(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $controller = file_get_contents($root . '/app/Controllers/Api/V1/Identity/RoleController.php');
+        $repository = file_get_contents($root . '/app/Repositories/Identity/RoleRepository.php');
+
+        self::assertStringContainsString('localizeGlobalRole(', $controller);
+        self::assertStringContainsString('->where(\'company_id\', $companyId)', $controller);
+        self::assertStringContainsString("->table('users')", $controller);
+        self::assertStringContainsString("->table('approval_chain_steps')", $controller);
+        self::assertStringContainsString('SUPER_ADMIN_PERMISSIONS_IMMUTABLE', $controller);
+        self::assertStringContainsString('NOT EXISTS', $repository);
+    }
+
     private function injectTenant(array $permissions): void
     {
         $tenant = new class($permissions) extends TenantContext {

@@ -11,16 +11,14 @@ final class NormalizeSidebarRouteIdentities extends Migration
 {
     public function up(): void
     {
-        if (! $this->db->tableExists('menus')) return;
+        if (!$this->db->tableExists('menus')) {
+            return;
+        }
 
         $service = new RbacMenuCatalogService($this->db);
         $service->syncRouteIdentities();
-        $audit = $service->audit();
-        if ($audit['missing_codes'] !== [] || $audit['conflicting_codes'] !== []
-            || $audit['unknown_permissions'] !== [] || $audit['unmapped_codes'] !== []
-        ) {
-            throw new \RuntimeException('Sidebar route identities are not consistent');
-        }
+        // Later migrations add permission-backed items. The final resync
+        // migration performs the complete strict catalog audit.
     }
 
     public function down(): void

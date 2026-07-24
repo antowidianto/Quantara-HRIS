@@ -30,25 +30,25 @@ class RosterController extends ApiController
     public function index()
     {
         $startDate = (string) ($this->request->getGet('start_date') ?? date('Y-m-01'));
-        $endDate   = (string) ($this->request->getGet('end_date')   ?? date('Y-m-t'));
-        if (! $this->validRange($startDate, $endDate)) {
+        $endDate = (string) ($this->request->getGet('end_date') ?? date('Y-m-t'));
+        if (!$this->validRange($startDate, $endDate)) {
             return $this->fail('Rentang tanggal tidak valid (max 92 hari)', 422);
         }
 
         $branchId = (int) ($this->request->getGet('branch_id') ?? 0);
-        $deptId   = (int) ($this->request->getGet('department_id') ?? 0);
-        $wlId     = (int) ($this->request->getGet('work_location_id') ?? 0);
-        $q        = trim((string) $this->request->getGet('q'));
-        $page     = max(1, (int) ($this->request->getGet('page') ?? 1));
-        $perPage  = min(200, max(10, (int) ($this->request->getGet('per_page') ?? 50)));
+        $deptId = (int) ($this->request->getGet('department_id') ?? 0);
+        $wlId = (int) ($this->request->getGet('work_location_id') ?? 0);
+        $q = trim((string) $this->request->getGet('q'));
+        $page = max(1, (int) ($this->request->getGet('page') ?? 1));
+        $perPage = min(200, max(10, (int) ($this->request->getGet('per_page') ?? 50)));
 
         $db = \Config\Database::connect();
         $tenant = $this->tenant();
 
         // Branch isolation: HR cabang hanya bisa lihat cabangnya, kecuali
         // punya permission `attendance.view_all_branches` atau super admin.
-        if (! $tenant->isSuperAdmin()
-            && ! $tenant->hasPermission('attendance.view_all_branches')
+        if (!$tenant->isSuperAdmin()
+            && !$tenant->hasPermission('attendance.view_all_branches')
             && $branchId > 0
             && $branchId !== $tenant->getBranchId()
         ) {
@@ -63,9 +63,15 @@ class RosterController extends ApiController
             ->where('e.is_active', 1)
             ->where('e.deleted_at IS NULL');
         $tenant->applyAttendanceScope($empBuilder, 'e.company_id', 'e.branch_id');
-        if ($branchId) $empBuilder->where('e.branch_id', $branchId);
-        if ($deptId)   $empBuilder->where('e.department_id', $deptId);
-        if ($wlId)     $empBuilder->where('e.work_location_id', $wlId);
+        if ($branchId) {
+            $empBuilder->where('e.branch_id', $branchId);
+        }
+        if ($deptId) {
+            $empBuilder->where('e.department_id', $deptId);
+        }
+        if ($wlId) {
+            $empBuilder->where('e.work_location_id', $wlId);
+        }
         if ($q !== '') {
             $empBuilder->groupStart()
                 ->like('e.full_name', $q)
@@ -80,7 +86,7 @@ class RosterController extends ApiController
         // Generate list tanggal
         $dates = [];
         $cursor = strtotime($startDate);
-        $endTs  = strtotime($endDate);
+        $endTs = strtotime($endDate);
         while ($cursor <= $endTs) {
             $dates[] = date('Y-m-d', $cursor);
             $cursor += 86400;
@@ -100,14 +106,14 @@ class RosterController extends ApiController
 
         return $this->ok([
             'start_date' => $startDate,
-            'end_date'   => $endDate,
-            'dates'      => $dates,
-            'rows'       => $matrix,
-            'meta'       => [
-                'total'    => $total,
-                'page'     => $page,
+            'end_date' => $endDate,
+            'dates' => $dates,
+            'rows' => $matrix,
+            'meta' => [
+                'total' => $total,
+                'page' => $page,
                 'per_page' => $perPage,
-                'pages'    => $perPage > 0 ? (int) ceil($total / $perPage) : 0,
+                'pages' => $perPage > 0 ? (int) ceil($total / $perPage) : 0,
             ],
         ]);
     }
@@ -130,27 +136,31 @@ class RosterController extends ApiController
         $valid = $this->validateOrFail($data, [
             'pattern_id' => 'required|integer',
             'start_date' => 'required|valid_date',
-            'end_date'   => 'required|valid_date',
+            'end_date' => 'required|valid_date',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $companyId = $this->requireCompanyId();
-        if ($companyId === null) return null;
+        if ($companyId === null) {
+            return null;
+        }
 
         $startDate = $data['start_date'];
-        $endDate   = $data['end_date'];
-        if (! $this->validRange($startDate, $endDate, 366)) {
+        $endDate = $data['end_date'];
+        if (!$this->validRange($startDate, $endDate, 366)) {
             return $this->fail('Rentang tanggal tidak valid (max 366 hari)', 422);
         }
 
         $db = \Config\Database::connect();
         $pattern = $db->table('shift_patterns')
             ->where('id', (int) $data['pattern_id'])
+            ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
-        if (! $pattern) return $this->fail('Pola tidak ditemukan', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $pattern['company_id'] !== $companyId) {
-            return $this->fail('Pola di luar perusahaan Anda', 403);
+        if (!$pattern) {
+            return $this->fail('Pola tidak ditemukan', 404);
         }
 
         $employees = $this->resolveScopedEmployees($companyId, $data);
@@ -161,13 +171,13 @@ class RosterController extends ApiController
         $cycle = max(1, (int) $pattern['cycle_days']);
         $patternData = json_decode((string) $pattern['pattern_data'], true) ?: [];
         $anchor = $data['anchor_date'] ?? $startDate;
-        $overwrite = ! empty($data['overwrite']);
-        $dryRun    = ! empty($data['dry_run']);
+        $overwrite = !empty($data['overwrite']);
+        $dryRun = !empty($data['dry_run']);
 
         $now = date('Y-m-d H:i:s');
         $dates = [];
         $cursor = strtotime($startDate);
-        $endTs  = strtotime($endDate);
+        $endTs = strtotime($endDate);
         while ($cursor <= $endTs) {
             $dates[] = date('Y-m-d', $cursor);
             $cursor += 86400;
@@ -178,27 +188,38 @@ class RosterController extends ApiController
         $skipped = 0;
         $offDays = 0;
 
-        if (! $dryRun) {
+        if (!$dryRun) {
             $db->transStart();
         }
 
         foreach ($employees as $emp) {
             foreach ($dates as $d) {
                 $diff = (int) floor((strtotime($d) - strtotime($anchor)) / 86400);
-                $idx  = (($diff % $cycle) + $cycle) % $cycle;
+                $idx = (($diff % $cycle) + $cycle) % $cycle;
                 $slot = $patternData[$idx] ?? null;
 
-                $shiftId   = is_array($slot) && ! empty($slot['shift_id']) ? (int) $slot['shift_id'] : null;
-                $isOff     = is_array($slot) && ! empty($slot['is_off']) ? 1 : 0;
-                $isHoliday = is_array($slot) && ! empty($slot['is_holiday']) ? 1 : 0;
-                if ($isOff) $offDays++;
+                $shiftId = is_array($slot) && !empty($slot['shift_id']) ? (int) $slot['shift_id'] : null;
+                $isOff = is_array($slot) && !empty($slot['is_off']) ? 1 : 0;
+                $isHoliday = is_array($slot) && !empty($slot['is_holiday']) ? 1 : 0;
+                if ($isOff) {
+                    $offDays++;
+                }
+
+                if ($shiftId !== null && !$this->shiftBelongsToCompany($db, $shiftId, $companyId)) {
+                    if (!$dryRun) {
+                        $db->transRollback();
+                    }
+
+                    return $this->fail('Pola memuat shift di luar perusahaan Anda', 422, 'INVALID_SHIFT_SCOPE');
+                }
 
                 $existing = $db->table('shift_schedules')
+                    ->where('company_id', $companyId)
                     ->where('employee_id', (int) $emp['id'])
                     ->where('work_date', $d)
                     ->get()->getRowArray();
 
-                if ($existing && ! $overwrite) {
+                if ($existing && !$overwrite) {
                     $skipped++;
                     continue;
                 }
@@ -209,16 +230,19 @@ class RosterController extends ApiController
                 }
 
                 $row = [
-                    'company_id'  => (int) $emp['company_id'],
+                    'company_id' => (int) $emp['company_id'],
                     'employee_id' => (int) $emp['id'],
-                    'shift_id'    => $shiftId,
-                    'work_date'   => $d,
-                    'is_off'      => $isOff,
-                    'is_holiday'  => $isHoliday,
-                    'updated_at'  => $now,
+                    'shift_id' => $shiftId,
+                    'work_date' => $d,
+                    'is_off' => $isOff,
+                    'is_holiday' => $isHoliday,
+                    'updated_at' => $now,
                 ];
                 if ($existing) {
-                    $db->table('shift_schedules')->where('id', $existing['id'])->update($row);
+                    $db->table('shift_schedules')
+                        ->where('id', $existing['id'])
+                        ->where('company_id', $companyId)
+                        ->update($row);
                     $updated++;
                 } else {
                     $row['created_at'] = $now;
@@ -228,24 +252,24 @@ class RosterController extends ApiController
             }
         }
 
-        if (! $dryRun) {
+        if (!$dryRun) {
             $db->transComplete();
         }
 
         $summary = [
-            'pattern_id'   => (int) $pattern['id'],
+            'pattern_id' => (int) $pattern['id'],
             'pattern_name' => $pattern['name'],
-            'employees'    => count($employees),
-            'days'         => count($dates),
-            'created'      => $created,
-            'updated'      => $updated,
-            'skipped'      => $skipped,
-            'off_days'     => $offDays,
-            'overwrite'    => $overwrite,
-            'dry_run'      => $dryRun,
+            'employees' => count($employees),
+            'days' => count($dates),
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'off_days' => $offDays,
+            'overwrite' => $overwrite,
+            'dry_run' => $dryRun,
         ];
 
-        if (! $dryRun) {
+        if (!$dryRun) {
             Services::audit()
                 ->forModule('ROSTER')
                 ->log(
@@ -270,7 +294,7 @@ class RosterController extends ApiController
     {
         $data = $this->getJsonInput();
         $entries = $data['entries'] ?? [];
-        if (! is_array($entries) || empty($entries)) {
+        if (!is_array($entries) || empty($entries)) {
             return $this->fail('entries kosong', 422);
         }
         if (count($entries) > 5000) {
@@ -279,37 +303,59 @@ class RosterController extends ApiController
 
         $db = \Config\Database::connect();
         $tenant = $this->tenant();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
+        }
         $now = date('Y-m-d H:i:s');
         $touched = 0;
 
         $db->transStart();
         foreach ($entries as $e) {
-            if (empty($e['employee_id']) || empty($e['work_date'])) continue;
-            $emp = $db->table('employees')->where('id', (int) $e['employee_id'])->get()->getRowArray();
-            if (! $emp) continue;
-            if (! $tenant->canAccessBranch(
+            if (empty($e['employee_id']) || empty($e['work_date'])) {
+                continue;
+            }
+            $emp = $db->table('employees')
+                ->where('id', (int) $e['employee_id'])
+                ->where('company_id', $companyId)
+                ->get()->getRowArray();
+            if (!$emp) {
+                continue;
+            }
+            if (!$tenant->canAccessBranch(
                 (int) $emp['company_id'],
                 isset($emp['branch_id']) ? (int) $emp['branch_id'] : null
             )) {
                 continue;
             }
 
+            $shiftId = isset($e['shift_id']) && $e['shift_id'] !== '' ? (int) $e['shift_id'] : null;
+            if ($shiftId !== null && !$this->shiftBelongsToCompany($db, $shiftId, $companyId)) {
+                $db->transRollback();
+
+                return $this->fail('Shift di luar perusahaan Anda', 422, 'INVALID_SHIFT_SCOPE');
+            }
+
             $existing = $db->table('shift_schedules')
+                ->where('company_id', $companyId)
                 ->where('employee_id', (int) $emp['id'])
                 ->where('work_date', $e['work_date'])
                 ->get()->getRowArray();
 
             $row = [
-                'company_id'  => (int) $emp['company_id'],
+                'company_id' => (int) $emp['company_id'],
                 'employee_id' => (int) $emp['id'],
-                'shift_id'    => isset($e['shift_id']) && $e['shift_id'] !== '' ? (int) $e['shift_id'] : null,
-                'work_date'   => $e['work_date'],
-                'is_off'      => ! empty($e['is_off']) ? 1 : 0,
-                'is_holiday'  => ! empty($e['is_holiday']) ? 1 : 0,
-                'updated_at'  => $now,
+                'shift_id' => $shiftId,
+                'work_date' => $e['work_date'],
+                'is_off' => !empty($e['is_off']) ? 1 : 0,
+                'is_holiday' => !empty($e['is_holiday']) ? 1 : 0,
+                'updated_at' => $now,
             ];
             if ($existing) {
-                $db->table('shift_schedules')->where('id', $existing['id'])->update($row);
+                $db->table('shift_schedules')
+                    ->where('id', $existing['id'])
+                    ->where('company_id', $companyId)
+                    ->update($row);
             } else {
                 $row['created_at'] = $now;
                 $db->table('shift_schedules')->insert($row);
@@ -327,6 +373,7 @@ class RosterController extends ApiController
                 after: ['count' => $touched],
                 description: "Bulk update roster: {$touched} entries"
             );
+
         return $this->ok(['count' => $touched], 'Roster diperbarui');
     }
 
@@ -337,21 +384,25 @@ class RosterController extends ApiController
     {
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
-            'start_date'   => 'required|valid_date',
-            'end_date'     => 'required|valid_date',
+            'start_date' => 'required|valid_date',
+            'end_date' => 'required|valid_date',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $employeeIds = array_filter(array_map('intval', (array) ($data['employee_ids'] ?? [])));
         if (empty($employeeIds)) {
             return $this->fail('employee_ids wajib diisi', 422);
         }
-        if (! $this->validRange($data['start_date'], $data['end_date'], 366)) {
+        if (!$this->validRange($data['start_date'], $data['end_date'], 366)) {
             return $this->fail('Rentang tanggal tidak valid', 422);
         }
 
         $companyId = $this->requireCompanyId();
-        if ($companyId === null) return null;
+        if ($companyId === null) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
         $deleted = $db->table('shift_schedules')
@@ -383,9 +434,14 @@ class RosterController extends ApiController
 
     private function validRange(string $start, string $end, int $maxDays = 92): bool
     {
-        if (strtotime($start) === false || strtotime($end) === false) return false;
-        if (strtotime($end) < strtotime($start)) return false;
+        if (strtotime($start) === false || strtotime($end) === false) {
+            return false;
+        }
+        if (strtotime($end) < strtotime($start)) {
+            return false;
+        }
         $days = (strtotime($end) - strtotime($start)) / 86400 + 1;
+
         return $days <= $maxDays;
     }
 
@@ -403,14 +459,23 @@ class RosterController extends ApiController
             ->where('deleted_at IS NULL');
 
         $explicit = array_filter(array_map('intval', (array) ($scope['employee_ids'] ?? [])));
-        if (! empty($explicit)) {
+        if (!empty($explicit)) {
             $builder->whereIn('id', $explicit);
         } else {
-            if (! empty($scope['branch_id']))        $builder->where('branch_id', (int) $scope['branch_id']);
-            if (! empty($scope['department_id']))    $builder->where('department_id', (int) $scope['department_id']);
-            if (! empty($scope['work_location_id']))$builder->where('work_location_id', (int) $scope['work_location_id']);
-            if (! empty($scope['job_grade_id']))    $builder->where('job_grade_id', (int) $scope['job_grade_id']);
+            if (!empty($scope['branch_id'])) {
+                $builder->where('branch_id', (int) $scope['branch_id']);
+            }
+            if (!empty($scope['department_id'])) {
+                $builder->where('department_id', (int) $scope['department_id']);
+            }
+            if (!empty($scope['work_location_id'])) {
+                $builder->where('work_location_id', (int) $scope['work_location_id']);
+            }
+            if (!empty($scope['job_grade_id'])) {
+                $builder->where('job_grade_id', (int) $scope['job_grade_id']);
+            }
         }
+
         return $builder->get()->getResultArray();
     }
 
@@ -420,18 +485,27 @@ class RosterController extends ApiController
     private function compactCell(array $r): array
     {
         return [
-            'shift_id'   => $r['shift']['id']   ?? null,
+            'shift_id' => $r['shift']['id'] ?? null,
             'shift_code' => $r['shift']['code'] ?? null,
             'shift_name' => $r['shift']['name'] ?? null,
             'start_time' => $r['shift']['start_time'] ?? null,
-            'end_time'   => $r['shift']['end_time']   ?? null,
-            'color'      => $r['shift']['color'] ?? null,
-            'source'     => $r['source'],
-            'is_off'     => (bool) $r['is_off'],
+            'end_time' => $r['shift']['end_time'] ?? null,
+            'color' => $r['shift']['color'] ?? null,
+            'source' => $r['source'],
+            'is_off' => (bool) $r['is_off'],
             'is_holiday' => (bool) $r['is_holiday'],
             'holiday_name' => $r['holiday_name'] ?? null,
             'pattern_id' => $r['pattern_id'] ?? null,
-            'reason'     => $r['reason'] ?? null,
+            'reason' => $r['reason'] ?? null,
         ];
+    }
+
+    private function shiftBelongsToCompany($db, int $shiftId, int $companyId): bool
+    {
+        return $db->table('shifts')
+            ->where('id', $shiftId)
+            ->where('company_id', $companyId)
+            ->where('deleted_at IS NULL')
+            ->countAllResults() > 0;
     }
 }

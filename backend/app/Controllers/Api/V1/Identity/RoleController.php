@@ -30,27 +30,22 @@ class RoleController extends ApiController
      */
     private function ensureSuperAdmin()
     {
-        if (! $this->tenant()->isSuperAdmin()) {
+        if (!$this->tenant()->isSuperAdmin()) {
             return $this->fail(
                 'Forbidden — hanya Super Admin yang dapat mengubah role & permission',
                 403,
                 'SUPER_ADMIN_ONLY'
             );
         }
+
         return null;
     }
 
     public function index()
     {
-        $db = \Config\Database::connect();
-        $companyId = $this->companyId();
-        $rows = $db->table('roles')
-            ->groupStart()
-                ->where('company_id', $companyId)
-                ->orWhere('company_id IS NULL')
-            ->groupEnd()
-            ->orderBy('name')
-            ->get()->getResultArray();
+        $rows = (new \App\Repositories\Identity\RoleRepository())
+            ->listForCompany($this->companyId());
+
         return $this->ok($rows);
     }
 
@@ -58,14 +53,19 @@ class RoleController extends ApiController
     {
         $db = \Config\Database::connect();
         $row = $db->table('roles')->where('id', (int) $id)->get()->getRowArray();
-        if (! $row) return $this->fail('Not found', 404);
-        if ($row['company_id'] !== null && (int) $row['company_id'] !== $this->companyId() && ! $this->tenant()->isSuperAdmin()) return $this->fail('Forbidden', 403);
+        if (!$row) {
+            return $this->fail('Not found', 404);
+        }
+        if ($row['company_id'] !== null && (int) $row['company_id'] !== $this->companyId() && !$this->tenant()->isSuperAdmin()) {
+            return $this->fail('Forbidden', 403);
+        }
         $perms = $db->table('role_permissions rp')
             ->select('p.id, p.slug, p.name, p.group')
             ->join('permissions p', 'p.id = rp.permission_id')
             ->where('rp.role_id', $id)
             ->get()->getResultArray();
         $row['permissions'] = $perms;
+
         return $this->ok($row);
     }
 
@@ -75,7 +75,9 @@ class RoleController extends ApiController
     public function approvalRequests()
     {
         $companyId = $this->companyId();
-        if ($companyId <= 0) return $this->fail('Company context tidak valid', 422);
+        if ($companyId <= 0) {
+            return $this->fail('Company context tidak valid', 422);
+        }
 
         $db = \Config\Database::connect();
         $rows = $db->table('privileged_action_requests par')
@@ -120,7 +122,7 @@ class RoleController extends ApiController
 
             $approvers = [];
             foreach ($expectedIds as $userId) {
-                if (! array_key_exists($userId, $userCache)) {
+                if (!array_key_exists($userId, $userCache)) {
                     $userCache[$userId] = $db->table('users u')
                         ->select('u.id, u.name, u.email, r.name AS role_name')
                         ->join('roles r', 'r.id = u.role_id', 'left')
@@ -129,7 +131,9 @@ class RoleController extends ApiController
                         ->where('u.is_active', 1)
                         ->get()->getRowArray();
                 }
-                if ($userCache[$userId]) $approvers[] = $userCache[$userId];
+                if ($userCache[$userId]) {
+                    $approvers[] = $userCache[$userId];
+                }
             }
 
             $row['current_approvers'] = $approvers;
@@ -162,7 +166,7 @@ class RoleController extends ApiController
         $snapshot = is_string($rawPayload) && $rawPayload !== ''
             ? json_decode($rawPayload, true)
             : null;
-        if (! is_array($snapshot)) {
+        if (!is_array($snapshot)) {
             return ['available' => false];
         }
         // schema_version=1 menyimpan state sebelum + payload usulan.
@@ -187,8 +191,8 @@ class RoleController extends ApiController
             $existing = $db->table('roles')
                 ->where('id', $roleId)
                 ->groupStart()
-                    ->where('company_id', $companyId)
-                    ->orWhere('company_id IS NULL')
+                ->where('company_id', $companyId)
+                ->orWhere('company_id IS NULL')
                 ->groupEnd()
                 ->get()->getRowArray();
             if ($existing) {
@@ -196,8 +200,13 @@ class RoleController extends ApiController
                     'intval',
                     array_column(
                         $db->table('role_permissions')
-                            ->select('permission_id')
+                            ->select('role_permissions.permission_id')
+                            ->join('roles', 'roles.id = role_permissions.role_id')
                             ->where('role_id', $roleId)
+                            ->groupStart()
+                            ->where('roles.company_id', $companyId)
+                            ->orWhere('roles.company_id IS NULL')
+                            ->groupEnd()
                             ->get()->getResultArray(),
                         'permission_id'
                     )
@@ -254,55 +263,71 @@ class RoleController extends ApiController
 
     public function create()
     {
-        if ($block = $this->ensureSuperAdmin()) return $block;
+        if ($block = $this->ensureSuperAdmin()) {
+            return $block;
+        }
 
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'slug' => 'required|alpha_dash|max_length[50]',
             'name' => 'required|max_length[100]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         // Cegah pembuatan role bernama `super_admin` lewat API (slug ini
         // dipakai sebagai bypass permission di TenantContext).
         if (strtolower($data['slug']) === 'super_admin') {
-            return $this->fail('Slug "super_admin" tidak diperbolehkan', 422,
-                'RESERVED_SLUG');
+            return $this->fail(
+                'Slug "super_admin" tidak diperbolehkan',
+                422,
+                'RESERVED_SLUG'
+            );
         }
 
         $db = \Config\Database::connect();
         $db->table('roles')->insert([
-            'company_id'  => $this->companyId(),
-            'slug'        => $data['slug'],
-            'name'        => $data['name'],
+            'company_id' => $this->companyId(),
+            'slug' => $data['slug'],
+            'name' => $data['name'],
             'description' => $data['description'] ?? null,
-            'is_system'   => 0,
-            'created_at'  => date('Y-m-d H:i:s'),
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'is_system' => 0,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
         $id = (int) $db->insertID();
 
-        if (! empty($data['permissions']) && is_array($data['permissions'])) {
+        if (!empty($data['permissions']) && is_array($data['permissions'])) {
             $this->syncPermissions($db, $id, $data['permissions']);
         }
         Services::audit()->forModule('SECURITY')->log(
-            action: 'role.create', entity: 'roles', entityId: $id,
+            action: 'role.create',
+            entity: 'roles',
+            entityId: $id,
             after: ['slug' => $data['slug'], 'name' => $data['name']],
             description: "Membuat role: {$data['name']} ({$data['slug']})",
             severity: 'CRITICAL',
         );
+
         return $this->ok(['id' => $id], 'Role created', 201);
     }
 
     public function update($id = null)
     {
-        if ($block = $this->ensureSuperAdmin()) return $block;
+        if ($block = $this->ensureSuperAdmin()) {
+            return $block;
+        }
 
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $db->table('roles')->where('id', $id)->get()->getRowArray();
-        if (! $existing) return $this->fail('Not found', 404);
-        if ($existing['company_id'] !== null && (int) $existing['company_id'] !== $this->companyId()) return $this->fail('Role bukan milik tenant target', 403);
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if ($existing['company_id'] !== null && (int) $existing['company_id'] !== $this->companyId()) {
+            return $this->fail('Role bukan milik tenant target', 403);
+        }
 
         // Super admin BOLEH edit role apa pun, termasuk yang `is_system=1`
         // (hr_admin, manager, finance, employee, bahkan super_admin sendiri).
@@ -314,17 +339,36 @@ class RoleController extends ApiController
         $update = array_intersect_key($data, array_flip(['name', 'description']));
         $update['updated_at'] = date('Y-m-d H:i:s');
 
-        // Pengaman tambahan: jangan biarkan super admin tanpa sengaja
-        // mengosongkan permission role super_admin sendiri. Walau bypass
-        // di TenantContext via role_id=1 tetap aktif, mengosongkan list
-        // ini bikin auditor bingung dan menutup jalur fallback kalau
-        // suatu hari bypass itu dicabut.
-        if ((int) $existing['id'] === 1 && isset($data['permissions'])
-            && is_array($data['permissions']) && empty($data['permissions'])) {
-            return $this->fail(
-                'Tidak boleh mengosongkan permission role Super Admin',
-                422, 'CANNOT_EMPTY_SUPER_ADMIN'
+        // Super Admin adalah break-glass role dan bypass permission lookup.
+        // Membiarkan checklist-nya diedit memberi kesan palsu bahwa role ini
+        // dapat dibatasi lewat RBAC, padahal server tetap mengizinkannya.
+        if ((int) $existing['id'] === 1 && isset($data['permissions']) && is_array($data['permissions'])) {
+            $currentPermissionIds = array_map(
+                'intval',
+                array_column(
+                    $db->table('role_permissions')->select('permission_id')
+                        ->where('role_id', 1)->get()->getResultArray(),
+                    'permission_id',
+                ),
             );
+            $requestedPermissionIds = array_values(array_unique(array_filter(array_map('intval', $data['permissions']))));
+            sort($currentPermissionIds);
+            sort($requestedPermissionIds);
+            if ($currentPermissionIds !== $requestedPermissionIds) {
+                return $this->fail(
+                    'Permission Super Admin bersifat permanen karena merupakan role break-glass',
+                    422,
+                    'SUPER_ADMIN_PERMISSIONS_IMMUTABLE',
+                );
+            }
+        }
+
+        // Global system roles are templates shared by all tenants. On first
+        // edit, create a tenant-local copy and move only this tenant's users
+        // and approval-chain references to it. Never mutate the global map.
+        if ($existing['company_id'] === null && (int) $existing['id'] !== 1) {
+            $existing = $this->localizeGlobalRole($db, $existing, $this->companyId());
+            $id = (int) $existing['id'];
         }
 
         $db->table('roles')->where('id', $id)->update($update);
@@ -333,25 +377,37 @@ class RoleController extends ApiController
             $this->syncPermissions($db, $id, $data['permissions']);
         }
         Services::audit()->forModule('SECURITY')->log(
-            action: 'role.update', entity: 'roles', entityId: $id,
-            before: $existing, after: array_merge($update, ['permissions' => $data['permissions'] ?? null]),
+            action: 'role.update',
+            entity: 'roles',
+            entityId: $id,
+            before: $existing,
+            after: array_merge($update, ['permissions' => $data['permissions'] ?? null]),
             description: "Mengubah role: {$existing['name']} ({$existing['slug']})"
                 . ((int) $existing['is_system'] === 1 ? ' [SYSTEM ROLE]' : ''),
             severity: 'CRITICAL',
         );
-        return $this->ok(null, 'Updated');
+
+        return $this->ok(['id' => $id], 'Updated');
     }
 
     public function delete($id = null)
     {
-        if ($block = $this->ensureSuperAdmin()) return $block;
+        if ($block = $this->ensureSuperAdmin()) {
+            return $block;
+        }
 
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $db->table('roles')->where('id', $id)->get()->getRowArray();
-        if (! $existing) return $this->fail('Not found', 404);
-        if ($existing['company_id'] !== null && (int) $existing['company_id'] !== $this->companyId()) return $this->fail('Role bukan milik tenant target', 403);
-        if ((int) $existing['is_system'] === 1) return $this->fail('Cannot delete system role', 403);
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if ($existing['company_id'] !== null && (int) $existing['company_id'] !== $this->companyId()) {
+            return $this->fail('Role bukan milik tenant target', 403);
+        }
+        if ((int) $existing['is_system'] === 1) {
+            return $this->fail('Cannot delete system role', 403);
+        }
 
         // Cegah penghapusan role yang masih aktif dipakai user — kalau
         // tidak, user-user itu jadi tanpa role dan akses mereka rusak.
@@ -367,11 +423,14 @@ class RoleController extends ApiController
         $db->table('role_permissions')->where('role_id', $id)->delete();
         $db->table('roles')->where('id', $id)->delete();
         Services::audit()->forModule('SECURITY')->log(
-            action: 'role.delete', entity: 'roles', entityId: $id,
+            action: 'role.delete',
+            entity: 'roles',
+            entityId: $id,
             before: $existing,
             description: "Menghapus role: {$existing['name']} ({$existing['slug']})",
             severity: 'CRITICAL',
         );
+
         return $this->ok(null, 'Deleted');
     }
 
@@ -384,6 +443,100 @@ class RoleController extends ApiController
                 $rows[] = ['role_id' => $roleId, 'permission_id' => $pid, 'created_at' => date('Y-m-d H:i:s')];
             }
         }
-        if ($rows) $db->table('role_permissions')->insertBatch($rows);
+        if ($rows) {
+            // roleId originates from a role created/scoped above; this junction has no company_id.
+            // @tenant-scope-reviewed
+            $db->table('role_permissions')->insertBatch($rows);
+        }
+    }
+
+    /**
+     * Clone-on-write for a global role template.
+     *
+     * @param array<string,mixed> $globalRole
+     * @return array<string,mixed>
+     */
+    private function localizeGlobalRole($db, array $globalRole, int $companyId): array
+    {
+        if ($companyId <= 0) {
+            throw new \RuntimeException('Company target wajib dipilih sebelum mengubah role tenant');
+        }
+
+        $local = $db->table('roles')
+            ->where('company_id', $companyId)
+            ->where('slug', $globalRole['slug'])
+            ->get()->getRowArray();
+        if ($local) {
+            $this->rebindTenantRoleReferences(
+                $db,
+                $companyId,
+                (int) $globalRole['id'],
+                (int) $local['id'],
+                date('Y-m-d H:i:s'),
+            );
+            return $local;
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $db->transBegin();
+        try {
+            $db->table('roles')->insert([
+                'company_id' => $companyId,
+                'slug' => $globalRole['slug'],
+                'name' => $globalRole['name'],
+                'description' => $globalRole['description'] ?? null,
+                'is_system' => (int) ($globalRole['is_system'] ?? 1),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+            $localId = (int) $db->insertID();
+            $permissionIds = array_map(
+                'intval',
+                array_column(
+                    $db->table('role_permissions')->select('permission_id')
+                        ->where('role_id', (int) $globalRole['id'])->get()->getResultArray(),
+                    'permission_id',
+                ),
+            );
+            if ($permissionIds !== []) {
+                $this->syncPermissions($db, $localId, $permissionIds);
+            }
+
+            $this->rebindTenantRoleReferences(
+                $db,
+                $companyId,
+                (int) $globalRole['id'],
+                $localId,
+                $now,
+            );
+
+            if (! $db->transStatus()) {
+                throw new \RuntimeException('Gagal membuat role khusus tenant');
+            }
+            $db->transCommit();
+
+            return $db->table('roles')->where('id', $localId)->get()->getRowArray();
+        } catch (\Throwable $error) {
+            $db->transRollback();
+            throw $error;
+        }
+    }
+
+    private function rebindTenantRoleReferences(
+        $db,
+        int $companyId,
+        int $globalRoleId,
+        int $localRoleId,
+        string $now,
+    ): void {
+        $db->table('users')
+            ->where('company_id', $companyId)
+            ->where('role_id', $globalRoleId)
+            ->update(['role_id' => $localRoleId, 'updated_at' => $now]);
+
+        $db->table('approval_chain_steps')
+            ->where('company_id', $companyId)
+            ->where('approver_role_id', $globalRoleId)
+            ->update(['approver_role_id' => $localRoleId, 'updated_at' => $now]);
     }
 }

@@ -37,7 +37,6 @@ return [
         'candidate_password_resets' => ['parent' => 'candidate_accounts', 'foreign_key' => true],
         'candidate_refresh_tokens' => ['parent' => 'candidate_accounts', 'foreign_key' => true],
         'competency_levels' => ['parent' => 'competencies', 'foreign_key' => true],
-        'employee_benefit_balances' => ['parent' => 'employees', 'foreign_key' => true],
         'job_posting_scoring_criteria' => ['parent' => 'job_postings', 'foreign_key' => true],
         'online_test_answers' => ['parent' => 'online_test_attempts', 'foreign_key' => true],
         'online_test_attempts' => ['parent' => 'online_test_assignments', 'foreign_key' => true],

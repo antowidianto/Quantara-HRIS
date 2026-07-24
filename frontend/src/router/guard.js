@@ -3,11 +3,18 @@ export function resolveNavigation(to, auth, featureMap = null, subscriptionStatu
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta.guest && auth.isAuthenticated) return { name: 'dashboard' }
+  if (to.meta.superAdminOnly && ! auth.isSuperAdmin) return { name: 'dashboard' }
+  if (to.meta.requiresEmployee && ! Number(auth.user?.employee_id)) return { name: 'dashboard' }
 
   const permissions = Array.isArray(to.meta.permissions)
     ? to.meta.permissions
     : (to.meta.permission ? [to.meta.permission] : [])
   if (permissions.some(permission => ! auth.can(permission))) return { name: 'dashboard' }
+
+  const permissionAny = Array.isArray(to.meta.permissionAny) ? to.meta.permissionAny : []
+  if (permissionAny.length > 0 && !permissionAny.some(permission => auth.can(permission))) {
+    return { name: 'dashboard' }
+  }
 
   if (to.meta.feature && !featureMap?.[to.meta.feature]?.enabled) {
     return { name: 'dashboard', query: { unavailable: to.meta.feature } }

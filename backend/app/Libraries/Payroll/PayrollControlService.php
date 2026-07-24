@@ -18,13 +18,16 @@ final class PayrollControlService
         if ($period['status'] !== 'CALCULATED') {
             throw new \RuntimeException('Only a calculated payroll can be submitted');
         }
+        if (!empty($period['submitted_at'])) {
+            throw new \RuntimeException('Payroll has already been submitted for approval');
+        }
         if ((int) ($period['variance_requires_review'] ?? 0) === 1
             && empty($period['variance_reviewed_at'])
         ) {
             throw new \RuntimeException('Material payroll variance must be reviewed before submission');
         }
         $reconciliation = (new PayrollReconciliationService($this->db))->analyze($companyId, $periodId);
-        if (! $reconciliation['is_reconciled']) {
+        if (!$reconciliation['is_reconciled']) {
             throw new \RuntimeException('Resolve payroll reconciliation exceptions before submission');
         }
         if ($this->db->tableExists('payroll_period_approvals')) {
@@ -38,6 +41,7 @@ final class PayrollControlService
             'approved_at' => null,
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+
         return $this->period($companyId, $periodId);
     }
 
@@ -69,6 +73,7 @@ final class PayrollControlService
         if ($count < $required) {
             $pending = $this->period($companyId, $periodId);
             $pending['approval_progress'] = ['approved' => $count, 'required' => $required];
+
             return $pending;
         }
 
@@ -84,7 +89,60 @@ final class PayrollControlService
         ]);
         $approved = $this->period($companyId, $periodId);
         $approved['approval_progress'] = ['approved' => $count, 'required' => $required];
+
         return $approved;
+    }
+
+    /** Final outcome invoked atomically by the generic ApprovalEngine adapter. */
+    public function approveFromWorkflow(int $companyId, int $periodId, int $userId): array
+    {
+        $period = $this->period($companyId, $periodId);
+        if ($period['status'] !== 'CALCULATED' || empty($period['submitted_at'])) {
+            throw new \RuntimeException('Payroll must be submitted before approval');
+        }
+        if ((int) ($period['prepared_by'] ?? 0) === $userId) {
+            throw new \DomainException('Payroll preparer cannot approve their own payroll');
+        }
+
+        [$snapshotJson, $snapshotHash] = $this->buildSnapshot($period);
+        $now = date('Y-m-d H:i:s');
+        $this->db->table('payroll_periods')
+            ->where('id', $periodId)
+            ->where('company_id', $companyId)
+            ->where('status', 'CALCULATED')
+            ->update([
+                'status' => 'APPROVED',
+                'approved_by' => $userId,
+                'approved_at' => $now,
+                'snapshot_json' => $snapshotJson,
+                'snapshot_hash' => $snapshotHash,
+                'snapshot_created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        if ($this->db->affectedRows() !== 1) {
+            throw new \RuntimeException('Payroll changed while applying final approval');
+        }
+
+        return $this->period($companyId, $periodId);
+    }
+
+    /** A rejected chain returns the calculated payroll to a resubmittable state. */
+    public function rejectFromWorkflow(int $companyId, int $periodId): array
+    {
+        $period = $this->period($companyId, $periodId);
+        if ($period['status'] !== 'CALCULATED' || empty($period['submitted_at'])) {
+            throw new \RuntimeException('Payroll is not awaiting approval');
+        }
+        $now = date('Y-m-d H:i:s');
+        $this->db->table('payroll_periods')->where('id', $periodId)->where('company_id', $companyId)->update([
+            'submitted_by' => null,
+            'submitted_at' => null,
+            'approved_by' => null,
+            'approved_at' => null,
+            'updated_at' => $now,
+        ]);
+
+        return $this->period($companyId, $periodId);
     }
 
     public function breakGlassApprove(
@@ -129,9 +187,10 @@ final class PayrollControlService
             'updated_at' => $now,
         ]);
         $this->db->transComplete();
-        if (! $this->db->transStatus()) {
+        if (!$this->db->transStatus()) {
             throw new \RuntimeException('Break-glass approval transaction failed');
         }
+
         return $this->period($companyId, $periodId);
     }
 
@@ -148,6 +207,7 @@ final class PayrollControlService
             throw new \RuntimeException('Approved payroll snapshot is missing');
         }
         (new PayrollSnapshotService($this->db))->assertValid($period);
+
         return $period;
     }
 
@@ -155,15 +215,17 @@ final class PayrollControlService
     {
         $row = $this->db->table('payroll_periods')
             ->where('id', $periodId)->where('company_id', $companyId)->get()->getRowArray();
-        if (! $row) {
+        if (!$row) {
             throw new \InvalidArgumentException('Payroll period not found');
         }
+
         return $row;
     }
 
     private function requiredApprovals(array $period): int
     {
         $threshold = (new PayrollSettings())->highValueApprovalThreshold((int) $period['company_id']);
+
         return $threshold > 0 && (float) $period['total_net'] >= $threshold ? 2 : 1;
     }
 

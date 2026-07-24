@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import api from '@/api/client'
 
-const ACCESS_KEY  = 'hris_access'
+const ACCESS_KEY = 'hris_access'
 const REFRESH_KEY = 'hris_refresh'
 const ACTIVE_COMPANY_KEY = 'hris_active_company_id'
 
@@ -15,6 +15,7 @@ export const useAuthStore = defineStore('auth', {
     branch: null,
     role: null,
     permissions: [],
+    authorizationVersion: null,
     bootstrapped: false,
 
     // Khusus super admin: target company yang sedang dipilih untuk
@@ -32,12 +33,12 @@ export const useAuthStore = defineStore('auth', {
      * tulis bakal ditolak backend dengan COMPANY_REQUIRED. Komponen UI
      * boleh mengandalkan flag ini untuk disable tombol Tambah.
      */
-    needsCompanyContext: (s) => s.role?.slug === 'super_admin' && ! s.activeCompanyId,
+    needsCompanyContext: (s) => s.role?.slug === 'super_admin' && !s.activeCompanyId,
   },
 
   actions: {
     async bootstrap() {
-      if (! this.accessToken) {
+      if (!this.accessToken) {
         this.bootstrapped = true
         return
       }
@@ -46,7 +47,12 @@ export const useAuthStore = defineStore('auth', {
       } catch (e) {
         // Token might be expired; try refresh once
         if (this.refreshToken) {
-          try { await this.refresh(); await this.fetchMe(); } catch (_) { this.logoutLocal() }
+          try {
+            await this.refresh()
+            await this.fetchMe()
+          } catch (_) {
+            this.logoutLocal()
+          }
         } else {
           this.logoutLocal()
         }
@@ -79,7 +85,15 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async refresh() {
-      const res = await api.post('/auth/refresh', { refresh_token: this.refreshToken })
+      const token = this.refreshToken
+      if (!token) throw new Error('Refresh token tidak tersedia')
+      // Refresh request must never enter the regular 401 retry interceptor;
+      // otherwise an invalid refresh token waits on its own promise forever.
+      const res = await api.post(
+        '/auth/refresh',
+        { refresh_token: token },
+        { skipAuth: true, skipAuthRefresh: true }
+      )
       this.setTokens(res.data.data.tokens)
     },
 
@@ -91,7 +105,8 @@ export const useAuthStore = defineStore('auth', {
       this.company = d.company
       this.branch = d.branch || null
       this.role = d.role
-      this.permissions = d.permissions || []
+      this.permissions = [...new Set(d.permissions || [])].sort()
+      this.authorizationVersion = d.authorization_version || this.authorizationStateKey()
       // avatar_url sudah ditandatangani backend (signed URL valid 1 jam).
       // Komponen lain (sidebar, header) bisa pakai langsung sebagai
       // <img :src="auth.user.avatar_url"> tanpa header Authorization.
@@ -105,10 +120,12 @@ export const useAuthStore = defineStore('auth', {
           const cRes = await api.get('/companies', { params: { per_page: 100 } })
           this.availableCompanies = cRes.data.data || []
           // Auto-pick kalau cuma ada 1 company aktif
-          if (! this.activeCompanyId && this.availableCompanies.length === 1) {
+          if (!this.activeCompanyId && this.availableCompanies.length === 1) {
             this.setActiveCompany(this.availableCompanies[0].id)
           }
-        } catch (_) { /* abaikan, user belum punya akses */ }
+        } catch (_) {
+          /* abaikan, user belum punya akses */
+        }
       }
     },
 
@@ -121,8 +138,42 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    /**
+     * Refresh only the effective role and permissions. Returns true when the
+     * UI authorization state changed, allowing the layout to reload its menu.
+     */
+    async syncAuthorization() {
+      if (!this.isAuthenticated) return false
+      const res = await api.get('/auth/authorization')
+      const data = res.data.data || {}
+      const nextPermissions = [...new Set(data.permissions || [])].sort()
+      const previousKey = this.authorizationVersion || this.authorizationStateKey()
+      const nextKey = data.version || JSON.stringify([
+        data.role?.id || null,
+        data.role?.slug || null,
+        data.role?.name || null,
+        nextPermissions,
+      ])
+
+      this.role = data.role || null
+      this.permissions = nextPermissions
+      this.authorizationVersion = nextKey
+      return previousKey !== nextKey
+    },
+
+    authorizationStateKey() {
+      return JSON.stringify([
+        this.role?.id || null,
+        this.role?.slug || null,
+        this.role?.name || null,
+        [...this.permissions].sort(),
+      ])
+    },
+
     async logout() {
-      try { await api.post('/auth/logout') } catch (_) {}
+      try {
+        await api.post('/auth/logout')
+      } catch (_) {}
       this.logoutLocal()
     },
 
@@ -150,6 +201,7 @@ export const useAuthStore = defineStore('auth', {
       this.branch = null
       this.role = null
       this.permissions = []
+      this.authorizationVersion = null
       this.activeCompanyId = null
       this.availableCompanies = []
       localStorage.removeItem(ACCESS_KEY)
@@ -158,9 +210,9 @@ export const useAuthStore = defineStore('auth', {
     },
 
     setTokens(tokens) {
-      this.accessToken  = tokens.access_token
+      this.accessToken = tokens.access_token
       this.refreshToken = tokens.refresh_token
-      localStorage.setItem(ACCESS_KEY,  tokens.access_token)
+      localStorage.setItem(ACCESS_KEY, tokens.access_token)
       localStorage.setItem(REFRESH_KEY, tokens.refresh_token)
     },
   },

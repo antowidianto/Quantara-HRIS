@@ -13,6 +13,9 @@ class UserController extends ApiController
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 20)));
         $search = trim((string) $this->request->getGet('search'));
+        $roleId = max(0, (int) ($this->request->getGet('role_id') ?? 0));
+        $active = $this->request->getGet('is_active');
+        $linked = strtolower(trim((string) $this->request->getGet('linked')));
 
         $builder = $db->table('users u')
             ->select('u.id, u.email, u.name, u.is_active, u.role_id, u.company_id, u.employee_id, u.last_login_at, u.twofa_enabled, r.slug AS role_slug, r.name AS role_name, e.employee_number, e.full_name AS employee_full_name')
@@ -24,7 +27,23 @@ class UserController extends ApiController
             $builder->where('u.company_id', $this->companyId());
         }
         if ($search !== '') {
-            $builder->groupStart()->like('u.email', $search)->orLike('u.name', $search)->groupEnd();
+            $builder->groupStart()
+                ->like('u.email', $search)
+                ->orLike('u.name', $search)
+                ->orLike('e.employee_number', $search)
+                ->orLike('e.full_name', $search)
+                ->groupEnd();
+        }
+        if ($roleId > 0) {
+            $builder->where('u.role_id', $roleId);
+        }
+        if ($active === '0' || $active === '1') {
+            $builder->where('u.is_active', (int) $active);
+        }
+        if ($linked === 'linked') {
+            $builder->where('e.id IS NOT NULL');
+        } elseif ($linked === 'unlinked') {
+            $builder->where('e.id IS NULL');
         }
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('u.name')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
