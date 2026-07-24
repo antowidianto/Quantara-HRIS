@@ -3,6 +3,7 @@
 namespace App\Controllers\Api\V1\Auth;
 
 use App\Controllers\Api\V1\ApiController;
+use App\Repositories\Identity\AuthorizationRepository;
 use Config\Services;
 
 class AuthController extends ApiController
@@ -494,26 +495,18 @@ class AuthController extends ApiController
      */
     public function authorization()
     {
-        $db = \Config\Database::connect();
-        $user = $db->table('users')
-            ->select('id, role_id')
-            ->where('id', $this->userId())
-            ->where('is_active', 1)
-            ->get()
-            ->getRowArray();
-        if (! $user) {
+        $tenant = $this->tenant();
+        $snapshot = (new AuthorizationRepository())->snapshotForUser(
+            $this->userId(),
+            $this->companyId(),
+            $tenant->isSuperAdmin(),
+        );
+        if ($snapshot === null) {
             return $this->fail('User not found or inactive', 401, 'USER_INACTIVE');
         }
 
-        $role = null;
-        if (! empty($user['role_id'])) {
-            $role = $db->table('roles')
-                ->select('id, slug, name, updated_at')
-                ->where('id', (int) $user['role_id'])
-                ->get()
-                ->getRowArray();
-        }
-        $permissions = $this->tenant()->getPermissions();
+        $role = $snapshot['role'];
+        $permissions = $tenant->getPermissions();
 
         return $this->ok([
             'role' => $role ? [
@@ -905,7 +898,7 @@ class AuthController extends ApiController
             : $userQuery->where('company_id IS NULL');
         $user = $userQuery->get()->getRowArray();
         if (!$user) {
-            return $this->failNotFound('User tidak ditemukan pada tenant aktif');
+            return $this->fail('User tidak ditemukan pada tenant aktif', 404, 'USER_NOT_FOUND');
         }
         if (!password_verify($data['password'], $user['password_hash'])) {
             return $this->fail('Password incorrect', 400);
