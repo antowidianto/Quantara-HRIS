@@ -2,11 +2,11 @@
 
 namespace App\Libraries\Notification;
 
-use App\Notifications\NotificationChannel;
 use App\Notifications\Channels\EmailChannel;
 use App\Notifications\Channels\InAppChannel;
 use App\Notifications\Channels\WebPushChannel;
 use App\Notifications\Channels\WhatsAppChannel;
+use App\Notifications\NotificationChannel;
 use Config\Services;
 
 /**
@@ -51,20 +51,20 @@ class NotificationService
             ->where('id', $userId)
             ->where('company_id', $companyId)
             ->get()->getRowArray();
-        if (! $user) {
+        if (!$user) {
             throw new \RuntimeException('Notification recipient does not belong to the requested tenant.');
         }
 
         $now = date('Y-m-d H:i:s');
         $db->table('notifications')->insert([
             'company_id' => $companyId,
-            'user_id'    => $userId,
-            'type'       => $type,
-            'title'      => $title,
-            'message'    => $message,
-            'data'       => $data ? json_encode($data, JSON_UNESCAPED_UNICODE) : null,
-            'link_url'   => $linkUrl,
-            'is_read'    => 0,
+            'user_id' => $userId,
+            'type' => $type,
+            'title' => $title,
+            'message' => $message,
+            'data' => $data ? json_encode($data, JSON_UNESCAPED_UNICODE) : null,
+            'link_url' => $linkUrl,
+            'is_read' => 0,
             'sent_email' => 0,
             'created_at' => $now,
         ]);
@@ -72,18 +72,21 @@ class NotificationService
 
         $payload = [
             'notification_id' => $notifId,
-            'notif_type'      => $type,
-            'title'           => $title,
-            'message'         => $message,
-            'data'            => $data,
-            'link_url'        => $linkUrl,
-            'company_id'      => $companyId,
+            'notif_type' => $type,
+            'title' => $title,
+            'message' => $message,
+            'data' => $data,
+            'link_url' => $linkUrl,
+            'company_id' => $companyId,
         ];
 
         $channels = $this->resolveChannelsFor($userId, $type, $sendEmail);
         $sentChannels = [];
         foreach ($channels as $channel) {
-            if (! $channel->isAvailable($user)) continue;
+            if (!$channel->isAvailable($user)) {
+                continue;
+            }
+
             try {
                 if ($channel->send($user, $payload)) {
                     $sentChannels[] = $channel->slug();
@@ -96,7 +99,7 @@ class NotificationService
         // Update flag sent_email kalau email channel sukses (backward-compat).
         if (in_array('email', $sentChannels, true)) {
             $db->table('notifications')->where('id', $notifId)->update([
-                'sent_email'    => 1,
+                'sent_email' => 1,
                 'email_sent_at' => $now,
             ]);
         }
@@ -109,12 +112,13 @@ class NotificationService
      * Email/WA/push: cek user prefs, fallback ke default per type.
      *
      * @param bool $forceEmail Override pref email (untuk backward-compat caller lama)
+     *
      * @return NotificationChannel[]
      */
     private function resolveChannelsFor(int $userId, string $type, bool $forceEmail = false): array
     {
         $defaults = $this->defaultChannelsFor($type);
-        if ($forceEmail && ! in_array('email', $defaults, true)) {
+        if ($forceEmail && !in_array('email', $defaults, true)) {
             $defaults[] = 'email';
         }
 
@@ -122,6 +126,7 @@ class NotificationService
         // notif_type=$type dulu, lalu fallback ke notif_type='*' kalau tidak ada.
         $db = \Config\Database::connect();
         $prefs = [];
+
         try {
             $rows = $db->table('user_notification_preferences')
                 ->where('user_id', $userId)
@@ -130,7 +135,9 @@ class NotificationService
             foreach ($rows as $r) {
                 // Specific (notif_type=$type) menang atas wildcard '*'
                 $key = $r['channel'];
-                if (isset($prefs[$key]) && $prefs[$key]['notif_type'] === $type) continue;
+                if (isset($prefs[$key]) && $prefs[$key]['notif_type'] === $type) {
+                    continue;
+                }
                 $prefs[$key] = $r;
             }
         } catch (\Throwable $e) {
@@ -145,15 +152,22 @@ class NotificationService
                 $enabledSlugs[] = $slug;
                 continue;
             }
+            // Caller yang meminta force-email harus mengalahkan preference user.
+            if ($slug === 'email' && $forceEmail) {
+                $enabledSlugs[] = $slug;
+                continue;
+            }
             if (isset($prefs[$slug])) {
-                if ((int) $prefs[$slug]['enabled'] === 1) $enabledSlugs[] = $slug;
+                if ((int) $prefs[$slug]['enabled'] === 1) {
+                    $enabledSlugs[] = $slug;
+                }
             } elseif (in_array($slug, $defaults, true)) {
                 $enabledSlugs[] = $slug;
             }
         }
 
         if ($this->isWithinQuietHours($userId)) {
-            $enabledSlugs = ['in_app'];
+            $enabledSlugs = $forceEmail ? ['in_app', 'email'] : ['in_app'];
         }
 
         // Filter ke instance channel sesuai enabled slugs.
@@ -166,13 +180,18 @@ class NotificationService
     private function isWithinQuietHours(int $userId): bool
     {
         $db = \Config\Database::connect();
-        if (! $db->fieldExists('quiet_hours_start', 'users')) return false;
+        if (!$db->fieldExists('quiet_hours_start', 'users')) {
+            return false;
+        }
         $user = $db->table('users')->select('quiet_hours_start, quiet_hours_end')
             ->where('id', $userId)->get()->getRowArray();
         $start = substr((string) ($user['quiet_hours_start'] ?? ''), 0, 5);
         $end = substr((string) ($user['quiet_hours_end'] ?? ''), 0, 5);
-        if ($start === '' || $end === '' || $start === $end) return false;
+        if ($start === '' || $end === '' || $start === $end) {
+            return false;
+        }
         $now = date('H:i');
+
         return $start < $end
             ? ($now >= $start && $now < $end)
             : ($now >= $start || $now < $end);
@@ -188,25 +207,27 @@ class NotificationService
     {
         // Pola: <module>.<action> → set channel default
         $rules = [
-            'leave.requested'         => ['in_app', 'email'],
-            'overtime.requested'      => ['in_app', 'email'],
+            'leave.requested' => ['in_app', 'email'],
+            'overtime.requested' => ['in_app', 'email'],
             'attendance.change_requested' => ['in_app', 'email'],
-            'approval.pending'        => ['in_app', 'email', 'whatsapp'],
-            'leave.approved'          => ['in_app', 'email'],
-            'leave.rejected'          => ['in_app', 'email'],
-            'overtime.approved'       => ['in_app', 'email'],
-            'overtime.rejected'       => ['in_app', 'email'],
+            'approval.pending' => ['in_app', 'email', 'whatsapp'],
+            'payroll.approval.pending' => ['in_app', 'email'],
+            'leave.approved' => ['in_app', 'email'],
+            'leave.rejected' => ['in_app', 'email'],
+            'overtime.approved' => ['in_app', 'email'],
+            'overtime.rejected' => ['in_app', 'email'],
             'attendance.change.approved' => ['in_app', 'email'],
             'attendance.change.rejected' => ['in_app', 'email'],
-            'reimbursement.approved'  => ['in_app', 'email'],
-            'reimbursement.rejected'  => ['in_app', 'email'],
-            'loan.approved'           => ['in_app', 'email'],
-            'loan.rejected'           => ['in_app', 'email'],
-            'payslip.published'       => ['in_app', 'email'],
-            'contract.expiring'       => ['in_app', 'email'],
-            'cert.expiring'           => ['in_app', 'email'],
-            'sp.issued'               => ['in_app', 'email'],
+            'reimbursement.approved' => ['in_app', 'email'],
+            'reimbursement.rejected' => ['in_app', 'email'],
+            'loan.approved' => ['in_app', 'email'],
+            'loan.rejected' => ['in_app', 'email'],
+            'payslip.published' => ['in_app', 'email'],
+            'contract.expiring' => ['in_app', 'email'],
+            'cert.expiring' => ['in_app', 'email'],
+            'sp.issued' => ['in_app', 'email'],
         ];
+
         return $rules[$type] ?? ['in_app'];
     }
 
@@ -221,6 +242,7 @@ class NotificationService
                 new WebPushChannel(),
             ];
         }
+
         return $this->channels;
     }
 
@@ -242,10 +264,10 @@ class NotificationService
                 ->update(['enabled' => $enabled ? 1 : 0, 'updated_at' => $now]);
         } else {
             $db->table('user_notification_preferences')->insert([
-                'user_id'    => $userId,
+                'user_id' => $userId,
                 'notif_type' => $notifType,
-                'channel'    => $channel,
-                'enabled'    => $enabled ? 1 : 0,
+                'channel' => $channel,
+                'enabled' => $enabled ? 1 : 0,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
@@ -256,6 +278,7 @@ class NotificationService
     public function getPreferences(int $userId): array
     {
         $db = \Config\Database::connect();
+
         return $db->table('user_notification_preferences')
             ->where('user_id', $userId)
             ->orderBy('notif_type', 'ASC')
@@ -268,21 +291,22 @@ class NotificationService
         $db = \Config\Database::connect();
         $now = date('Y-m-d H:i:s');
         $db->table('email_queue')->insert([
-            'company_id'  => $companyId,
-            'to_email'    => $toEmail,
-            'to_name'     => $toName,
-            'subject'     => $subject,
-            'body_html'   => $bodyHtml,
+            'company_id' => $companyId,
+            'to_email' => $toEmail,
+            'to_name' => $toName,
+            'subject' => $subject,
+            'body_html' => $bodyHtml,
             'attachments' => $attachments ? json_encode($attachments) : null,
-            'status'      => 'QUEUED',
-            'attempts'    => 0,
-            'scheduled_at'=> $now,
+            'status' => 'QUEUED',
+            'attempts' => 0,
+            'scheduled_at' => $now,
             // Sprint 7 — kolom retry tracking. Default null (boleh kirim sekarang).
-            'next_retry_at'   => null,
+            'next_retry_at' => null,
             'last_attempt_at' => null,
-            'created_at'  => $now,
-            'updated_at'  => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
         ]);
+
         return (int) $db->insertID();
     }
 
@@ -307,8 +331,8 @@ class NotificationService
             ->where('scheduled_at <=', $now)
             // next_retry_at NULL atau ≤ now (boleh retry sekarang)
             ->groupStart()
-                ->where('next_retry_at IS NULL')
-                ->orWhere('next_retry_at <=', $now)
+            ->where('next_retry_at IS NULL')
+            ->orWhere('next_retry_at <=', $now)
             ->groupEnd()
             ->orderBy('id', 'ASC')
             ->limit($batch)
@@ -318,37 +342,42 @@ class NotificationService
         $sent = 0;
         foreach ($rows as $row) {
             $newAttempt = (int) $row['attempts'] + 1;
-            $db->table('email_queue')->where('id', $row['id'])->update([
-                'status'          => 'SENDING',
-                'attempts'        => $newAttempt,
-                'last_attempt_at' => $now,
-            ]);
+            $db->table('email_queue')->where('id', $row['id'])
+                ->where('company_id', $row['company_id'])->update([
+                    'status' => 'SENDING',
+                    'attempts' => $newAttempt,
+                    'last_attempt_at' => $now,
+                ]);
+
             try {
                 $this->dispatch($row);
-                $db->table('email_queue')->where('id', $row['id'])->update([
-                    'status'        => 'SENT',
-                    'sent_at'       => date('Y-m-d H:i:s'),
-                    'next_retry_at' => null,
-                    'updated_at'    => date('Y-m-d H:i:s'),
-                ]);
+                $db->table('email_queue')->where('id', $row['id'])
+                    ->where('company_id', $row['company_id'])->update([
+                        'status' => 'SENT',
+                        'sent_at' => date('Y-m-d H:i:s'),
+                        'next_retry_at' => null,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
                 $sent++;
             } catch (\Throwable $e) {
                 // Schedule next retry kalau masih ada budget attempts.
                 // Kalau sudah habis, set status FAILED final tanpa next_retry_at.
                 $exhausted = $newAttempt >= \App\Libraries\System\EmailQueueBackoff::MAX_ATTEMPTS;
                 $update = [
-                    'status'     => 'FAILED',
+                    'status' => 'FAILED',
                     'last_error' => substr($e->getMessage(), 0, 1000),
                     'updated_at' => date('Y-m-d H:i:s'),
                 ];
-                if (! $exhausted) {
+                if (!$exhausted) {
                     $update['next_retry_at'] = \App\Libraries\System\EmailQueueBackoff::nextRetryAt($newAttempt);
                 } else {
                     $update['next_retry_at'] = null;  // tidak retry lagi
                 }
-                $db->table('email_queue')->where('id', $row['id'])->update($update);
+                $db->table('email_queue')->where('id', $row['id'])
+                    ->where('company_id', $row['company_id'])->update($update);
             }
         }
+
         return $sent;
     }
 
@@ -361,9 +390,9 @@ class NotificationService
 
         $mailer = new \PHPMailer\PHPMailer\PHPMailer(true);
         $mailer->isSMTP();
-        $mailer->Host       = $cfg['host'];
-        $mailer->Port       = $cfg['port'];
-        $mailer->SMTPAuth   = $cfg['username'] !== '';
+        $mailer->Host = $cfg['host'];
+        $mailer->Port = $cfg['port'];
+        $mailer->SMTPAuth = $cfg['username'] !== '';
         if ($mailer->SMTPAuth) {
             $mailer->Username = $cfg['username'];
             $mailer->Password = $cfg['password'];
@@ -378,10 +407,10 @@ class NotificationService
         $mailer->addAddress($row['to_email'], $row['to_name'] ?? '');
         $mailer->Subject = $row['subject'];
         $mailer->isHTML(true);
-        $mailer->Body    = $row['body_html'];
+        $mailer->Body = $row['body_html'];
         $mailer->AltBody = strip_tags($row['body_html']);
 
-        if (! empty($row['attachments'])) {
+        if (!empty($row['attachments'])) {
             $atts = json_decode($row['attachments'], true) ?: [];
             foreach ($atts as $att) {
                 if (isset($att['path']) && is_file($att['path'])) {
@@ -411,42 +440,59 @@ class NotificationService
     private function resolveSmtpConfig(?int $companyId): array
     {
         $cfg = [
-            'host'         => (string) env('mail.host', 'smtp.gmail.com'),
-            'port'         => (int) env('mail.port', 587),
-            'username'     => (string) env('mail.username', ''),
-            'password'     => (string) env('mail.password', ''),
-            'encryption'   => strtolower((string) env('mail.encryption', 'tls')),
+            'host' => (string) env('mail.host', 'smtp.gmail.com'),
+            'port' => (int) env('mail.port', 587),
+            'username' => (string) env('mail.username', ''),
+            'password' => (string) env('mail.password', ''),
+            'encryption' => strtolower((string) env('mail.encryption', 'tls')),
             'from_address' => (string) env('mail.fromAddress', 'noreply@hris.local'),
-            'from_name'    => (string) env('mail.fromName', 'HRIS'),
+            'from_name' => (string) env('mail.fromName', 'HRIS'),
         ];
-        if (! $companyId) return $this->applyDevelopmentMailpit($cfg);
+        if (!$companyId) {
+            return $this->applyDevelopmentMailpit($cfg);
+        }
 
         $db = \Config\Database::connect();
-        if (! $db->tableExists('settings')) return $this->applyDevelopmentMailpit($cfg);
+        if (!$db->tableExists('settings')) {
+            return $this->applyDevelopmentMailpit($cfg);
+        }
         $rows = $db->table('settings')
             ->where('company_id', $companyId)
             ->whereIn('key', [
-                'email.host','email.port','email.username','email.password_enc',
-                'email.encryption','email.from_address','email.from_name',
+                'email.host', 'email.port', 'email.username', 'email.password_enc',
+                'email.encryption', 'email.from_address', 'email.from_name',
             ])
             ->get()->getResultArray();
         $kv = array_column($rows, 'value', 'key');
 
-        if (isset($kv['email.host'])         && $kv['email.host']         !== '') $cfg['host']         = $kv['email.host'];
-        if (isset($kv['email.port'])         && $kv['email.port']         !== '') $cfg['port']         = (int) $kv['email.port'];
-        if (isset($kv['email.username'])     && $kv['email.username']     !== '') $cfg['username']     = $kv['email.username'];
-        if (isset($kv['email.encryption'])   && $kv['email.encryption']   !== '') $cfg['encryption']   = strtolower($kv['email.encryption']);
-        if (isset($kv['email.from_address']) && $kv['email.from_address'] !== '') $cfg['from_address'] = $kv['email.from_address'];
-        if (isset($kv['email.from_name'])    && $kv['email.from_name']    !== '') $cfg['from_name']    = $kv['email.from_name'];
+        if (isset($kv['email.host']) && $kv['email.host'] !== '') {
+            $cfg['host'] = $kv['email.host'];
+        }
+        if (isset($kv['email.port']) && $kv['email.port'] !== '') {
+            $cfg['port'] = (int) $kv['email.port'];
+        }
+        if (isset($kv['email.username']) && $kv['email.username'] !== '') {
+            $cfg['username'] = $kv['email.username'];
+        }
+        if (isset($kv['email.encryption']) && $kv['email.encryption'] !== '') {
+            $cfg['encryption'] = strtolower($kv['email.encryption']);
+        }
+        if (isset($kv['email.from_address']) && $kv['email.from_address'] !== '') {
+            $cfg['from_address'] = $kv['email.from_address'];
+        }
+        if (isset($kv['email.from_name']) && $kv['email.from_name'] !== '') {
+            $cfg['from_name'] = $kv['email.from_name'];
+        }
 
         // Password decrypt — kalau gagal, fallback ke env supaya email
         // tidak tiba-tiba mati gara-gara key rotation issue.
-        if (! empty($kv['email.password_enc'])) {
+        if (!empty($kv['email.password_enc'])) {
             $plain = Services::encryption()->decrypt($kv['email.password_enc']);
             if ($plain !== null && $plain !== '') {
                 $cfg['password'] = $plain;
             }
         }
+
         return $this->applyDevelopmentMailpit($cfg);
     }
 
@@ -470,13 +516,14 @@ class NotificationService
 
     private function renderEmailHtml(string $title, string $message, ?string $linkUrl): string
     {
-        $safeTitle   = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
+        $safeTitle = htmlspecialchars($title, ENT_QUOTES, 'UTF-8');
         $safeMessage = nl2br(htmlspecialchars($message, ENT_QUOTES, 'UTF-8'));
         $linkHtml = '';
         if ($linkUrl) {
             $safeLink = htmlspecialchars($linkUrl, ENT_QUOTES, 'UTF-8');
             $linkHtml = "<p><a href=\"{$safeLink}\" style=\"display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;\">Buka di HRIS</a></p>";
         }
+
         return <<<HTML
 <!doctype html>
 <html lang="id">

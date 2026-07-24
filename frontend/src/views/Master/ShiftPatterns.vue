@@ -9,9 +9,12 @@ import {
   CalendarDaysIcon,
 } from '@heroicons/vue/24/outline'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
+const canManage = computed(() => auth.can('shift_pattern.manage'))
 
 const items = ref([])
 const loading = ref(false)
@@ -207,7 +210,7 @@ function shiftLabel(slot) {
       <h1 class="text-2xl font-bold flex items-center gap-2">
         <CalendarDaysIcon class="w-6 h-6" /> {{ t('master.shift_patterns.title') }}
       </h1>
-      <button type="button" class="btn-primary" @click="openCreate">
+      <button v-if="canManage" type="button" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-4 h-4" /> {{ t('master.shift_patterns.btn_create') }}
       </button>
     </div>
@@ -257,8 +260,8 @@ function shiftLabel(slot) {
               </td>
               <td class="text-right">
                 <div class="inline-flex gap-2">
-                  <button type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind="{ title: t('common.edit'), 'aria-label': t('common.edit') }"><PencilIcon class="w-4 h-4" /></button>
-                  <button type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" :disabled="deletingId !== null" v-bind="{ title: t('common.delete'), 'aria-label': t('common.delete') }"><TrashIcon class="w-4 h-4" /></button>
+                  <button v-if="canManage" type="button" class="text-gray-500 hover:text-primary-600" @click="openEdit(item)" v-bind="{ title: t('common.edit'), 'aria-label': t('common.edit') }"><PencilIcon class="w-4 h-4" /></button>
+                  <button v-if="canManage" type="button" class="text-gray-500 hover:text-red-600 disabled:opacity-50" @click="remove(item)" :disabled="deletingId !== null" v-bind="{ title: t('common.delete'), 'aria-label': t('common.delete') }"><TrashIcon class="w-4 h-4" /></button>
                 </div>
               </td>
             </tr>

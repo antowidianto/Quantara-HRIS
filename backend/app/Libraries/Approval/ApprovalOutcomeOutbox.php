@@ -25,23 +25,29 @@ final class ApprovalOutcomeOutbox
         $entity = $db->table((string) $request['entity_table'])
             ->where('id', (int) $request['entity_id'])->where('company_id', $companyId)
             ->get()->getRowArray();
-        if (! $entity) throw new \RuntimeException('Entitas outcome approval tidak ditemukan');
-        $recipientUserId = $employee && ! empty($employee['user_id']) ? (int) $employee['user_id'] : null;
-        if ($module === 'CANDIDATE_OFFER' && $decision === 'APPROVED' && ! empty($entity['candidate_id'])) {
+        if (!$entity) {
+            throw new \RuntimeException('Entitas outcome approval tidak ditemukan');
+        }
+        $recipientUserId = $employee && !empty($employee['user_id']) ? (int) $employee['user_id'] : null;
+        if ($module === 'CANDIDATE_OFFER' && $decision === 'APPROVED' && !empty($entity['candidate_id'])) {
             $candidate = $db->table('candidates')->where('id', (int) $entity['candidate_id'])
                 ->where('company_id', $companyId)->get()->getRowArray();
-            $recipientUserId = $candidate && ! empty($candidate['user_id'])
+            $recipientUserId = $candidate && !empty($candidate['user_id'])
                 ? (int) $candidate['user_id'] : null;
         }
         $requestMeta = $request['meta'] ?? [];
-        if (is_string($requestMeta)) $requestMeta = json_decode($requestMeta, true) ?: [];
-        if (! is_array($requestMeta)) $requestMeta = [];
+        if (is_string($requestMeta)) {
+            $requestMeta = json_decode($requestMeta, true) ?: [];
+        }
+        if (!is_array($requestMeta)) {
+            $requestMeta = [];
+        }
         if (in_array($module, ['GENERATED_CONTRACT', 'ASSET_TRANSACTION', 'HIRE_CONVERSION', 'EMPLOYEE_SENSITIVE_CHANGE', 'MASTER_RATE_CHANGE', 'PRIVILEGED_ACTION'], true) && $decision === 'REJECTED') {
-            $recipientUserId = ! empty($requestMeta['submitted_by'])
+            $recipientUserId = !empty($requestMeta['submitted_by'])
                 ? (int) $requestMeta['submitted_by'] : null;
         }
         if ($module === 'PRIVILEGED_ACTION') {
-            $recipientUserId = ! empty($requestMeta['submitted_by'])
+            $recipientUserId = !empty($requestMeta['submitted_by'])
                 ? (int) $requestMeta['submitted_by'] : null;
         }
 
@@ -55,15 +61,25 @@ final class ApprovalOutcomeOutbox
                 $company = $db->table('companies')->where('id', $companyId)->get()->getRowArray();
                 $slug = trim((string) ($company['career_slug'] ?? ''));
                 $notification['link'] = $slug !== '' ? '/careers/' . rawurlencode($slug) . '/offers' : '/careers';
-            } elseif (! empty($entity['job_posting_id'])) {
+            } elseif (!empty($entity['job_posting_id'])) {
                 $notification['link'] = '/recruitment/jobs/' . (int) $entity['job_posting_id'];
             }
         }
-        if ($module === 'GENERATED_CONTRACT') $notification['link'] = '/employees/contracts';
-        if ($module === 'ASSET_TRANSACTION') $notification['link'] = '/hr/assets';
-        if ($module === 'EMPLOYEE_SENSITIVE_CHANGE') $notification['link'] = '/employees';
-        if ($module === 'MASTER_RATE_CHANGE') $notification['link'] = '/master/payroll-components';
-        if ($module === 'PRIVILEGED_ACTION') $notification['link'] = '/approvals';
+        if ($module === 'GENERATED_CONTRACT') {
+            $notification['link'] = '/employees/contracts';
+        }
+        if ($module === 'ASSET_TRANSACTION') {
+            $notification['link'] = '/hr/assets';
+        }
+        if ($module === 'EMPLOYEE_SENSITIVE_CHANGE') {
+            $notification['link'] = '/employees';
+        }
+        if ($module === 'MASTER_RATE_CHANGE') {
+            $notification['link'] = '/master/payroll-components';
+        }
+        if ($module === 'PRIVILEGED_ACTION') {
+            $notification['link'] = '/approvals';
+        }
         $payload = [
             'approval_request_id' => (int) $request['id'],
             'module' => $module,
@@ -111,6 +127,7 @@ final class ApprovalOutcomeOutbox
             'created_at' => $now,
             'updated_at' => $now,
         ]);
+
         return (int) $db->insertID();
     }
 
@@ -121,9 +138,10 @@ final class ApprovalOutcomeOutbox
         $now = date('Y-m-d H:i:s');
         $staleProcessing = date('Y-m-d H:i:s', time() - 900);
         $rows = $db->table('approval_outbox_events')
+            ->where('company_id >', 0)
             ->groupStart()
-                ->groupStart()->whereIn('status', ['PENDING', 'FAILED'])->where('available_at <=', $now)->groupEnd()
-                ->orGroupStart()->where('status', 'PROCESSING')->where('processing_at <=', $staleProcessing)->groupEnd()
+            ->groupStart()->whereIn('status', ['PENDING', 'FAILED'])->where('available_at <=', $now)->groupEnd()
+            ->orGroupStart()->where('status', 'PROCESSING')->where('processing_at <=', $staleProcessing)->groupEnd()
             ->groupEnd()
             ->where('attempts < max_attempts', null, false)->orderBy('id', 'ASC')
             ->limit(max(1, min(200, $limit)))->get()->getResultArray();
@@ -131,6 +149,7 @@ final class ApprovalOutcomeOutbox
         foreach ($rows as $row) {
             $attempt = (int) $row['attempts'] + 1;
             $db->table('approval_outbox_events')->where('id', (int) $row['id'])
+                ->where('company_id', (int) $row['company_id'])
                 ->where('status', (string) $row['status'])->update([
                     'status' => 'PROCESSING', 'attempts' => $attempt,
                     'processing_at' => $now, 'updated_at' => $now,
@@ -139,23 +158,31 @@ final class ApprovalOutcomeOutbox
                 $skipped++;
                 continue;
             }
+
             try {
                 $payload = json_decode((string) $row['payload'], true, 512, JSON_THROW_ON_ERROR);
                 $notification = $payload['notification'];
                 $recipient = (int) ($payload['recipient_user_id'] ?? 0);
                 if ($recipient > 0) {
                     Services::notification()->send(
-                        $recipient, (int) $row['company_id'], (string) $notification['type'],
-                        (string) $notification['title'], (string) $notification['message'],
+                        $recipient,
+                        (int) $row['company_id'],
+                        (string) $notification['type'],
+                        (string) $notification['title'],
+                        (string) $notification['message'],
                         ['approval_request_id' => (int) $row['approval_request_id'], 'entity_id' => (int) $row['entity_id']],
-                        (string) $notification['link'], true
+                        (string) $notification['link'],
+                        true
                     );
                 }
                 Services::webhook()->dispatch(
-                    (string) $row['event_type'], (int) $row['company_id'],
-                    $payload['webhook'], (string) $row['event_id']
+                    (string) $row['event_type'],
+                    (int) $row['company_id'],
+                    $payload['webhook'],
+                    (string) $row['event_id']
                 );
                 $db->table('approval_outbox_events')->where('id', (int) $row['id'])
+                    ->where('company_id', (int) $row['company_id'])
                     ->where('status', 'PROCESSING')->update([
                         'status' => 'PUBLISHED', 'published_at' => date('Y-m-d H:i:s'),
                         'last_error' => null, 'updated_at' => date('Y-m-d H:i:s'),
@@ -164,15 +191,17 @@ final class ApprovalOutcomeOutbox
             } catch (\Throwable $exception) {
                 $exhausted = $attempt >= (int) $row['max_attempts'];
                 $delay = 30 * (2 ** max(0, $attempt - 1));
-                $db->table('approval_outbox_events')->where('id', (int) $row['id'])->update([
-                    'status' => 'FAILED',
-                    'available_at' => $exhausted ? $now : date('Y-m-d H:i:s', time() + $delay),
-                    'last_error' => mb_substr($exception->getMessage(), 0, 2000),
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
+                $db->table('approval_outbox_events')->where('id', (int) $row['id'])
+                    ->where('company_id', (int) $row['company_id'])->update([
+                        'status' => 'FAILED',
+                        'available_at' => $exhausted ? $now : date('Y-m-d H:i:s', time() + $delay),
+                        'last_error' => mb_substr($exception->getMessage(), 0, 2000),
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
                 $failed++;
             }
         }
+
         return ['published' => $published, 'failed' => $failed, 'skipped' => $skipped];
     }
 
@@ -193,6 +222,8 @@ final class ApprovalOutcomeOutbox
             'BUSINESS_TRIP:REJECTED' => WebhookEvent::BUSINESS_TRIP_REJECTED,
             'BONUS:APPROVED' => WebhookEvent::BONUS_RUN_APPROVED,
             'BONUS:REJECTED' => WebhookEvent::BONUS_RUN_REJECTED,
+            'PAYROLL:APPROVED' => WebhookEvent::PAYROLL_PERIOD_APPROVED,
+            'PAYROLL:REJECTED' => WebhookEvent::PAYROLL_PERIOD_REJECTED,
             'PAYROLL_ADJUSTMENT:APPROVED' => WebhookEvent::PAYROLL_ADJUSTMENT_APPROVED,
             'PAYROLL_ADJUSTMENT:REJECTED' => WebhookEvent::PAYROLL_ADJUSTMENT_REJECTED,
             'COMPENSATION_REVIEW:APPROVED' => WebhookEvent::COMPENSATION_REVIEW_APPROVED,
@@ -231,6 +262,7 @@ final class ApprovalOutcomeOutbox
             'ATTENDANCE_CHANGE' => 'Koreksi absensi', 'REIMBURSEMENT' => 'Reimbursement',
             'BUSINESS_TRIP' => 'Perjalanan dinas',
             'BONUS' => 'Bonus run',
+            'PAYROLL' => 'Periode payroll',
             'PAYROLL_ADJUSTMENT' => 'Koreksi payroll',
             'COMPENSATION_REVIEW' => 'Perubahan kompensasi',
             'TRAINING_REGISTRATION' => 'Registrasi training',
@@ -257,6 +289,7 @@ final class ApprovalOutcomeOutbox
             'ATTENDANCE_CHANGE' => '/attendance/my-changes',
             'BUSINESS_TRIP' => '/travel',
             'BONUS' => '/payroll/bonus/runs',
+            'PAYROLL' => '/payroll/periods',
             'PAYROLL_ADJUSTMENT' => '/payroll/adjustments',
             'COMPENSATION_REVIEW' => '/hr/compensation-review',
             'TRAINING_REGISTRATION' => '/training',
@@ -272,6 +305,7 @@ final class ApprovalOutcomeOutbox
             'PRIVILEGED_ACTION' => '/approvals',
             'REIMBURSEMENT' => '/reimbursements', 'LOAN' => '/loans', default => '/',
         };
+
         return [
             'type' => $type,
             'title' => $label . ($approved ? ' disetujui' : ' ditolak'),
@@ -283,6 +317,7 @@ final class ApprovalOutcomeOutbox
     private function eventId(int $requestId, string $decision): string
     {
         $hex = substr(hash('sha256', "approval:{$requestId}:{$decision}"), 0, 32);
+
         return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4)
             . '-' . substr($hex, 16, 4) . '-' . substr($hex, 20, 12);
     }

@@ -43,7 +43,7 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 class XlsxImportService
 {
     public const MAX_BYTES = 10 * 1024 * 1024;     // 10 MB
-    public const MAX_ROWS  = 5000;
+    public const MAX_ROWS = 5000;
     public const PREVIEW_ROWS = 50;
 
     /**
@@ -60,8 +60,8 @@ class XlsxImportService
         $col = 1;
         foreach ($spec['columns'] as $c) {
             $cellRef = $this->colLetter($col) . '1';
-            $header  = $c['header'];
-            if (! empty($c['required'])) {
+            $header = $c['header'];
+            if (!empty($c['required'])) {
                 $header .= ' *';
             }
             $sheet->setCellValue($cellRef, $header);
@@ -140,16 +140,16 @@ class XlsxImportService
         $r = 7;
         foreach ($spec['columns'] as $c) {
             $help->setCellValue("A{$r}", $c['header']);
-            $help->setCellValue("B{$r}", ! empty($c['required']) ? 'Wajib' : '-');
+            $help->setCellValue("B{$r}", !empty($c['required']) ? 'Wajib' : '-');
             $help->setCellValue("C{$r}", strtoupper($c['type']));
             $note = $c['help'] ?? '';
-            if (! empty($c['in'])) {
+            if (!empty($c['in'])) {
                 $note .= ($note ? "\n" : '') . 'Nilai yang diizinkan: ' . implode(', ', $c['in']);
             }
-            if (! empty($c['fk_table'])) {
+            if (!empty($c['fk_table'])) {
                 $note .= ($note ? "\n" : '') . "Referensi ke {$c['fk_table']}.{$c['fk_column']} (master harus sudah ada).";
             }
-            if (! empty($c['regex'])) {
+            if (!empty($c['regex'])) {
                 $note .= ($note ? "\n" : '') . 'Format: ' . $c['regex'];
             }
             if (isset($c['default'])) {
@@ -162,9 +162,13 @@ class XlsxImportService
 
         // ─── Write to temp file ─────────────────────────────────────
         $tmpDir = WRITEPATH . 'imports/templates';
-        if (! is_dir($tmpDir)) @mkdir($tmpDir, 0775, true);
+        if (!is_dir($tmpDir)) {
+            @mkdir($tmpDir, 0775, true);
+        }
         $path = $tmpDir . DIRECTORY_SEPARATOR . sprintf(
-            'template-%s-%s.xlsx', $spec['slug'], date('YmdHis')
+            'template-%s-%s.xlsx',
+            $spec['slug'],
+            date('YmdHis')
         );
         $writer = new XlsxWriter($ss);
         $writer->save($path);
@@ -203,14 +207,14 @@ class XlsxImportService
             ->get()->getRowArray();
         if ($existing) {
             return [
-                'batch_id'    => (int) $existing['id'],
-                'total'       => (int) $existing['total_rows'],
-                'valid'       => (int) $existing['valid_rows'],
-                'errors'      => (int) $existing['error_rows'],
+                'batch_id' => (int) $existing['id'],
+                'total' => (int) $existing['total_rows'],
+                'valid' => (int) $existing['valid_rows'],
+                'errors' => (int) $existing['error_rows'],
                 'errors_list' => json_decode($existing['errors_json'] ?? '[]', true) ?: [],
-                'preview'     => json_decode($existing['preview_json'] ?? '[]', true) ?: [],
-                'status'      => $existing['status'],
-                'idempotent'  => true,
+                'preview' => json_decode($existing['preview_json'] ?? '[]', true) ?: [],
+                'status' => $existing['status'],
+                'idempotent' => true,
             ];
         }
 
@@ -220,7 +224,7 @@ class XlsxImportService
             $reader->setReadDataOnly(true);
             $ss = $reader->load($tmpPath);
         } catch (\Throwable $e) {
-            throw new \RuntimeException("Gagal membaca file xlsx: " . $e->getMessage());
+            throw new \RuntimeException('Gagal membaca file xlsx: ' . $e->getMessage());
         }
         $sheet = $ss->getSheet(0);
         $rowsRaw = $sheet->toArray(null, true, true, false);
@@ -237,22 +241,24 @@ class XlsxImportService
 
         // ─── 3. Save file + create batch row ───────────────────────
         $batchInsert = [
-            'company_id'    => $companyId,
-            'resource'      => $spec['slug'],
-            'user_id'       => $userId,
+            'company_id' => $companyId,
+            'resource' => $spec['slug'],
+            'user_id' => $userId,
             'original_name' => mb_substr($originalName, 0, 255),
-            'file_size'     => $fileSize,
-            'content_hash'  => $hash,
-            'status'        => 'PENDING',
-            'created_at'    => date('Y-m-d H:i:s'),
-            'updated_at'    => date('Y-m-d H:i:s'),
+            'file_size' => $fileSize,
+            'content_hash' => $hash,
+            'status' => 'PENDING',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ];
         $db->table('import_batches')->insert($batchInsert);
         $batchId = (int) $db->insertID();
 
         // Pindahkan file ke writable storage permanent
         $storageDir = WRITEPATH . 'imports' . DIRECTORY_SEPARATOR . $companyId;
-        if (! is_dir($storageDir)) @mkdir($storageDir, 0775, true);
+        if (!is_dir($storageDir)) {
+            @mkdir($storageDir, 0775, true);
+        }
         $finalPath = $storageDir . DIRECTORY_SEPARATOR . "batch-{$batchId}.xlsx";
         @copy($tmpPath, $finalPath);
         $db->table('import_batches')->where('id', $batchId)->update([
@@ -266,27 +272,30 @@ class XlsxImportService
         // Pre-load existing values untuk unique_in_table
         $uniqueLookups = $this->buildUniqueLookups($spec['columns'], $spec['table'], $companyId);
 
-        $errors  = [];
-        $valid   = 0;
+        $errors = [];
+        $valid = 0;
         $preview = [];
         $batchSeen = []; // [field => [normalizedValue => firstRowIdx]] untuk unique_in_batch
         $compositeSeenBatch = []; // composite_unique: [key => firstRowIdx]
 
         // Pre-load composite unique existing data dari DB
         $compositeExistingDb = [];
-        if (! empty($spec['composite_unique'])) {
+        if (!empty($spec['composite_unique'])) {
             $compositeExistingDb = $this->buildCompositeUniqueLookup(
-                $spec['composite_unique'], $spec['table'], $companyId
+                $spec['composite_unique'],
+                $spec['table'],
+                $companyId
             );
         }
 
         $totalRows = count($rowsRaw);
         if ($totalRows > self::MAX_ROWS) {
             $db->table('import_batches')->where('id', $batchId)->update([
-                'status'        => 'FAILED',
+                'status' => 'FAILED',
                 'failed_reason' => "Jumlah baris {$totalRows} melebihi batas " . self::MAX_ROWS,
-                'updated_at'    => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
             ]);
+
             throw new \RuntimeException("Jumlah baris {$totalRows} melebihi batas " . self::MAX_ROWS);
         }
 
@@ -296,11 +305,16 @@ class XlsxImportService
             // Skip baris kosong total
             $allEmpty = true;
             foreach ($row as $v) {
-                if ($v !== null && trim((string) $v) !== '') { $allEmpty = false; break; }
+                if ($v !== null && trim((string) $v) !== '') {
+                    $allEmpty = false;
+                    break;
+                }
             }
-            if ($allEmpty) continue;
+            if ($allEmpty) {
+                continue;
+            }
 
-            $rowData   = []; // db field → final value (after coerce + FK lookup)
+            $rowData = []; // db field → final value (after coerce + FK lookup)
             $rowErrors = [];
 
             foreach ($spec['columns'] as $col) {
@@ -317,7 +331,7 @@ class XlsxImportService
                 }
 
                 // Required
-                if ($rawVal === '' && ! empty($col['required'])) {
+                if ($rawVal === '' && !empty($col['required'])) {
                     $rowErrors[] = ['column' => $col['header'], 'error' => 'Wajib diisi'];
                     continue;
                 }
@@ -327,10 +341,10 @@ class XlsxImportService
                 }
 
                 // Max length
-                if (! empty($col['max_length']) && mb_strlen($rawVal) > $col['max_length']) {
+                if (!empty($col['max_length']) && mb_strlen($rawVal) > $col['max_length']) {
                     $rowErrors[] = [
                         'column' => $col['header'],
-                        'error'  => "Maks {$col['max_length']} karakter, sekarang " . mb_strlen($rawVal),
+                        'error' => "Maks {$col['max_length']} karakter, sekarang " . mb_strlen($rawVal),
                     ];
                     continue;
                 }
@@ -344,18 +358,18 @@ class XlsxImportService
                 }
 
                 // Regex
-                if (! empty($col['regex']) && ! preg_match($col['regex'], (string) $rawVal)) {
+                if (!empty($col['regex']) && !preg_match($col['regex'], (string) $rawVal)) {
                     $rowErrors[] = ['column' => $col['header'], 'error' => "Format tidak sesuai pola {$col['regex']}"];
                     continue;
                 }
 
                 // unique_in_batch
-                if (! empty($col['unique_in_batch'])) {
+                if (!empty($col['unique_in_batch'])) {
                     $key = strtolower((string) $rawVal);
                     if (isset($batchSeen[$field][$key])) {
                         $rowErrors[] = [
                             'column' => $col['header'],
-                            'error'  => "Duplikat di baris " . $batchSeen[$field][$key] . " (di file ini)",
+                            'error' => 'Duplikat di baris ' . $batchSeen[$field][$key] . ' (di file ini)',
                         ];
                         continue;
                     }
@@ -363,12 +377,12 @@ class XlsxImportService
                 }
 
                 // unique_in_table
-                if (! empty($col['unique_in_table'])) {
+                if (!empty($col['unique_in_table'])) {
                     $key = strtolower((string) $rawVal);
                     if (isset($uniqueLookups[$field][$key])) {
                         $rowErrors[] = [
                             'column' => $col['header'],
-                            'error'  => "Sudah ada di database (id=" . $uniqueLookups[$field][$key] . ")",
+                            'error' => 'Sudah ada di database (id=' . $uniqueLookups[$field][$key] . ')',
                         ];
                         continue;
                     }
@@ -377,13 +391,13 @@ class XlsxImportService
                 $rowData[$field] = $coerced;
             }
 
-            if (! empty($rowErrors)) {
+            if (!empty($rowErrors)) {
                 foreach ($rowErrors as $e) {
                     $errors[] = ['row' => $rowNum, 'column' => $e['column'], 'error' => $e['error']];
                 }
             } else {
                 // ─── Composite unique check ─────────────────────────
-                if (! empty($spec['composite_unique'])) {
+                if (!empty($spec['composite_unique'])) {
                     $compositeKey = implode('|', array_map(
                         fn ($f) => strtolower((string) ($rowData[$f] ?? '')),
                         $spec['composite_unique']
@@ -391,7 +405,7 @@ class XlsxImportService
                     if (isset($compositeSeenBatch[$compositeKey])) {
                         $rowErrors[] = [
                             'column' => implode(' + ', $spec['composite_unique']),
-                            'error'  => "Duplikat kombinasi di baris " . $compositeSeenBatch[$compositeKey] . " (di file ini)",
+                            'error' => 'Duplikat kombinasi di baris ' . $compositeSeenBatch[$compositeKey] . ' (di file ini)',
                         ];
                         foreach ($rowErrors as $e) {
                             $errors[] = ['row' => $rowNum, 'column' => $e['column'], 'error' => $e['error']];
@@ -399,7 +413,7 @@ class XlsxImportService
                     } elseif (isset($compositeExistingDb[$compositeKey]) && empty($spec['upsert_on_conflict'])) {
                         $rowErrors[] = [
                             'column' => implode(' + ', $spec['composite_unique']),
-                            'error'  => "Kombinasi sudah ada di database (id=" . $compositeExistingDb[$compositeKey] . ")",
+                            'error' => 'Kombinasi sudah ada di database (id=' . $compositeExistingDb[$compositeKey] . ')',
                         ];
                         foreach ($rowErrors as $e) {
                             $errors[] = ['row' => $rowNum, 'column' => $e['column'], 'error' => $e['error']];
@@ -408,15 +422,17 @@ class XlsxImportService
                         $compositeSeenBatch[$compositeKey] = $rowNum;
                     }
                 }
-                if (empty($rowErrors)) $valid++;
+                if (empty($rowErrors)) {
+                    $valid++;
+                }
             }
 
             if (count($preview) < self::PREVIEW_ROWS) {
                 $preview[] = [
-                    'row'       => $rowNum,
-                    'data'      => $rowData,
-                    'has_error' => ! empty($rowErrors),
-                    'errors'    => $rowErrors,
+                    'row' => $rowNum,
+                    'data' => $rowData,
+                    'has_error' => !empty($rowErrors),
+                    'errors' => $rowErrors,
                 ];
             }
 
@@ -435,8 +451,15 @@ class XlsxImportService
             foreach ($rowsRaw as $idx => $row) {
                 $rowNum = $idx + 2;
                 $allEmpty = true;
-                foreach ($row as $v) { if ($v !== null && trim((string) $v) !== '') { $allEmpty = false; break; } }
-                if ($allEmpty) continue;
+                foreach ($row as $v) {
+                    if ($v !== null && trim((string) $v) !== '') {
+                        $allEmpty = false;
+                        break;
+                    }
+                }
+                if ($allEmpty) {
+                    continue;
+                }
 
                 $rowData = [];
                 $rowOk = true;
@@ -444,19 +467,36 @@ class XlsxImportService
                     $excelCol = $headerMap[$col['header']] ?? null;
                     $rawVal = $excelCol !== null ? ($row[$excelCol] ?? null) : null;
                     $rawVal = $rawVal === null ? '' : trim((string) $rawVal);
-                    if ($rawVal === '' && isset($col['default'])) { $rowData[$col['field']] = $col['default']; continue; }
-                    if ($rawVal === '' && ! empty($col['required'])) { $rowOk = false; break; }
-                    if ($rawVal === '') { $rowData[$col['field']] = null; continue; }
+                    if ($rawVal === '' && isset($col['default'])) {
+                        $rowData[$col['field']] = $col['default'];
+                        continue;
+                    }
+                    if ($rawVal === '' && !empty($col['required'])) {
+                        $rowOk = false;
+                        break;
+                    }
+                    if ($rawVal === '') {
+                        $rowData[$col['field']] = null;
+                        continue;
+                    }
+
                     try {
                         $rowData[$col['field']] = $this->coerceValue($rawVal, $col, $fkLookups);
-                    } catch (\Throwable $e) { $rowOk = false; break; }
+                    } catch (\Throwable $e) {
+                        $rowOk = false;
+                        break;
+                    }
                 }
-                if ($rowOk) $validRowsFull[] = ['row' => $rowNum, 'data' => $rowData];
+                if ($rowOk) {
+                    $validRowsFull[] = ['row' => $rowNum, 'data' => $rowData];
+                }
             }
         } else {
             // Cukup ambil dari preview
             foreach ($preview as $p) {
-                if (! $p['has_error']) $validRowsFull[] = ['row' => $p['row'], 'data' => $p['data']];
+                if (!$p['has_error']) {
+                    $validRowsFull[] = ['row' => $p['row'], 'data' => $p['data']];
+                }
             }
         }
 
@@ -465,17 +505,17 @@ class XlsxImportService
         $finalStatus = ($errorRows === 0 && $valid > 0) ? 'PREVIEW' : ($valid === 0 ? 'FAILED' : 'PREVIEW');
 
         $payload = [
-            'status'         => $finalStatus,
-            'total_rows'     => $totalRows,
-            'valid_rows'     => $valid,
-            'error_rows'     => $errorRows,
-            'errors_json'    => json_encode($errors, JSON_UNESCAPED_UNICODE),
-            'preview_json'   => json_encode([
+            'status' => $finalStatus,
+            'total_rows' => $totalRows,
+            'valid_rows' => $valid,
+            'error_rows' => $errorRows,
+            'errors_json' => json_encode($errors, JSON_UNESCAPED_UNICODE),
+            'preview_json' => json_encode([
                 'preview' => $preview,
-                'rows'    => $validRowsFull,
+                'rows' => $validRowsFull,
             ], JSON_UNESCAPED_UNICODE),
-            'previewed_at'   => date('Y-m-d H:i:s'),
-            'updated_at'     => date('Y-m-d H:i:s'),
+            'previewed_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ];
         if ($valid === 0 && $errorRows > 0) {
             $payload['failed_reason'] = "Semua {$totalRows} baris gagal validasi.";
@@ -483,14 +523,14 @@ class XlsxImportService
         $db->table('import_batches')->where('id', $batchId)->update($payload);
 
         return [
-            'batch_id'    => $batchId,
-            'total'       => $totalRows,
-            'valid'       => $valid,
-            'errors'      => $errorRows,
+            'batch_id' => $batchId,
+            'total' => $totalRows,
+            'valid' => $valid,
+            'errors' => $errorRows,
             'errors_list' => $errors,
-            'preview'     => $preview,
-            'status'      => $finalStatus,
-            'idempotent'  => false,
+            'preview' => $preview,
+            'status' => $finalStatus,
+            'idempotent' => false,
         ];
     }
 
@@ -507,7 +547,7 @@ class XlsxImportService
             ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
-        if (! $batch) {
+        if (!$batch) {
             throw new \RuntimeException('Batch tidak ditemukan');
         }
         if ($batch['resource'] !== $spec['slug']) {
@@ -517,7 +557,7 @@ class XlsxImportService
             return [
                 'batch_id' => $batchId,
                 'inserted' => (int) $batch['inserted_count'],
-                'skipped'  => (int) $batch['skipped_count'],
+                'skipped' => (int) $batch['skipped_count'],
                 'already_committed' => true,
             ];
         }
@@ -538,7 +578,7 @@ class XlsxImportService
 
         $now = date('Y-m-d H:i:s');
         $inserted = 0;
-        $skipped  = 0;
+        $skipped = 0;
 
         $db->transStart();
         foreach ($rows as $r) {
@@ -548,18 +588,20 @@ class XlsxImportService
             $data['company_id'] = $companyId;
             $data['created_at'] = $now;
             $data['updated_at'] = $now;
-            if (! isset($data['is_active'])) $data['is_active'] = 1;
+            if (!isset($data['is_active'])) {
+                $data['is_active'] = 1;
+            }
 
             // Handle encrypted fields (npwp, bank account). Encryption::encrypt
             // mengembalikan ciphertext string ber-prefix versi (mis. "v2:..."),
             // jadi nilai dari Encryption::activeVersion() di-mirror ke
             // kolom `key_version` kalau tabel target punya kolom itu.
             $encColumns = $this->encryptedColumns($spec['columns']);
-            if (! empty($encColumns)) {
+            if (!empty($encColumns)) {
                 $enc = Services::encryption();
                 $activeVer = method_exists($enc, 'activeVersion') ? $enc->activeVersion() : 'v1';
                 foreach ($encColumns as $field) {
-                    if (! empty($data[$field])) {
+                    if (!empty($data[$field])) {
                         try {
                             $cipher = $enc->encrypt((string) $data[$field]);
                             if ($cipher !== null) {
@@ -582,11 +624,11 @@ class XlsxImportService
             // Khusus employees: derive full_name + nik_hash kalau ada
             if ($spec['slug'] === 'employees') {
                 $first = (string) ($insertSafe['first_name'] ?? '');
-                $last  = (string) ($insertSafe['last_name']  ?? '');
+                $last = (string) ($insertSafe['last_name'] ?? '');
                 if (in_array('full_name', $existingFields, true)) {
                     $insertSafe['full_name'] = trim($first . ' ' . $last);
                 }
-                if (! empty($data['nik_encrypted']) && in_array('nik_hash', $existingFields, true)) {
+                if (!empty($data['nik_encrypted']) && in_array('nik_hash', $existingFields, true)) {
                     $insertSafe['nik_hash'] = hash('sha256', (string) $data['nik_encrypted']);
                 }
             }
@@ -610,7 +652,7 @@ class XlsxImportService
             }
 
             // Auto-inject fields dari spec (mis. bonus_recipients.amount_overridden = 1)
-            if (! empty($spec['auto_inject'])) {
+            if (!empty($spec['auto_inject'])) {
                 foreach ($spec['auto_inject'] as $field => $value) {
                     if (in_array($field, $existingFields, true)) {
                         $insertSafe[$field] = $value;
@@ -625,6 +667,7 @@ class XlsxImportService
                     $emp = $db->table('employees')
                         ->select('employee_number, first_name, last_name, basic_salary, join_date, department_id, position_id')
                         ->where('id', $empId)
+                        ->where('company_id', $companyId)
                         ->get()->getRowArray();
                     if ($emp) {
                         if (in_array('employee_number', $existingFields, true)) {
@@ -636,16 +679,16 @@ class XlsxImportService
                         if (in_array('monthly_salary', $existingFields, true)) {
                             $insertSafe['monthly_salary'] = (float) ($emp['basic_salary'] ?? 0);
                         }
-                        if (in_array('tenure_months', $existingFields, true) && ! empty($emp['join_date'])) {
+                        if (in_array('tenure_months', $existingFields, true) && !empty($emp['join_date'])) {
                             $joinTs = strtotime($emp['join_date']);
                             $insertSafe['tenure_months'] = $joinTs ? max(0, (int) round((time() - $joinTs) / (30.44 * 86400))) : 0;
                         }
-                        if (in_array('department_name', $existingFields, true) && ! empty($emp['department_id'])) {
-                            $dept = $db->table('departments')->select('name')->where('id', $emp['department_id'])->get()->getRowArray();
+                        if (in_array('department_name', $existingFields, true) && !empty($emp['department_id'])) {
+                            $dept = $db->table('departments')->select('name')->where('id', $emp['department_id'])->where('company_id', $companyId)->get()->getRowArray();
                             $insertSafe['department_name'] = $dept['name'] ?? '';
                         }
-                        if (in_array('position_name', $existingFields, true) && ! empty($emp['position_id'])) {
-                            $pos = $db->table('positions')->select('name')->where('id', $emp['position_id'])->get()->getRowArray();
+                        if (in_array('position_name', $existingFields, true) && !empty($emp['position_id'])) {
+                            $pos = $db->table('positions')->select('name')->where('id', $emp['position_id'])->where('company_id', $companyId)->get()->getRowArray();
                             $insertSafe['position_name'] = $pos['name'] ?? '';
                         }
                     }
@@ -654,20 +697,27 @@ class XlsxImportService
 
             try {
                 // Upsert support: kalau spec punya upsert_on_conflict, update existing row
-                if (! empty($spec['upsert_on_conflict']) && ! empty($spec['composite_unique'])) {
+                if (!empty($spec['upsert_on_conflict']) && !empty($spec['composite_unique'])) {
                     $whereConditions = [];
                     foreach ($spec['composite_unique'] as $f) {
                         $whereConditions[$f] = $insertSafe[$f] ?? null;
                     }
                     $whereConditions['company_id'] = $companyId;
-                    $existingRow = $db->table($spec['table'])->where($whereConditions)->get()->getRowArray();
+                    $existingRow = $db->table($spec['table'])
+                        ->where($whereConditions)
+                        ->where('company_id', $companyId)
+                        ->get()->getRowArray();
                     if ($existingRow) {
                         unset($insertSafe['created_at']);
-                        $db->table($spec['table'])->where('id', $existingRow['id'])->update($insertSafe);
+                        $db->table($spec['table'])
+                            ->where('id', $existingRow['id'])
+                            ->where('company_id', $companyId)
+                            ->update($insertSafe);
                         $inserted++;
                         continue;
                     }
                 }
+                // @tenant-scope-reviewed insertSafe inherits enforced company_id from $data above.
                 $db->table($spec['table'])->insert($insertSafe);
                 $inserted++;
             } catch (\Throwable $e) {
@@ -679,11 +729,11 @@ class XlsxImportService
 
         $finalStatus = $db->transStatus() ? 'COMMITTED' : 'FAILED';
         $db->table('import_batches')->where('id', $batchId)->update([
-            'status'         => $finalStatus,
+            'status' => $finalStatus,
             'inserted_count' => $inserted,
-            'skipped_count'  => $skipped,
-            'committed_at'   => $finalStatus === 'COMMITTED' ? $now : null,
-            'updated_at'     => $now,
+            'skipped_count' => $skipped,
+            'committed_at' => $finalStatus === 'COMMITTED' ? $now : null,
+            'updated_at' => $now,
         ]);
 
         Services::audit()->forModule('IMPORT')->log(
@@ -698,8 +748,8 @@ class XlsxImportService
         return [
             'batch_id' => $batchId,
             'inserted' => $inserted,
-            'skipped'  => $skipped,
-            'status'   => $finalStatus,
+            'skipped' => $skipped,
+            'status' => $finalStatus,
         ];
     }
 
@@ -715,7 +765,7 @@ class XlsxImportService
         foreach ($headerRow as $idx => $h) {
             $key = strtolower(preg_replace('/\s+/', ' ', trim((string) $h)));
             // Strip "*" suffix yang dipakai di template
-            $key = rtrim($key, " *");
+            $key = rtrim($key, ' *');
             $normalized[$key] = $idx;
         }
         $map = [];
@@ -723,6 +773,7 @@ class XlsxImportService
             $key = strtolower(preg_replace('/\s+/', ' ', trim($c['header'])));
             $map[$c['header']] = $normalized[$key] ?? null;
         }
+
         return $map;
     }
 
@@ -734,10 +785,14 @@ class XlsxImportService
         $db = \Config\Database::connect();
         $lookups = [];
         foreach ($columns as $c) {
-            if ($c['type'] !== 'fk') continue;
+            if ($c['type'] !== 'fk') {
+                continue;
+            }
             $tbl = $c['fk_table'];
             $col = $c['fk_column'];
-            if (! $db->tableExists($tbl)) continue;
+            if (!$db->tableExists($tbl)) {
+                continue;
+            }
             $b = $db->table($tbl)->select("id, {$col}");
             // Filter by company_id kalau tabel target multi-tenant
             $tblFields = $db->getFieldNames($tbl);
@@ -754,6 +809,7 @@ class XlsxImportService
             }
             $lookups[$c['field']] = $map;
         }
+
         return $lookups;
     }
 
@@ -763,26 +819,39 @@ class XlsxImportService
     private function buildUniqueLookups(array $columns, string $table, int $companyId): array
     {
         $db = \Config\Database::connect();
-        if (! $db->tableExists($table)) return [];
+        if (!$db->tableExists($table)) {
+            return [];
+        }
         $tblFields = $db->getFieldNames($table);
 
         $lookups = [];
         foreach ($columns as $c) {
-            if (empty($c['unique_in_table'])) continue;
+            if (empty($c['unique_in_table'])) {
+                continue;
+            }
             $f = $c['field'];
-            if (! in_array($f, $tblFields, true)) continue;
+            if (!in_array($f, $tblFields, true)) {
+                continue;
+            }
             $b = $db->table($table)->select("id, {$f}");
-            if (in_array('company_id', $tblFields, true)) $b->where('company_id', $companyId);
-            if (in_array('deleted_at', $tblFields, true)) $b->where('deleted_at IS NULL');
+            if (in_array('company_id', $tblFields, true)) {
+                $b->where('company_id', $companyId);
+            }
+            if (in_array('deleted_at', $tblFields, true)) {
+                $b->where('deleted_at IS NULL');
+            }
             $rows = $b->get()->getResultArray();
             $map = [];
             foreach ($rows as $r) {
                 $v = $r[$f] ?? null;
-                if ($v === null || $v === '') continue;
+                if ($v === null || $v === '') {
+                    continue;
+                }
                 $map[strtolower((string) $v)] = (int) $r['id'];
             }
             $lookups[$f] = $map;
         }
+
         return $lookups;
     }
 
@@ -793,24 +862,30 @@ class XlsxImportService
     {
         switch ($col['type']) {
             case 'int':
-                if (! preg_match('/^-?\d+$/', $val)) {
+                if (!preg_match('/^-?\d+$/', $val)) {
                     throw new \RuntimeException('Harus angka bulat');
                 }
+
                 return (int) $val;
 
             case 'float':
                 $clean = str_replace([',', ' '], ['', ''], $val);
-                if (! is_numeric($clean)) {
+                if (!is_numeric($clean)) {
                     throw new \RuntimeException('Harus angka');
                 }
+
                 return (float) $clean;
 
             case 'bool':
                 $lower = strtolower($val);
-                if (in_array($lower, ['1','y','yes','true','aktif','active'], true)) return 1;
-                if (in_array($lower, ['0','n','no','false','non-aktif','inactive'], true)) return 0;
-                throw new \RuntimeException("Nilai bool tidak valid (pakai 1/0 atau yes/no)");
+                if (in_array($lower, ['1', 'y', 'yes', 'true', 'aktif', 'active'], true)) {
+                    return 1;
+                }
+                if (in_array($lower, ['0', 'n', 'no', 'false', 'non-aktif', 'inactive'], true)) {
+                    return 0;
+                }
 
+                throw new \RuntimeException('Nilai bool tidak valid (pakai 1/0 atau yes/no)');
             case 'date':
                 // Accept YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY
                 $ts = false;
@@ -825,15 +900,19 @@ class XlsxImportService
                 if ($ts !== false) {
                     return date('Y-m-d', $ts);
                 }
-                throw new \RuntimeException("Format tanggal tidak valid (pakai YYYY-MM-DD)");
 
+                throw new \RuntimeException('Format tanggal tidak valid (pakai YYYY-MM-DD)');
             case 'datetime':
                 // Accept full datetime: YYYY-MM-DD HH:MM:SS, YYYY-MM-DD HH:MM
                 // Also accept time-only HH:MM or HH:MM:SS (will be combined with work_date at commit)
                 if (preg_match('/^\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(:\d{2})?$/', $val)) {
                     $dt = \DateTime::createFromFormat('Y-m-d H:i:s', str_pad($val, 19, ':00'));
-                    if (! $dt) $dt = \DateTime::createFromFormat('Y-m-d H:i', substr($val, 0, 16));
-                    if ($dt) return $dt->format('Y-m-d H:i:s');
+                    if (!$dt) {
+                        $dt = \DateTime::createFromFormat('Y-m-d H:i', substr($val, 0, 16));
+                    }
+                    if ($dt) {
+                        return $dt->format('Y-m-d H:i:s');
+                    }
                 }
                 // Time-only: HH:MM or HH:MM:SS — return as-is, commit will combine with work_date
                 if (preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $val)) {
@@ -841,41 +920,51 @@ class XlsxImportService
                 }
                 // DD/MM/YYYY HH:MM:SS
                 $dt = \DateTime::createFromFormat('d/m/Y H:i:s', $val);
-                if ($dt) return $dt->format('Y-m-d H:i:s');
+                if ($dt) {
+                    return $dt->format('Y-m-d H:i:s');
+                }
                 $dt = \DateTime::createFromFormat('d/m/Y H:i', $val);
-                if ($dt) return $dt->format('Y-m-d H:i:s');
+                if ($dt) {
+                    return $dt->format('Y-m-d H:i:s');
+                }
                 // Last-resort
                 $ts = strtotime($val);
-                if ($ts !== false) return date('Y-m-d H:i:s', $ts);
-                throw new \RuntimeException("Format datetime tidak valid (pakai YYYY-MM-DD HH:MM:SS)");
-
-            case 'enum':
-                if (! in_array($val, $col['in'] ?? [], true)) {
-                    throw new \RuntimeException("Nilai harus salah satu: " . implode(', ', $col['in'] ?? []));
+                if ($ts !== false) {
+                    return date('Y-m-d H:i:s', $ts);
                 }
+
+                throw new \RuntimeException('Format datetime tidak valid (pakai YYYY-MM-DD HH:MM:SS)');
+            case 'enum':
+                if (!in_array($val, $col['in'] ?? [], true)) {
+                    throw new \RuntimeException('Nilai harus salah satu: ' . implode(', ', $col['in'] ?? []));
+                }
+
                 return $val;
 
             case 'fk':
                 $lookup = $fkLookups[$col['field']] ?? [];
                 $id = $lookup[strtolower($val)] ?? null;
-                if (! $id) {
+                if (!$id) {
                     throw new \RuntimeException(
                         "Nilai '{$val}' tidak ditemukan di master {$col['fk_table']} (kolom {$col['fk_column']})"
                     );
                 }
+
                 return $id;
 
             case 'email':
-                if (! filter_var($val, FILTER_VALIDATE_EMAIL)) {
+                if (!filter_var($val, FILTER_VALIDATE_EMAIL)) {
                     throw new \RuntimeException('Format email tidak valid');
                 }
+
                 return $val;
 
             case 'phone':
                 $clean = preg_replace('/[\s\-()]/', '', $val);
-                if (! preg_match('/^(\+?62|0)\d{8,15}$/', $clean)) {
+                if (!preg_match('/^(\+?62|0)\d{8,15}$/', $clean)) {
                     throw new \RuntimeException('Format nomor HP tidak valid (pakai 08xx atau +62)');
                 }
+
                 return $val;
 
             case 'encrypted':
@@ -892,8 +981,11 @@ class XlsxImportService
     {
         $list = [];
         foreach ($columns as $c) {
-            if (($c['type'] ?? '') === 'encrypted') $list[] = $c['field'];
+            if (($c['type'] ?? '') === 'encrypted') {
+                $list[] = $c['field'];
+            }
         }
+
         return $list;
     }
 
@@ -904,18 +996,26 @@ class XlsxImportService
     private function buildCompositeUniqueLookup(array $fields, string $table, int $companyId): array
     {
         $db = \Config\Database::connect();
-        if (! $db->tableExists($table)) return [];
+        if (!$db->tableExists($table)) {
+            return [];
+        }
         $tblFields = $db->getFieldNames($table);
 
         // Pastikan semua field composite ada di tabel
         foreach ($fields as $f) {
-            if (! in_array($f, $tblFields, true)) return [];
+            if (!in_array($f, $tblFields, true)) {
+                return [];
+            }
         }
 
         $selectFields = array_merge(['id'], $fields);
         $b = $db->table($table)->select(implode(',', $selectFields));
-        if (in_array('company_id', $tblFields, true)) $b->where('company_id', $companyId);
-        if (in_array('deleted_at', $tblFields, true)) $b->where('deleted_at IS NULL');
+        if (in_array('company_id', $tblFields, true)) {
+            $b->where('company_id', $companyId);
+        }
+        if (in_array('deleted_at', $tblFields, true)) {
+            $b->where('deleted_at IS NULL');
+        }
         $rows = $b->get()->getResultArray();
 
         $map = [];
@@ -923,6 +1023,7 @@ class XlsxImportService
             $key = implode('|', array_map(fn ($f) => strtolower((string) ($r[$f] ?? '')), $fields));
             $map[$key] = (int) $r['id'];
         }
+
         return $map;
     }
 
@@ -934,6 +1035,7 @@ class XlsxImportService
             $letters = chr(65 + ($col % 26)) . $letters;
             $col = intdiv($col, 26);
         }
+
         return $letters;
     }
 }

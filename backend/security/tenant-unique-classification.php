@@ -8,6 +8,8 @@ declare(strict_types=1);
  * identifiers or keys already bounded by a tenant-owned parent identifier.
  */
 return [
+    'approval_outbox_events:approval_request_id' => 'Approval request parent is tenant-bound and emits once.',
+    'approval_outbox_events:event_id' => 'Globally generated immutable outbox event identifier.',
     'api_keys:key_prefix' => 'Globally addressable secret prefix.',
     'application_track_tokens:token' => 'Globally addressable public security token.',
     'attendance_change_requests:request_number' => 'Globally generated immutable business number.',
@@ -19,6 +21,7 @@ return [
     'disciplinary_records:reference_number' => 'Globally generated immutable business number.',
     'email_events:provider,provider_event_key' => 'Provider event idempotency key is global.',
     'employee_allowance_assignments:employee_id,allowance_type_id' => 'Employee parent is tenant-bound.',
+    'employee_benefit_balances:employee_id,policy_id,year' => 'Employee and benefit policy parents are tenant-bound.',
     'employee_skills:employee_id,skill_slug' => 'Employee parent is tenant-bound.',
     'inbound_webhook_events:inbound_id,source_event_id' => 'Inbound webhook parent is tenant-bound.',
     'inbound_webhooks:slug' => 'Globally addressable inbound endpoint.',

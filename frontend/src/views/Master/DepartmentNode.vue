@@ -21,6 +21,7 @@ const props = defineProps({
   level:       { type: Number, default: 0 },
   collapsedIds:{ type: Set,    required: true },
   dragOverId:  { type: Number, default: null },
+  canManage:   { type: Boolean, default: false },
 })
 const { t } = useI18n()
 
@@ -50,7 +51,7 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
       :class="dragOverId === node.id
         ? 'border-primary-500 ring-2 ring-primary-200 shadow-lg'
         : 'border-slate-200 hover:border-primary-400 hover:shadow-md'"
-      draggable="true"
+      :draggable="canManage"
       @dragstart.stop="emit('drag-start', $event, 'department', node.id)"
       @dragover.stop="emit('drag-over', $event, node.id)"
       @dragleave.stop="emit('drag-leave')"
@@ -72,6 +73,7 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
         </div>
         <!-- Menu 3 titik untuk aksi sekunder -->
         <button
+          v-if="canManage"
           type="button" class="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 opacity-0 group-hover:opacity-100"
           @click.stop="toggleMenu($event)"
           v-bind="{ title: t('org_structure.node_more_actions'), 'aria-label': t('org_structure.node_more_actions') }"
@@ -144,6 +146,7 @@ const hasChildren = () => (props.node.children?.length ?? 0) > 0
             :level="level + 1"
             :collapsed-ids="collapsedIds"
             :drag-over-id="dragOverId"
+            :can-manage="canManage"
             @toggle="(id) => emit('toggle', id)"
             @drop-on="(e, id) => emit('drop-on', e, id)"
             @drag-over="(e, id) => emit('drag-over', e, id)"

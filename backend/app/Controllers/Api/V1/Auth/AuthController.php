@@ -20,10 +20,12 @@ class AuthController extends ApiController
             ['identifier' => $identifierRaw, 'password' => $data['password'] ?? ''],
             [
                 'identifier' => 'required|max_length[191]',
-                'password'   => 'required|min_length[6]|max_length[200]',
+                'password' => 'required|min_length[6]|max_length[200]',
             ],
         );
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $identifier = trim($identifierRaw);
         $password = (string) $data['password'];
@@ -49,12 +51,32 @@ class AuthController extends ApiController
             // Join via employees.user_id (kolom existing) — kalau NIK belum
             // ter-link ke user, login akan dianggap "unknown_email" supaya
             // pesan error generic (tidak bocorin apakah NIK exist atau tidak).
-            $row = $db->table('employees e')
+            $companyCode = null;
+            $employeeNumber = $identifier;
+            if (str_contains($identifier, '/')) {
+                [$companyCode, $employeeNumber] = array_map('trim', explode('/', $identifier, 2));
+                $companyCode = strtoupper($companyCode);
+            }
+            $builder = $db->table('employees e')
                 ->select('u.*')
                 ->join('users u', 'u.id = e.user_id')
-                ->where('e.employee_number', $identifier)
+                ->join('companies c', 'c.id = e.company_id')
+                ->where('e.employee_number', $employeeNumber)
                 ->where('e.deleted_at IS NULL')
-                ->get()->getRowArray();
+                ->where('c.deleted_at IS NULL')
+                ->where('c.is_active', 1);
+            if ($companyCode !== null && $companyCode !== '') {
+                $builder->where('c.code', $companyCode);
+            }
+            $matches = $builder->limit(2)->get()->getResultArray();
+            if ($companyCode === null && count($matches) > 1) {
+                return $this->fail(
+                    'NIK digunakan di lebih dari satu perusahaan. Masuk dengan format KODE_PERUSAHAAN/NIK.',
+                    422,
+                    'TENANT_IDENTIFIER_REQUIRED',
+                );
+            }
+            $row = $matches[0] ?? null;
             if ($row) {
                 $user = $row;
                 $resolvedVia = 'nik';
@@ -65,7 +87,7 @@ class AuthController extends ApiController
         $ip = $this->request->getIPAddress();
         $ua = substr((string) $this->request->getUserAgent(), 0, 255);
 
-        if (! $user) {
+        if (!$user) {
             $db->table('login_attempts')->insert([
                 'email' => $logIdentifier, 'ip_address' => $ip, 'success' => 0,
                 'reason' => 'unknown_identifier', 'user_agent' => $ua, 'created_at' => date('Y-m-d H:i:s'),
@@ -76,6 +98,7 @@ class AuthController extends ApiController
             Services::audit()
                 ->forModule('AUTH')
                 ->logFailure('auth.login', null, null, 'INVALID_CREDENTIALS', $msg);
+
             return $this->fail('Invalid credentials', 401, 'INVALID_CREDENTIALS');
         }
 
@@ -88,7 +111,7 @@ class AuthController extends ApiController
             return $this->fail('Account is disabled', 403, 'ACCOUNT_DISABLED');
         }
 
-        if (! password_verify($password, $user['password_hash'])) {
+        if (!password_verify($password, $user['password_hash'])) {
             $failed = (int) $user['failed_attempts'] + 1;
             $update = ['failed_attempts' => $failed, 'updated_at' => date('Y-m-d H:i:s')];
             $maxAttempts = (int) env('ratelimit.loginAttempts', 5);
@@ -104,12 +127,22 @@ class AuthController extends ApiController
             ]);
             $audit = Services::audit()->forModule('AUTH');
             if ($locked) {
-                $audit->logCritical('auth.login.locked', 'user', (int) $user['id'],
-                    "Akun dikunci sementara setelah {$failed} percobaan gagal: {$logIdentifier}");
+                $audit->logCritical(
+                    'auth.login.locked',
+                    'user',
+                    (int) $user['id'],
+                    "Akun dikunci sementara setelah {$failed} percobaan gagal: {$logIdentifier}"
+                );
             } else {
-                $audit->logFailure('auth.login', 'user', (int) $user['id'], 'INVALID_CREDENTIALS',
-                    "Login gagal (password salah, percobaan ke-{$failed}, via {$resolvedVia}): {$logIdentifier}");
+                $audit->logFailure(
+                    'auth.login',
+                    'user',
+                    (int) $user['id'],
+                    'INVALID_CREDENTIALS',
+                    "Login gagal (password salah, percobaan ke-{$failed}, via {$resolvedVia}): {$logIdentifier}"
+                );
             }
+
             return $this->fail('Invalid credentials', 401, 'INVALID_CREDENTIALS');
         }
 
@@ -125,18 +158,19 @@ class AuthController extends ApiController
             $challenge = bin2hex(random_bytes(16));
             $cache = Services::cache();
             $cache->save('2fa:' . $challenge, ['user_id' => $user['id']], 300);
+
             return $this->ok([
                 'requires_2fa' => true,
-                'challenge'    => $challenge,
+                'challenge' => $challenge,
             ], 'Two-factor required');
         }
 
         // Reset failed counter, update last login
         $db->table('users')->where('id', $user['id'])->update([
             'failed_attempts' => 0,
-            'locked_until'    => null,
-            'last_login_at'   => date('Y-m-d H:i:s'),
-            'last_login_ip'   => $ip,
+            'locked_until' => null,
+            'last_login_at' => date('Y-m-d H:i:s'),
+            'last_login_ip' => $ip,
         ]);
         $db->table('login_attempts')->insert([
             'email' => $logIdentifier, 'ip_address' => $ip, 'success' => 1,
@@ -161,7 +195,7 @@ class AuthController extends ApiController
 
         return $this->ok([
             'tokens' => $tokens,
-            'user'   => $this->shapeUser($user, $companyId),
+            'user' => $this->shapeUser($user, $companyId),
             'must_change_password' => (int) $user['must_change_password'] === 1,
         ], 'Login successful');
     }
@@ -174,11 +208,13 @@ class AuthController extends ApiController
         //  - `backup_code` : 10 char alfanumerik recovery code (Sprint 3)
         // Salah satu wajib ada.
         $valid = $this->validateOrFail($data, [
-            'challenge'   => 'required|alpha_numeric|max_length[64]',
-            'code'        => 'permit_empty|numeric|exact_length[6]',
+            'challenge' => 'required|alpha_numeric|max_length[64]',
+            'code' => 'permit_empty|numeric|exact_length[6]',
             'backup_code' => 'permit_empty|max_length[32]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         if (empty($data['code']) && empty($data['backup_code'])) {
             return $this->fail('Wajib isi kode 2FA atau backup code', 400, 'MISSING_2FA_CODE');
@@ -186,30 +222,34 @@ class AuthController extends ApiController
 
         $cache = Services::cache();
         $entry = $cache->get('2fa:' . $data['challenge']);
-        if (! $entry) {
+        if (!$entry) {
             return $this->fail('Invalid or expired challenge', 400, 'INVALID_CHALLENGE');
         }
 
         $db = \Config\Database::connect();
         $user = $db->table('users')->where('id', $entry['user_id'])->get()->getRowArray();
-        if (! $user) return $this->fail('User not found', 404);
+        if (!$user) {
+            return $this->fail('User not found', 404);
+        }
 
         $usedBackup = false;
-        if (! empty($data['backup_code'])) {
+        if (!empty($data['backup_code'])) {
             // Sprint 3 — recovery via backup code
-            if (! Services::twoFactorBackupCodes()->verify((int) $user['id'], (string) $data['backup_code'])) {
+            if (!Services::twoFactorBackupCodes()->verify((int) $user['id'], (string) $data['backup_code'])) {
                 Services::audit()->forModule('AUTH')->logFailure(
                     'auth.2fa.backup_invalid',
-                    'user', (int) $user['id'],
+                    'user',
+                    (int) $user['id'],
                     'INVALID_BACKUP_CODE',
                     "Backup code 2FA tidak valid: {$user['email']}"
                 );
+
                 return $this->fail('Invalid 2FA backup code', 401, 'INVALID_2FA_BACKUP');
             }
             $usedBackup = true;
         } else {
             $tfa = new \RobThree\Auth\TwoFactorAuth((string) env('twofa.issuer', 'HRIS'));
-            if (! $tfa->verifyCode($user['twofa_secret'], $data['code'])) {
+            if (!$tfa->verifyCode($user['twofa_secret'], $data['code'])) {
                 return $this->fail('Invalid 2FA code', 401, 'INVALID_2FA');
             }
         }
@@ -220,7 +260,8 @@ class AuthController extends ApiController
             $remaining = Services::twoFactorBackupCodes()->remainingCount((int) $user['id']);
             Services::audit()->forModule('AUTH')->log(
                 action: 'auth.2fa.backup_used',
-                entity: 'user', entityId: (int) $user['id'],
+                entity: 'user',
+                entityId: (int) $user['id'],
                 description: "Login via backup code 2FA: {$user['email']} (sisa {$remaining} kode)",
                 severity: 'NOTICE'
             );
@@ -241,12 +282,13 @@ class AuthController extends ApiController
 
         $resp = [
             'tokens' => $tokens,
-            'user'   => $this->shapeUser($user, $companyId),
+            'user' => $this->shapeUser($user, $companyId),
         ];
         if ($usedBackup) {
             $resp['used_backup_code'] = true;
             $resp['backup_codes_remaining'] = Services::twoFactorBackupCodes()->remainingCount((int) $user['id']);
         }
+
         return $this->ok($resp, '2FA verified');
     }
 
@@ -256,12 +298,15 @@ class AuthController extends ApiController
         $valid = $this->validateOrFail($data, [
             'refresh_token' => 'required|string',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $tokens = Services::jwt()->rotate($data['refresh_token']);
-        if (! $tokens) {
+        if (!$tokens) {
             return $this->fail('Invalid or expired refresh token', 401, 'INVALID_REFRESH');
         }
+
         return $this->ok(['tokens' => $tokens], 'Token refreshed');
     }
 
@@ -284,6 +329,7 @@ class AuthController extends ApiController
                 entityId: $this->userId(),
                 description: 'Logout & seluruh refresh token dicabut'
             );
+
         return $this->ok(null, 'Logged out');
     }
 
@@ -297,6 +343,7 @@ class AuthController extends ApiController
     public function listSessions()
     {
         $sessions = Services::jwt()->listActiveSessions($this->userId());
+
         return $this->ok(['sessions' => $sessions]);
     }
 
@@ -314,7 +361,7 @@ class AuthController extends ApiController
             return $this->fail('JTI tidak valid', 400);
         }
         $ok = Services::jwt()->revokeByUserAndJti($this->userId(), $jti);
-        if (! $ok) {
+        if (!$ok) {
             return $this->fail('Sesi tidak ditemukan atau bukan milik Anda', 404);
         }
         Services::audit()->forModule('AUTH')->log(
@@ -325,6 +372,7 @@ class AuthController extends ApiController
             severity: 'NOTICE',
             metadata: ['jti' => $jti],
         );
+
         return $this->ok(null, 'Sesi dicabut');
     }
 
@@ -360,6 +408,7 @@ class AuthController extends ApiController
             severity: 'NOTICE',
             metadata: ['revoked_count' => $count, 'kept_jti' => $exceptJti],
         );
+
         return $this->ok(['revoked_count' => $count], 'Sesi lain dicabut');
     }
 
@@ -367,7 +416,9 @@ class AuthController extends ApiController
     {
         $db = \Config\Database::connect();
         $user = $db->table('users')->where('id', $this->userId())->get()->getRowArray();
-        if (! $user) return $this->fail('User not found', 404);
+        if (!$user) {
+            return $this->fail('User not found', 404);
+        }
 
         $companyId = $this->companyId();
         $employee = null;
@@ -390,7 +441,7 @@ class AuthController extends ApiController
         }
 
         $branch = null;
-        if ($employee && ! empty($employee['branch_id'])) {
+        if ($employee && !empty($employee['branch_id'])) {
             $branch = $db->table('branches')
                 ->select('id, code, name, company_id')
                 ->where('id', (int) $employee['branch_id'])
@@ -407,15 +458,16 @@ class AuthController extends ApiController
         if ($avatarPath) {
             try {
                 $avatarUrl = Services::fileStorage()->signedUrl($avatarPath, 3600);
-            } catch (\Throwable $e) { /* file mungkin sudah hilang, abaikan */ }
+            } catch (\Throwable $e) { /* file mungkin sudah hilang, abaikan */
+            }
         }
 
         $userOut = $this->shapeUser($user, $companyId);
         $userOut['avatar_url'] = $avatarUrl;
 
         return $this->ok([
-            'user'        => $userOut,
-            'employee'    => $employee ? [
+            'user' => $userOut,
+            'employee' => $employee ? [
                 'id' => $employee['id'],
                 'employee_number' => $employee['employee_number'],
                 'full_name' => $employee['full_name'],
@@ -423,13 +475,69 @@ class AuthController extends ApiController
                 'department_id' => $employee['department_id'],
                 'branch_id' => $employee['branch_id'] ?? null,
                 'avatar_path' => $employee['avatar_path'] ?? null,
-                'avatar_url'  => $avatarUrl,
+                'avatar_url' => $avatarUrl,
             ] : null,
-            'company'     => $company ? ['id' => $company['id'], 'code' => $company['code'], 'name' => $company['name'], 'logo_path' => $company['logo_path']] : null,
-            'branch'      => $branch,
-            'role'        => $role ? ['id' => $role['id'], 'slug' => $role['slug'], 'name' => $role['name']] : null,
+            'company' => $company ? ['id' => $company['id'], 'code' => $company['code'], 'name' => $company['name'], 'logo_path' => $company['logo_path']] : null,
+            'branch' => $branch,
+            'role' => $role ? ['id' => $role['id'], 'slug' => $role['slug'], 'name' => $role['name']] : null,
             'permissions' => $perms,
+            'authorization_version' => $this->authorizationVersion($role, $perms),
         ]);
+    }
+
+    /**
+     * Lightweight authorization snapshot for live RBAC synchronization.
+     *
+     * API permission filters always read the current role mapping from the
+     * database. The frontend calls this small endpoint periodically so menus,
+     * buttons and filters do not keep the permission snapshot from login.
+     */
+    public function authorization()
+    {
+        $db = \Config\Database::connect();
+        $user = $db->table('users')
+            ->select('id, role_id')
+            ->where('id', $this->userId())
+            ->where('is_active', 1)
+            ->get()
+            ->getRowArray();
+        if (! $user) {
+            return $this->fail('User not found or inactive', 401, 'USER_INACTIVE');
+        }
+
+        $role = null;
+        if (! empty($user['role_id'])) {
+            $role = $db->table('roles')
+                ->select('id, slug, name, updated_at')
+                ->where('id', (int) $user['role_id'])
+                ->get()
+                ->getRowArray();
+        }
+        $permissions = $this->tenant()->getPermissions();
+
+        return $this->ok([
+            'role' => $role ? [
+                'id' => (int) $role['id'],
+                'slug' => $role['slug'],
+                'name' => $role['name'],
+            ] : null,
+            'permissions' => $permissions,
+            'version' => $this->authorizationVersion($role, $permissions),
+        ]);
+    }
+
+    /** @param string[] $permissions */
+    private function authorizationVersion(?array $role, array $permissions): string
+    {
+        $permissions = array_values(array_unique(array_map('strval', $permissions)));
+        sort($permissions, SORT_STRING);
+
+        return hash('sha256', implode('|', [
+            (string) ($role['id'] ?? 0),
+            (string) ($role['slug'] ?? ''),
+            (string) ($role['name'] ?? ''),
+            implode(',', $permissions),
+        ]));
     }
 
     /**
@@ -446,10 +554,12 @@ class AuthController extends ApiController
     public function uploadAvatar()
     {
         $userId = $this->userId();
-        if (! $userId) return $this->fail('Unauthenticated', 401);
+        if (!$userId) {
+            return $this->fail('Unauthenticated', 401);
+        }
 
         $file = $this->request->getFile('file');
-        if (! $file || ! $file->isValid()) {
+        if (!$file || !$file->isValid()) {
             return $this->fail('File tidak valid: '
                 . ($file?->getErrorString() ?? 'tidak ada file'), 400);
         }
@@ -459,20 +569,22 @@ class AuthController extends ApiController
         }
         $mime = $file->getMimeType();
         $allowedMime = ['image/jpeg', 'image/png', 'image/webp'];
-        if (! in_array($mime, $allowedMime, true)) {
+        if (!in_array($mime, $allowedMime, true)) {
             return $this->fail('Hanya JPEG/PNG/WebP yang diperbolehkan', 415);
         }
 
         // Sprint 3 — verify magic bytes, jangan trust MIME yang dikirim browser.
         // Mencegah upload .php/.html/.exe yang direname ke .jpg.
         $tempPath = $file->getTempName();
-        if (! \App\Libraries\System\FileSignatureValidator::matches($tempPath, $allowedMime)) {
+        if (!\App\Libraries\System\FileSignatureValidator::matches($tempPath, $allowedMime)) {
             Services::audit()->forModule('AUTH')->logFailure(
                 'profile.avatar.invalid_signature',
-                'user', (int) $userId,
+                'user',
+                (int) $userId,
                 'INVALID_FILE_SIGNATURE',
                 'Upload avatar ditolak: file signature tidak match (kemungkinan spoofed MIME)'
             );
+
             return $this->fail('File bukan gambar JPEG/PNG/WebP yang valid', 415, 'INVALID_FILE_SIGNATURE');
         }
 
@@ -491,7 +603,7 @@ class AuthController extends ApiController
 
         $storage = Services::fileStorage();
         $bytes = file_get_contents($file->getTempName());
-        if ($bytes === false || ! $storage->put($relativePath, $bytes)) {
+        if ($bytes === false || !$storage->put($relativePath, $bytes)) {
             return $this->fail('Gagal menyimpan file', 500);
         }
 
@@ -504,7 +616,7 @@ class AuthController extends ApiController
 
         $db->table('users')->where('id', $userId)->update([
             'avatar_path' => $relativePath,
-            'updated_at'  => $now,
+            'updated_at' => $now,
         ]);
 
         // Sinkronisasi ke employees.avatar_path supaya foto karyawan di
@@ -515,14 +627,17 @@ class AuthController extends ApiController
             $oldPath = $oldPath ?: ($emp['avatar_path'] ?? null);
             $db->table('employees')->where('id', $emp['id'])->update([
                 'avatar_path' => $relativePath,
-                'updated_at'  => $now,
+                'updated_at' => $now,
             ]);
         }
 
         // Best-effort delete file lama; jangan fail kalau gagal (file bisa
         // jadi sudah dihapus manual atau path-nya tidak valid lagi).
         if ($oldPath && $oldPath !== $relativePath) {
-            try { $storage->delete($oldPath); } catch (\Throwable $e) {}
+            try {
+                $storage->delete($oldPath);
+            } catch (\Throwable $e) {
+            }
         }
 
         Services::audit()->forModule('AUTH')->log(
@@ -535,7 +650,7 @@ class AuthController extends ApiController
 
         return $this->ok([
             'avatar_path' => $relativePath,
-            'avatar_url'  => $storage->signedUrl($relativePath, 3600),
+            'avatar_url' => $storage->signedUrl($relativePath, 3600),
         ], 'Foto profil tersimpan');
     }
 
@@ -545,7 +660,9 @@ class AuthController extends ApiController
     public function deleteAvatar()
     {
         $userId = $this->userId();
-        if (! $userId) return $this->fail('Unauthenticated', 401);
+        if (!$userId) {
+            return $this->fail('Unauthenticated', 401);
+        }
 
         $db = \Config\Database::connect();
         $user = $db->table('users')->select('avatar_path')->where('id', $userId)->get()->getRowArray();
@@ -553,7 +670,7 @@ class AuthController extends ApiController
 
         $db->table('users')->where('id', $userId)->update([
             'avatar_path' => null,
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
         $emp = $db->table('employees')->where('user_id', $userId)
@@ -562,12 +679,15 @@ class AuthController extends ApiController
             $oldPath = $oldPath ?: ($emp['avatar_path'] ?? null);
             $db->table('employees')->where('id', $emp['id'])->update([
                 'avatar_path' => null,
-                'updated_at'  => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
             ]);
         }
 
         if ($oldPath) {
-            try { Services::fileStorage()->delete($oldPath); } catch (\Throwable $e) {}
+            try {
+                Services::fileStorage()->delete($oldPath);
+            } catch (\Throwable $e) {
+            }
         }
 
         Services::audit()->forModule('AUTH')->log(
@@ -585,13 +705,15 @@ class AuthController extends ApiController
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'current_password' => 'required|string',
-            'new_password'     => 'required|string|max_length[200]',
+            'new_password' => 'required|string|max_length[200]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
         $user = $db->table('users')->where('id', $this->userId())->get()->getRowArray();
-        if (! $user || ! password_verify($data['current_password'], $user['password_hash'])) {
+        if (!$user || !password_verify($data['current_password'], $user['password_hash'])) {
             return $this->fail('Current password incorrect', 400, 'INVALID_CURRENT_PASSWORD');
         }
 
@@ -608,16 +730,16 @@ class AuthController extends ApiController
         if (password_verify($data['new_password'], $user['password_hash'])) {
             $errors[] = 'Password baru harus berbeda dari password saat ini.';
         }
-        if (! empty($errors)) {
+        if (!empty($errors)) {
             return $this->fail($errors[0], 422, 'PASSWORD_POLICY_VIOLATION', ['errors' => $errors]);
         }
 
         $newHash = password_hash($data['new_password'], PASSWORD_ARGON2ID);
         $db->table('users')->where('id', $user['id'])->update([
-            'password_hash'        => $newHash,
-            'password_changed_at'  => date('Y-m-d H:i:s'),
+            'password_hash' => $newHash,
+            'password_changed_at' => date('Y-m-d H:i:s'),
             'must_change_password' => 0,
-            'updated_at'           => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
         // Catat ke history (Sprint 3 R5)
         $policy->recordUsed((int) $user['id'], $newHash);
@@ -641,7 +763,9 @@ class AuthController extends ApiController
     {
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, ['email' => 'required|valid_email']);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
         $user = $db->table('users')->where('email', strtolower($data['email']))->where('is_active', 1)->get()->getRowArray();
@@ -649,9 +773,9 @@ class AuthController extends ApiController
         // Always respond same way to prevent enumeration
         if ($user) {
             $token = bin2hex(random_bytes(32));
-            $hash  = hash('sha256', $token);
+            $hash = hash('sha256', $token);
             $db->table('password_resets')->insert([
-                'user_id'    => $user['id'],
+                'user_id' => $user['id'],
                 'token_hash' => $hash,
                 'expires_at' => date('Y-m-d H:i:s', time() + 3600),
                 'created_at' => date('Y-m-d H:i:s'),
@@ -665,6 +789,7 @@ class AuthController extends ApiController
                 "<p>Halo {$user['name']},</p><p>Klik link berikut untuk reset password (berlaku 1 jam):</p><p><a href=\"{$resetUrl}\">{$resetUrl}</a></p>"
             );
         }
+
         return $this->ok(null, 'If the email exists, a reset link has been sent');
     }
 
@@ -672,10 +797,12 @@ class AuthController extends ApiController
     {
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
-            'token'        => 'required|alpha_numeric|min_length[64]|max_length[64]',
+            'token' => 'required|alpha_numeric|min_length[64]|max_length[64]',
             'new_password' => 'required|max_length[200]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
         $hash = hash('sha256', $data['token']);
@@ -685,7 +812,7 @@ class AuthController extends ApiController
             ->where('expires_at >', date('Y-m-d H:i:s'))
             ->get()
             ->getRowArray();
-        if (! $row) {
+        if (!$row) {
             return $this->fail('Invalid or expired token', 400, 'INVALID_TOKEN');
         }
 
@@ -702,18 +829,18 @@ class AuthController extends ApiController
                 \App\Libraries\Auth\PasswordPolicy::HISTORY_LIMIT
             );
         }
-        if (! empty($errors)) {
+        if (!empty($errors)) {
             return $this->fail($errors[0], 422, 'PASSWORD_POLICY_VIOLATION', ['errors' => $errors]);
         }
 
         $newHash = password_hash($data['new_password'], PASSWORD_ARGON2ID);
         $db->table('users')->where('id', $row['user_id'])->update([
-            'password_hash'       => $newHash,
+            'password_hash' => $newHash,
             'password_changed_at' => date('Y-m-d H:i:s'),
-            'must_change_password'=> 0,
-            'failed_attempts'     => 0,
-            'locked_until'        => null,
-            'updated_at'          => date('Y-m-d H:i:s'),
+            'must_change_password' => 0,
+            'failed_attempts' => 0,
+            'locked_until' => null,
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
         $db->table('password_resets')->where('id', $row['id'])->update(['used_at' => date('Y-m-d H:i:s')]);
         // Catat ke history (Sprint 3 R5)
@@ -748,16 +875,17 @@ class AuthController extends ApiController
         $backupCodes = Services::twoFactorBackupCodes()->regenerate((int) $user['id']);
         Services::audit()->forModule('AUTH')->log(
             action: 'auth.2fa.enable',
-            entity: 'user', entityId: (int) $user['id'],
-            description: "User enable 2FA + " . count($backupCodes) . ' backup codes',
+            entity: 'user',
+            entityId: (int) $user['id'],
+            description: 'User enable 2FA + ' . count($backupCodes) . ' backup codes',
             severity: 'NOTICE'
         );
 
         return $this->ok([
-            'secret'       => $secret,
-            'qr'           => $qr,
+            'secret' => $secret,
+            'qr' => $qr,
             'backup_codes' => $backupCodes,
-            'note'         => 'Simpan backup codes ini di tempat aman — tidak akan ditampilkan ulang. Confirm 2FA dengan kirim kode TOTP ke /auth/2fa/confirm.',
+            'note' => 'Simpan backup codes ini di tempat aman — tidak akan ditampilkan ulang. Confirm 2FA dengan kirim kode TOTP ke /auth/2fa/confirm.',
         ]);
     }
 
@@ -765,30 +893,45 @@ class AuthController extends ApiController
     {
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, ['password' => 'required|string']);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
-        $user = $db->table('users')->where('id', $this->userId())->get()->getRowArray();
-        if (! password_verify($data['password'], $user['password_hash'])) {
+        $companyId = $this->tenant()->getCompanyId();
+        $userQuery = $db->table('users')->where('id', $this->userId());
+        $companyId > 0
+            ? $userQuery->where('company_id', $companyId)
+            : $userQuery->where('company_id IS NULL');
+        $user = $userQuery->get()->getRowArray();
+        if (!$user) {
+            return $this->failNotFound('User tidak ditemukan pada tenant aktif');
+        }
+        if (!password_verify($data['password'], $user['password_hash'])) {
             return $this->fail('Password incorrect', 400);
         }
-        $db->table('users')->where('id', $user['id'])->update([
-            'twofa_secret'  => null,
+        $update = $db->table('users')->where('id', $user['id']);
+        $companyId > 0
+            ? $update->where('company_id', $companyId)
+            : $update->where('company_id IS NULL');
+        $update->update([
+            'twofa_secret' => null,
             'twofa_enabled' => 0,
         ]);
+
         return $this->ok(null, '2FA disabled');
     }
 
     private function shapeUser(array $user, $companyId = null): array
     {
         return [
-            'id'            => (int) $user['id'],
-            'email'         => $user['email'],
-            'name'          => $user['name'],
-            'avatar_path'   => $user['avatar_path'] ?? null,
-            'role_id'       => $user['role_id'] ?? null,
-            'company_id'    => $companyId ? (int) $companyId : null,
-            'employee_id'   => $user['employee_id'] ?? null,
+            'id' => (int) $user['id'],
+            'email' => $user['email'],
+            'name' => $user['name'],
+            'avatar_path' => $user['avatar_path'] ?? null,
+            'role_id' => $user['role_id'] ?? null,
+            'company_id' => $companyId ? (int) $companyId : null,
+            'employee_id' => $user['employee_id'] ?? null,
             'twofa_enabled' => (int) ($user['twofa_enabled'] ?? 0),
         ];
     }

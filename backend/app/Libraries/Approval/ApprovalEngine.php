@@ -8,7 +8,7 @@ use Config\Services;
  * ApprovalEngine
  *
  * Mesin approval generic untuk modul LEAVE / OVERTIME / ATTENDANCE_CHANGE /
- * REIMBURSEMENT / LOAN / BUSINESS_TRIP / BONUS / PAYROLL_ADJUSTMENT /
+ * REIMBURSEMENT / LOAN / BUSINESS_TRIP / BONUS / PAYROLL / PAYROLL_ADJUSTMENT /
  * COMPENSATION_REVIEW / TRAINING_REGISTRATION / TIMESHEET / CANDIDATE_OFFER /
  * GENERATED_CONTRACT / ASSET_TRANSACTION / HIRE_CONVERSION / PERFORMANCE_GOAL /
  * IDP_ACTIVATION / EMPLOYEE_SENSITIVE_CHANGE / MASTER_RATE_CHANGE / PRIVILEGED_ACTION.
@@ -47,8 +47,7 @@ class ApprovalEngine
     public function __construct(
         ?ApprovalDomainAdapterRegistry $domainAdapters = null,
         ?ApprovalOutcomeOutbox $outbox = null,
-    )
-    {
+    ) {
         $this->domainAdapters = $domainAdapters ?? new ApprovalDomainAdapterRegistry();
         $this->outbox = $outbox ?? new ApprovalOutcomeOutbox();
     }
@@ -61,13 +60,18 @@ class ApprovalEngine
     {
         $db = \Config\Database::connect();
         $db->transBegin();
+
         try {
             $result = $this->startWithinTransaction($params);
-            if (! $db->transStatus()) throw new \RuntimeException('Gagal membuat transaksi approval');
+            if (!$db->transStatus()) {
+                throw new \RuntimeException('Gagal membuat transaksi approval');
+            }
             $db->transCommit();
+
             return $result;
         } catch (\Throwable $exception) {
             $db->transRollback();
+
             throw $exception;
         }
     }
@@ -75,14 +79,14 @@ class ApprovalEngine
     /** @return array<string,mixed> */
     private function startWithinTransaction(array $params): array
     {
-        $companyId   = (int) ($params['company_id'] ?? 0);
-        $module      = strtoupper(trim((string) ($params['module'] ?? 'GENERIC')));
+        $companyId = (int) ($params['company_id'] ?? 0);
+        $module = strtoupper(trim((string) ($params['module'] ?? 'GENERIC')));
         $entityTable = (string) ($params['entity_table'] ?? '');
-        $entityId    = (int) ($params['entity_id'] ?? 0);
-        $employeeId  = (int) ($params['employee_id'] ?? 0);
-        $meta        = $params['meta'] ?? [];
+        $entityId = (int) ($params['entity_id'] ?? 0);
+        $employeeId = (int) ($params['employee_id'] ?? 0);
+        $meta = $params['meta'] ?? [];
 
-        if (! $companyId || ! $entityTable || ! $entityId || ! $employeeId) {
+        if (!$companyId || !$entityTable || !$entityId || !$employeeId) {
             throw new \InvalidArgumentException('ApprovalEngine.start: missing required parameters');
         }
 
@@ -97,14 +101,14 @@ class ApprovalEngine
             ->where('company_id', $companyId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
-        if (! $employee) {
+        if (!$employee) {
             throw new \InvalidArgumentException('Employee tidak ditemukan di tenant aktif');
         }
         $entity = $db->table($entityTable)
             ->where('id', $entityId)
             ->where('company_id', $companyId)
             ->get()->getRowArray();
-        if (! $entity) {
+        if (!$entity) {
             throw new \InvalidArgumentException('Entitas approval tidak ditemukan di tenant aktif');
         }
 
@@ -131,7 +135,7 @@ class ApprovalEngine
         }
 
         $chain = $this->resolveChain($companyId, $module, $employeeId);
-        $now   = date('Y-m-d H:i:s');
+        $now = date('Y-m-d H:i:s');
         $workflowSnapshot = $this->buildWorkflowSnapshot($chain, [
             'company_id' => $companyId,
             'module' => $module,
@@ -143,20 +147,20 @@ class ApprovalEngine
         $versionJson = json_encode($versionPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         $insert = [
-            'company_id'         => $companyId,
-            'module'             => $module,
-            'entity_table'       => $entityTable,
-            'entity_id'          => $entityId,
-            'employee_id'        => $employeeId,
-            'chain_id'           => $chain ? (int) $chain['id'] : null,
-            'current_step_id'    => null,
+            'company_id' => $companyId,
+            'module' => $module,
+            'entity_table' => $entityTable,
+            'entity_id' => $entityId,
+            'employee_id' => $employeeId,
+            'chain_id' => $chain ? (int) $chain['id'] : null,
+            'current_step_id' => null,
             'current_step_order' => 1,
-            'status'             => 'PENDING',
-            'meta'               => json_encode($meta, JSON_UNESCAPED_UNICODE),
-            'workflow_snapshot'  => $snapshotJson,
+            'status' => 'PENDING',
+            'meta' => json_encode($meta, JSON_UNESCAPED_UNICODE),
+            'workflow_snapshot' => $snapshotJson,
             'chain_version_hash' => hash('sha256', (string) $versionJson),
-            'created_at'         => $now,
-            'updated_at'         => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
         ];
         $db->table('approval_requests')->insert($insert);
         $reqId = (int) $db->insertID();
@@ -164,7 +168,7 @@ class ApprovalEngine
         // Tidak ada chain → langsung auto-approve (legacy behavior, biar tidak
         // memblokir). Caller bebas memutuskan apakah ini diperlakukan sebagai
         // PENDING atau APPROVED untuk tabel asalnya.
-        if (! $chain) {
+        if (!$chain) {
             $db->table('approval_requests')->where('id', $reqId)->update([
                 'status' => 'PENDING',
                 'updated_at' => $now,
@@ -178,17 +182,19 @@ class ApprovalEngine
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
+
             return [
-                'request_id'    => $reqId,
-                'chain_id'      => null,
-                'status'        => 'PENDING',
-                'next_approvers'=> $this->fallbackHrApprovers($companyId),
-                'final'         => false,
-                'note'          => 'Tidak ada chain terdaftar; pakai fallback HR.',
+                'request_id' => $reqId,
+                'chain_id' => null,
+                'status' => 'PENDING',
+                'next_approvers' => $this->fallbackHrApprovers($companyId),
+                'final' => false,
+                'note' => 'Tidak ada chain terdaftar; pakai fallback HR.',
             ];
         }
 
         $advance = $this->advance($reqId, 0); // mulai dari step 0 → cari step berikutnya
+
         return $advance;
     }
 
@@ -219,16 +225,31 @@ class ApprovalEngine
         return $this->decideEntity($module, $entityTable, $entityId, $companyId, $userId, 'REJECTED', $note);
     }
 
+    /** @return list<int> */
+    public function currentApprovers(int $requestId, int $companyId): array
+    {
+        $request = \Config\Database::connect()->table('approval_requests')
+            ->where('id', $requestId)->where('company_id', $companyId)
+            ->where('status', 'PENDING')->get()->getRowArray();
+        if (!$request) {
+            return [];
+        }
+
+        return $this->resolveCurrentApprovers($request);
+    }
+
     public function cancel(int $requestId): void
     {
         $db = \Config\Database::connect();
         $builder = $db->table('approval_requests')->where('id', $requestId)->where('status', 'PENDING');
         $companyId = Services::tenant()->getCompanyId();
-        if ($companyId > 0) $builder->where('company_id', $companyId);
+        if ($companyId > 0) {
+            $builder->where('company_id', $companyId);
+        }
         $builder->update([
-            'status'           => 'CANCELLED',
+            'status' => 'CANCELLED',
             'final_decided_at' => date('Y-m-d H:i:s'),
-            'updated_at'       => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
         if ($db->affectedRows() !== 1) {
             throw new \RuntimeException('Approval request PENDING tidak ditemukan atau sudah berubah');
@@ -250,7 +271,9 @@ class ApprovalEngine
             ->where('company_id', $companyId)->where('module', $module)
             ->where('entity_table', $entityTable)->where('entity_id', $entityId)
             ->where('status', 'PENDING')->orderBy('id', 'DESC')->get()->getRowArray();
-        if (! $request) throw new \RuntimeException('Approval request PENDING tidak ditemukan');
+        if (!$request) {
+            throw new \RuntimeException('Approval request PENDING tidak ditemukan');
+        }
         $this->cancel((int) $request['id']);
     }
 
@@ -263,20 +286,29 @@ class ApprovalEngine
         $db = \Config\Database::connect();
         $builder = $db->table('approval_requests')->where('id', $requestId);
         $companyId = Services::tenant()->getCompanyId();
-        if ($companyId > 0) $builder->where('company_id', $companyId);
+        if ($companyId > 0) {
+            $builder->where('company_id', $companyId);
+        }
         $req = $builder->get()->getRowArray();
-        if (! $req || $req['status'] !== 'PENDING') return false;
+        if (!$req || $req['status'] !== 'PENDING') {
+            return false;
+        }
 
         // Authorization preview must match decide(): even a super-admin may
         // never see their own transaction as actionable.
-        if ($this->isSelfApproval($userId, (int) $req['employee_id'], $req)) return false;
+        if ($this->isSelfApproval($userId, (int) $req['employee_id'], $req)) {
+            return false;
+        }
 
         // Super admin dapat bertindak sebagai emergency approver untuk
         // transaksi milik orang lain; keputusan tetap tercatat di audit trail.
         $tenant = Services::tenant();
-        if ($tenant->isSuperAdmin() && (int) $tenant->getUserId() === $userId) return true;
+        if ($tenant->isSuperAdmin() && (int) $tenant->getUserId() === $userId) {
+            return true;
+        }
 
         $approvers = $this->resolveCurrentApprovers($req);
+
         return in_array($userId, $approvers, true);
     }
 
@@ -296,8 +328,12 @@ class ApprovalEngine
             ->orderBy('ar.created_at', 'DESC')
             ->limit($limit);
         $companyId = Services::tenant()->getCompanyId();
-        if ($companyId > 0) $builder->where('ar.company_id', $companyId);
-        if ($module) $builder->where('ar.module', $module);
+        if ($companyId > 0) {
+            $builder->where('ar.company_id', $companyId);
+        }
+        if ($module) {
+            $builder->where('ar.module', $module);
+        }
 
         $rows = $builder->get()->getResultArray();
 
@@ -308,6 +344,7 @@ class ApprovalEngine
                 $out[] = $r;
             }
         }
+
         return $out;
     }
 
@@ -341,8 +378,12 @@ class ApprovalEngine
             ->limit($limit);
 
         $companyId = Services::tenant()->getCompanyId();
-        if ($companyId > 0) $builder->where('ar.company_id', $companyId);
-        if ($module) $builder->where('ar.module', $module);
+        if ($companyId > 0) {
+            $builder->where('ar.company_id', $companyId);
+        }
+        if ($module) {
+            $builder->where('ar.module', $module);
+        }
 
         $rows = $builder->get()->getResultArray();
 
@@ -352,7 +393,9 @@ class ApprovalEngine
         $out = [];
         foreach ($rows as $row) {
             $requestId = (int) $row['id'];
-            if (isset($seen[$requestId])) continue;
+            if (isset($seen[$requestId])) {
+                continue;
+            }
             $seen[$requestId] = true;
             $out[] = $row;
         }
@@ -377,23 +420,27 @@ class ApprovalEngine
     {
         $db = \Config\Database::connect();
         $emp = $db->table('employees')->where('id', $employeeId)->where('company_id', $companyId)->get()->getRowArray();
-        if (! $emp) return null;
+        if (!$emp) {
+            return null;
+        }
 
         // 1. Per-employee override
         $col = match ($module) {
-            'LEAVE'             => 'approval_chain_leave_id',
-            'OVERTIME'          => 'approval_chain_overtime_id',
+            'LEAVE' => 'approval_chain_leave_id',
+            'OVERTIME' => 'approval_chain_overtime_id',
             'ATTENDANCE_CHANGE' => 'approval_chain_attendance_id',
-            default             => null,
+            default => null,
         };
-        if ($col && ! empty($emp[$col])) {
+        if ($col && !empty($emp[$col])) {
             $chain = $db->table('approval_chains')
                 ->where('id', (int) $emp[$col])
                 ->where('company_id', $companyId)
                 ->where('module', $module)
                 ->where('is_active', 1)
                 ->get()->getRowArray();
-            if ($chain) return $chain;
+            if ($chain) {
+                return $chain;
+            }
         }
 
         // 2. Assignment rules — pilih row paling spesifik & priority terkecil
@@ -408,8 +455,8 @@ class ApprovalEngine
             ->get()->getResultArray();
         foreach ($rules as $rule) {
             $matchGrade = ($rule['job_grade_id'] === null || (int) $rule['job_grade_id'] === (int) $emp['job_grade_id']);
-            $matchDept  = ($rule['department_id'] === null || (int) $rule['department_id'] === (int) $emp['department_id']);
-            $matchBranch= ($rule['branch_id']    === null || (int) $rule['branch_id']    === (int) $emp['branch_id']);
+            $matchDept = ($rule['department_id'] === null || (int) $rule['department_id'] === (int) $emp['department_id']);
+            $matchBranch = ($rule['branch_id'] === null || (int) $rule['branch_id'] === (int) $emp['branch_id']);
             if ($matchGrade && $matchDept && $matchBranch) {
                 return $db->table('approval_chains')->where('id', (int) $rule['chain_id'])->where('company_id', $companyId)->get()->getRowArray();
             }
@@ -431,13 +478,14 @@ class ApprovalEngine
      * @param array<string,mixed>|null $chain
      * @param array<string,mixed> $request
      * @param array<string,mixed> $meta
+     *
      * @return array<string,mixed>
      */
     private function buildWorkflowSnapshot(?array $chain, array $request, array $meta): array
     {
         $companyId = (int) $request['company_id'];
         $request['meta'] = $meta;
-        if (! $chain) {
+        if (!$chain) {
             return [
                 'schema_version' => 1,
                 'chain_id' => null,
@@ -468,6 +516,7 @@ class ApprovalEngine
             unset($step['__request_employee_id']);
             $snapshots[] = $step;
         }
+
         return [
             'schema_version' => 1,
             'chain_id' => (int) $chain['id'],
@@ -483,9 +532,14 @@ class ApprovalEngine
     private function workflowSnapshot(array $request): array
     {
         $raw = $request['workflow_snapshot'] ?? null;
-        if (is_array($raw)) return $raw;
-        if (! is_string($raw) || $raw === '') return [];
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
         $decoded = json_decode($raw, true);
+
         return is_array($decoded) ? $decoded : [];
     }
 
@@ -496,8 +550,13 @@ class ApprovalEngine
     private function advance(int $requestId, int $lastStepOrder, int $actorUserId = 0, string $note = ''): array
     {
         $db = \Config\Database::connect();
-        $req = $db->table('approval_requests')->where('id', $requestId)->get()->getRowArray();
-        if (! $req) {
+        $requestBuilder = $db->table('approval_requests')->where('id', $requestId);
+        $tenantCompanyId = Services::tenant()->getCompanyId();
+        if ($tenantCompanyId > 0) {
+            $requestBuilder->where('company_id', $tenantCompanyId);
+        }
+        $req = $requestBuilder->get()->getRowArray();
+        if (!$req) {
             return ['request_id' => $requestId, 'status' => 'NOT_FOUND', 'final' => true, 'next_approvers' => []];
         }
         $meta = is_string($req['meta']) ? (json_decode($req['meta'], true) ?: []) : ($req['meta'] ?: []);
@@ -505,26 +564,29 @@ class ApprovalEngine
         $snapshot = $this->workflowSnapshot($req);
         $steps = $snapshot['steps'] ?? $db->table('approval_chain_steps')
             ->where('chain_id', (int) $req['chain_id'])
+            ->where('company_id', (int) $req['company_id'])
             ->orderBy('step_order', 'ASC')->get()->getResultArray();
 
         // Cari step pertama yang stepOrder > lastStepOrder dan kondisinya
         // terpenuhi serta tidak di-skip karena allow_skip_if_self.
         foreach ($steps as $step) {
-            if ((int) $step['step_order'] <= $lastStepOrder) continue;
+            if ((int) $step['step_order'] <= $lastStepOrder) {
+                continue;
+            }
             // Sprint 9 / H1.3 — sisipkan employee_id ke step row supaya
             // ApprovalConditionEvaluator bisa lookup department/branch/level.
             $step['__request_employee_id'] = (int) $req['employee_id'];
             $conditionMatched = array_key_exists('condition_matched', $step)
                 ? (bool) $step['condition_matched']
                 : $this->stepConditionMet($step, $meta);
-            if (! $conditionMatched) {
+            if (!$conditionMatched) {
                 $this->logSkip($requestId, $step, 'Condition not met');
                 continue;
             }
             $approvers = isset($step['expected_approver_user_ids'])
                 ? array_values(array_map('intval', (array) $step['expected_approver_user_ids']))
                 : $this->resolveApproversForStep($step, $req);
-            if (! empty($step['allow_skip_if_self'])
+            if (!empty($step['allow_skip_if_self'])
                 && count($approvers) === 1
                 && $this->isSelfApproval($approvers[0], (int) $req['employee_id'])
             ) {
@@ -533,7 +595,8 @@ class ApprovalEngine
             }
             // Kalau approver kosong, terapkan fallback strategy chain.
             if (empty($approvers)) {
-                $chain = $db->table('approval_chains')->where('id', (int) $req['chain_id'])->get()->getRowArray();
+                $chain = $db->table('approval_chains')->where('id', (int) $req['chain_id'])
+                    ->where('company_id', (int) $req['company_id'])->get()->getRowArray();
                 $strategy = $snapshot['fallback_strategy'] ?? $chain['fallback_strategy'] ?? 'HR_FALLBACK';
                 if ($strategy === 'SKIP') {
                     $this->logSkip($requestId, $step, 'No approver found; skipped');
@@ -546,41 +609,43 @@ class ApprovalEngine
 
             // Set step ini sebagai current
             $now = date('Y-m-d H:i:s');
-            $db->table('approval_requests')->where('id', $requestId)->update([
-                'current_step_id'    => (int) $step['id'],
-                'current_step_order' => (int) $step['step_order'],
-                'updated_at'         => $now,
-            ]);
+            $db->table('approval_requests')->where('id', $requestId)
+                ->where('company_id', (int) $req['company_id'])->update([
+                    'current_step_id' => (int) $step['id'],
+                    'current_step_order' => (int) $step['step_order'],
+                    'updated_at' => $now,
+                ]);
             $db->table('approval_decisions')->insert([
-                'company_id'          => (int) $req['company_id'],
+                'company_id' => (int) $req['company_id'],
                 'approval_request_id' => $requestId,
-                'chain_step_id'       => (int) $step['id'],
-                'step_order'          => (int) $step['step_order'],
-                'decision'            => 'PENDING',
-                'created_at'          => $now,
-                'updated_at'          => $now,
+                'chain_step_id' => (int) $step['id'],
+                'step_order' => (int) $step['step_order'],
+                'decision' => 'PENDING',
+                'created_at' => $now,
+                'updated_at' => $now,
             ]);
 
             $this->notifyApprovers($req, $step, $approvers);
 
             return [
-                'request_id'      => $requestId,
-                'chain_id'        => (int) $req['chain_id'],
-                'status'          => 'PENDING',
-                'current_step'    => (int) $step['step_order'],
-                'next_approvers'  => $approvers,
-                'final'           => false,
+                'request_id' => $requestId,
+                'chain_id' => (int) $req['chain_id'],
+                'status' => 'PENDING',
+                'current_step' => (int) $step['step_order'],
+                'next_approvers' => $approvers,
+                'final' => false,
             ];
         }
 
         // Tidak ada step lagi → finalisasi APPROVED
         if ($actorUserId <= 0) {
             $now = date('Y-m-d H:i:s');
-            $db->table('approval_requests')->where('id', $requestId)->update([
-                'current_step_id' => null,
-                'current_step_order' => 0,
-                'updated_at' => $now,
-            ]);
+            $db->table('approval_requests')->where('id', $requestId)
+                ->where('company_id', (int) $req['company_id'])->update([
+                    'current_step_id' => null,
+                    'current_step_order' => 0,
+                    'updated_at' => $now,
+                ]);
             $db->table('approval_decisions')->insert([
                 'company_id' => (int) $req['company_id'],
                 'approval_request_id' => $requestId,
@@ -590,6 +655,7 @@ class ApprovalEngine
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
+
             return [
                 'request_id' => $requestId,
                 'chain_id' => $req['chain_id'] !== null ? (int) $req['chain_id'] : null,
@@ -608,15 +674,18 @@ class ApprovalEngine
     {
         $db = \Config\Database::connect();
         $db->transBegin();
+
         try {
             $result = $this->decideWithinTransaction($requestId, $userId, $decision, $note);
-            if (! $db->transStatus()) {
+            if (!$db->transStatus()) {
                 throw new \RuntimeException('Transaksi approval gagal');
             }
             $db->transCommit();
+
             return $result;
         } catch (\Throwable $exception) {
             $db->transRollback();
+
             throw $exception;
         }
     }
@@ -627,9 +696,11 @@ class ApprovalEngine
         $db = \Config\Database::connect();
         $builder = $db->table('approval_requests')->where('id', $requestId);
         $companyId = Services::tenant()->getCompanyId();
-        if ($companyId > 0) $builder->where('company_id', $companyId);
+        if ($companyId > 0) {
+            $builder->where('company_id', $companyId);
+        }
         $req = $builder->get()->getRowArray();
-        if (! $req) {
+        if (!$req) {
             throw new \RuntimeException('Approval request not found');
         }
         if ($req['status'] !== 'PENDING') {
@@ -649,7 +720,7 @@ class ApprovalEngine
         $approvers = $this->resolveCurrentApprovers($req);
         $tenant = Services::tenant();
         $isSuperAdmin = $tenant->isSuperAdmin() && (int) $tenant->getUserId() === $userId;
-        if (! $isSuperAdmin && ! in_array($userId, $approvers, true)) {
+        if (!$isSuperAdmin && !in_array($userId, $approvers, true)) {
             throw new \RuntimeException('User bukan approver untuk step ini');
         }
 
@@ -664,7 +735,8 @@ class ApprovalEngine
         );
         if ($originalApprover !== null) {
             $origUser = \Config\Database::connect()
-                ->table('users')->where('id', $originalApprover)->get()->getRowArray();
+                ->table('users')->where('id', $originalApprover)
+                ->where('company_id', (int) $req['company_id'])->get()->getRowArray();
             $origLabel = $origUser['name'] ?? "user #{$originalApprover}";
             $note = trim($note);
             $prefix = "[Mendelegasi mewakili {$origLabel}]";
@@ -676,6 +748,7 @@ class ApprovalEngine
         // Update keputusan untuk step saat ini (cari row PENDING terakhir untuk step ini)
         $decisionBuilder = $db->table('approval_decisions')
             ->where('approval_request_id', $requestId)
+            ->where('company_id', (int) $req['company_id'])
             ->where('decision', 'PENDING')
             ->orderBy('id', 'DESC')
             ->limit(1);
@@ -687,10 +760,10 @@ class ApprovalEngine
         $existing = $decisionBuilder->get()->getRowArray();
         $decisionRow = [
             'approver_user_id' => $userId,
-            'decision'         => $decision,
-            'decided_at'       => $now,
-            'note'             => $note,
-            'updated_at'       => $now,
+            'decision' => $decision,
+            'decided_at' => $now,
+            'note' => $note,
+            'updated_at' => $now,
         ];
         if ($approverRoleResolved !== null) {
             $decisionRow['approver_role'] = $approverRoleResolved;
@@ -698,6 +771,7 @@ class ApprovalEngine
         if ($existing) {
             $db->table('approval_decisions')
                 ->where('id', $existing['id'])
+                ->where('company_id', (int) $req['company_id'])
                 ->where('decision', 'PENDING')
                 ->update($decisionRow);
             if ($db->affectedRows() !== 1) {
@@ -718,8 +792,13 @@ class ApprovalEngine
     private function finalize(int $requestId, string $status, int $actorUserId, string $note): array
     {
         $db = \Config\Database::connect();
-        $request = $db->table('approval_requests')->where('id', $requestId)->get()->getRowArray();
-        if (! $request || $request['status'] !== 'PENDING') {
+        $requestBuilder = $db->table('approval_requests')->where('id', $requestId);
+        $tenantCompanyId = Services::tenant()->getCompanyId();
+        if ($tenantCompanyId > 0) {
+            $requestBuilder->where('company_id', $tenantCompanyId);
+        }
+        $request = $requestBuilder->get()->getRowArray();
+        if (!$request || $request['status'] !== 'PENDING') {
             throw new \RuntimeException('Approval request berubah; muat ulang data');
         }
         $domainResult = $this->domainAdapters
@@ -727,18 +806,20 @@ class ApprovalEngine
             ->apply($request, $status, $actorUserId, $note);
         $outboxId = $this->outbox->record($request, $status, $actorUserId, $note, $domainResult);
         $now = date('Y-m-d H:i:s');
-        $db->table('approval_requests')->where('id', $requestId)->where('status', 'PENDING')->update([
-            'status'           => $status,
-            'final_decided_at' => $now,
-            'current_step_id'  => null,
-            'updated_at'       => $now,
-        ]);
+        $db->table('approval_requests')->where('id', $requestId)
+            ->where('company_id', (int) $request['company_id'])->where('status', 'PENDING')->update([
+                'status' => $status,
+                'final_decided_at' => $now,
+                'current_step_id' => null,
+                'updated_at' => $now,
+            ]);
+
         return [
-            'request_id'     => $requestId,
-            'status'         => $status,
-            'final'          => true,
+            'request_id' => $requestId,
+            'status' => $status,
+            'final' => true,
             'next_approvers' => [],
-            'domain_result'  => $domainResult,
+            'domain_result' => $domainResult,
             'outbox_event_id' => $outboxId,
         ];
     }
@@ -763,7 +844,7 @@ class ApprovalEngine
             ->where('status', 'PENDING')
             ->orderBy('id', 'DESC')
             ->get()->getRowArray();
-        if (! $request) {
+        if (!$request) {
             throw new \RuntimeException('Approval workflow PENDING tidak ditemukan untuk transaksi ini');
         }
 
@@ -775,15 +856,15 @@ class ApprovalEngine
         $db = \Config\Database::connect();
         $now = date('Y-m-d H:i:s');
         $db->table('approval_decisions')->insert([
-            'company_id'          => (int) $step['company_id'],
+            'company_id' => (int) $step['company_id'],
             'approval_request_id' => $requestId,
-            'chain_step_id'       => (int) $step['id'],
-            'step_order'          => (int) $step['step_order'],
-            'decision'            => 'SKIPPED',
-            'decided_at'          => $now,
-            'note'                => $reason,
-            'created_at'          => $now,
-            'updated_at'          => $now,
+            'chain_step_id' => (int) $step['id'],
+            'step_order' => (int) $step['step_order'],
+            'decision' => 'SKIPPED',
+            'decided_at' => $now,
+            'note' => $reason,
+            'created_at' => $now,
+            'updated_at' => $now,
         ]);
     }
 
@@ -793,7 +874,7 @@ class ApprovalEngine
         // condition_value_json. Kalau di-set, evaluasi pakai
         // ApprovalConditionEvaluator. Hasil di-AND dengan kondisi legacy
         // di bawah supaya backward compatible.
-        if (! empty($step['condition_type'])) {
+        if (!empty($step['condition_type'])) {
             $evaluator = new \App\Libraries\Approval\ApprovalConditionEvaluator();
             $employee = [];
             $empId = (int) ($step['__request_employee_id'] ?? 0);
@@ -804,7 +885,9 @@ class ApprovalEngine
                     ->join('job_grades g', 'g.id = e.job_grade_id', 'left')
                     ->where('e.id', $empId)
                     ->get()->getRowArray();
-                if ($emp) $employee = $emp;
+                if ($emp) {
+                    $employee = $emp;
+                }
             }
             $rawConfig = $step['condition_value_json'] ?? null;
             $contextOk = $evaluator->evaluate(
@@ -812,22 +895,29 @@ class ApprovalEngine
                 $rawConfig,
                 ['meta' => $meta, 'employee' => $employee],
             );
-            if (! $contextOk) return false;
+            if (!$contextOk) {
+                return false;
+            }
         }
 
         // Legacy condition: condition_field/op/value (numeric only).
-        if (empty($step['condition_field'])) return true;
+        if (empty($step['condition_field'])) {
+            return true;
+        }
         $field = $step['condition_field'];
-        $op    = $step['condition_op'];
+        $op = $step['condition_op'];
         $value = (float) $step['condition_value'];
-        if (! array_key_exists($field, $meta)) return true; // tidak bisa evaluasi → ambil aman, jalankan step
+        if (!array_key_exists($field, $meta)) {
+            return true;
+        } // tidak bisa evaluasi → ambil aman, jalankan step
         $actual = (float) $meta[$field];
+
         return match ($op) {
-            '>'  => $actual >  $value,
+            '>' => $actual > $value,
             '>=' => $actual >= $value,
-            '<'  => $actual <  $value,
+            '<' => $actual < $value,
             '<=' => $actual <= $value,
-            '='  => abs($actual - $value) < 0.0001,
+            '=' => abs($actual - $value) < 0.0001,
             '!=' => abs($actual - $value) >= 0.0001,
             default => true,
         };
@@ -840,38 +930,50 @@ class ApprovalEngine
     {
         $db = \Config\Database::connect();
         $employeeId = (int) $request['employee_id'];
-        $companyId  = (int) $request['company_id'];
+        $companyId = (int) $request['company_id'];
 
         $emp = $db->table('employees')->where('id', $employeeId)->where('company_id', $companyId)->get()->getRowArray();
-        if (! $emp) return [];
+        if (!$emp) {
+            return [];
+        }
 
         $type = $step['approver_type'];
         $candidates = [];
         $meta = $request['meta'] ?? [];
-        if (is_string($meta)) $meta = json_decode($meta, true) ?: [];
+        if (is_string($meta)) {
+            $meta = json_decode($meta, true) ?: [];
+        }
 
-        if ($type === 'SUPERVISOR' && ! empty($emp['supervisor_id'])) {
+        if ($type === 'SUPERVISOR' && !empty($emp['supervisor_id'])) {
             $sup = $db->table('employees')->where('id', (int) $emp['supervisor_id'])->where('company_id', $companyId)->get()->getRowArray();
-            if ($sup && ! empty($sup['user_id'])) $candidates[] = (int) $sup['user_id'];
-        } elseif ($type === 'MANAGER' && ! empty($emp['manager_id'])) {
+            if ($sup && !empty($sup['user_id'])) {
+                $candidates[] = (int) $sup['user_id'];
+            }
+        } elseif ($type === 'MANAGER' && !empty($emp['manager_id'])) {
             $mgr = $db->table('employees')->where('id', (int) $emp['manager_id'])->where('company_id', $companyId)->get()->getRowArray();
-            if ($mgr && ! empty($mgr['user_id'])) $candidates[] = (int) $mgr['user_id'];
-        } elseif ($type === 'DEPARTMENT_HEAD' && ! empty($emp['department_id'])) {
+            if ($mgr && !empty($mgr['user_id'])) {
+                $candidates[] = (int) $mgr['user_id'];
+            }
+        } elseif ($type === 'DEPARTMENT_HEAD' && !empty($emp['department_id'])) {
             $dept = $db->table('departments')->where('id', (int) $emp['department_id'])->where('company_id', $companyId)->get()->getRowArray();
-            if ($dept && ! empty($dept['manager_employee_id'])) {
+            if ($dept && !empty($dept['manager_employee_id'])) {
                 $head = $db->table('employees')->where('id', (int) $dept['manager_employee_id'])->where('company_id', $companyId)->get()->getRowArray();
-                if ($head && ! empty($head['user_id'])) $candidates[] = (int) $head['user_id'];
+                if ($head && !empty($head['user_id'])) {
+                    $candidates[] = (int) $head['user_id'];
+                }
             }
         } elseif ($type === 'BRANCH_HEAD') {
             // Coba work_location dulu, fallback ke branch
-            if (! empty($emp['work_location_id'])) {
+            if (!empty($emp['work_location_id'])) {
                 $loc = $db->table('work_locations')->where('id', (int) $emp['work_location_id'])->where('company_id', $companyId)->get()->getRowArray();
-                if ($loc && ! empty($loc['manager_employee_id'])) {
+                if ($loc && !empty($loc['manager_employee_id'])) {
                     $head = $db->table('employees')->where('id', (int) $loc['manager_employee_id'])->where('company_id', $companyId)->get()->getRowArray();
-                    if ($head && ! empty($head['user_id'])) $candidates[] = (int) $head['user_id'];
+                    if ($head && !empty($head['user_id'])) {
+                        $candidates[] = (int) $head['user_id'];
+                    }
                 }
             }
-            if (empty($candidates) && ! empty($emp['branch_id'])) {
+            if (empty($candidates) && !empty($emp['branch_id'])) {
                 // branches tidak punya manager_employee_id by default; cari user di branch dengan role manager
                 $rows = $db->table('users u')
                     ->select('u.id')
@@ -881,7 +983,9 @@ class ApprovalEngine
                     ->where('e.branch_id', (int) $emp['branch_id'])
                     ->where('u.role_id', 3) // manager
                     ->get()->getResultArray();
-                foreach ($rows as $r) $candidates[] = (int) $r['id'];
+                foreach ($rows as $r) {
+                    $candidates[] = (int) $r['id'];
+                }
             }
         } elseif ($type === 'HR') {
             $roleSlugs = ['hr_admin', 'hr_director', 'hr_business_partner'];
@@ -890,51 +994,68 @@ class ApprovalEngine
             if (str_contains($stepName, 'l&d') || str_contains($stepName, 'talent')) {
                 $roleSlugs[] = 'learning_development';
             }
-            if (str_contains($stepName, 'c&b')) $roleSlugs[] = 'compensation_benefits';
-            if (str_contains($stepName, 'payroll')) $roleSlugs[] = 'payroll_admin';
+            if (str_contains($stepName, 'c&b')) {
+                $roleSlugs[] = 'compensation_benefits';
+            }
+            if (str_contains($stepName, 'payroll')) {
+                $roleSlugs[] = 'payroll_admin';
+            }
             if (in_array($module, ['CANDIDATE_OFFER', 'HIRE_CONVERSION'], true)) {
                 $roleSlugs[] = 'recruiter';
             }
-            $roleIds = $this->roleIdsForSlugs($roleSlugs, [2]);
+            $roleIds = $this->roleIdsForSlugs($roleSlugs, [2], $companyId);
             $rows = $db->table('users')
                 ->where('is_active', 1)
                 ->where('company_id', $companyId)
                 ->whereIn('role_id', $roleIds)
                 ->get()->getResultArray();
-            foreach ($rows as $r) $candidates[] = (int) $r['id'];
+            foreach ($rows as $r) {
+                $candidates[] = (int) $r['id'];
+            }
         } elseif ($type === 'FINANCE') {
-            $roleIds = $this->roleIdsForSlugs(['finance', 'cfo'], [5]);
+            $roleIds = $this->roleIdsForSlugs(['finance', 'cfo'], [5], $companyId);
             $rows = $db->table('users')
                 ->where('is_active', 1)
                 ->where('company_id', $companyId)
                 ->whereIn('role_id', $roleIds)
                 ->get()->getResultArray();
-            foreach ($rows as $r) $candidates[] = (int) $r['id'];
-        } elseif ($type === 'ROLE' && ! empty($step['approver_role_id'])) {
+            foreach ($rows as $r) {
+                $candidates[] = (int) $r['id'];
+            }
+        } elseif ($type === 'ROLE' && !empty($step['approver_role_id'])) {
             $rows = $db->table('users')
                 ->where('is_active', 1)
                 ->where('company_id', $companyId)
                 ->where('role_id', (int) $step['approver_role_id'])
                 ->get()->getResultArray();
-            foreach ($rows as $r) $candidates[] = (int) $r['id'];
-        } elseif ($type === 'SPECIFIC_USER' && ! empty($step['approver_user_id'])) {
+            foreach ($rows as $r) {
+                $candidates[] = (int) $r['id'];
+            }
+        } elseif ($type === 'SPECIFIC_USER' && !empty($step['approver_user_id'])) {
             $target = $db->table('users')->where('id', (int) $step['approver_user_id'])
                 ->where('company_id', $companyId)->where('is_active', 1)->get()->getRowArray();
-            if ($target) $candidates[] = (int) $target['id'];
-        } elseif ($type === 'SPECIFIC_EMPLOYEE' && ! empty($step['approver_employee_id'])) {
+            if ($target) {
+                $candidates[] = (int) $target['id'];
+            }
+        } elseif ($type === 'SPECIFIC_EMPLOYEE' && !empty($step['approver_employee_id'])) {
             $tgt = $db->table('employees')->where('id', (int) $step['approver_employee_id'])->where('company_id', $companyId)->get()->getRowArray();
-            if ($tgt && ! empty($tgt['user_id'])) $candidates[] = (int) $tgt['user_id'];
-        } elseif ($type === 'HIRING_MANAGER' && is_array($meta) && ! empty($meta['job_posting_id'])) {
+            if ($tgt && !empty($tgt['user_id'])) {
+                $candidates[] = (int) $tgt['user_id'];
+            }
+        } elseif ($type === 'HIRING_MANAGER' && is_array($meta) && !empty($meta['job_posting_id'])) {
             $posting = $db->table('job_postings')->where('id', (int) $meta['job_posting_id'])
                 ->where('company_id', $companyId)->where('deleted_at IS NULL')->get()->getRowArray();
-            if ($posting && ! empty($posting['hiring_manager_id'])) {
+            if ($posting && !empty($posting['hiring_manager_id'])) {
                 $manager = $db->table('users')->where('id', (int) $posting['hiring_manager_id'])
                     ->where('company_id', $companyId)->where('is_active', 1)->get()->getRowArray();
-                if ($manager) $candidates[] = (int) $manager['id'];
+                if ($manager) {
+                    $candidates[] = (int) $manager['id'];
+                }
             }
         }
 
         $candidates = array_values(array_unique($candidates));
+
         return $expandDelegates
             ? $this->expandWithDelegates(
                 $candidates,
@@ -945,17 +1066,21 @@ class ApprovalEngine
     }
 
     /** @param list<string> $slugs @param list<int> $fallbackIds @return list<int> */
-    private function roleIdsForSlugs(array $slugs, array $fallbackIds): array
+    private function roleIdsForSlugs(array $slugs, array $fallbackIds, int $companyId): array
     {
         $db = \Config\Database::connect();
-        if (! $db->tableExists('roles')) return $fallbackIds;
+        if (!$db->tableExists('roles')) {
+            return $fallbackIds;
+        }
         $rows = $db->table('roles')->select('id')
             ->whereIn('slug', array_values(array_unique($slugs)))
+            ->groupStart()->where('company_id', $companyId)->orWhere('company_id IS NULL')->groupEnd()
             ->get()->getResultArray();
         $ids = array_values(array_unique(array_map(
             static fn (array $row): int => (int) $row['id'],
             $rows
         )));
+
         return $ids !== [] ? $ids : $fallbackIds;
     }
 
@@ -969,11 +1094,14 @@ class ApprovalEngine
      * bertahan supaya kalau dia kembali dari cuti & login, dia bisa approve.
      *
      * @param int[] $userIds
+     *
      * @return int[]
      */
     private function expandWithDelegates(array $userIds, int $companyId, string $module): array
     {
-        if (empty($userIds)) return $userIds;
+        if (empty($userIds)) {
+            return $userIds;
+        }
         $today = date('Y-m-d');
         $db = \Config\Database::connect();
         $rows = $db->table('approval_delegations')
@@ -983,14 +1111,15 @@ class ApprovalEngine
             ->where('date_from <=', $today)
             ->where('date_to >=', $today)
             ->groupStart()
-                ->where('module IS NULL')
-                ->orWhere('module', $module)
+            ->where('module IS NULL')
+            ->orWhere('module', $module)
             ->groupEnd()
             ->get()->getResultArray();
         $extra = [];
         foreach ($rows as $r) {
             $extra[] = (int) $r['delegate_to_user_id'];
         }
+
         return array_values(array_unique(array_merge($userIds, $extra)));
     }
 
@@ -999,12 +1128,15 @@ class ApprovalEngine
      * resmi $approverIds (lewat approval_delegations aktif).
      *
      * @param int[] $approverIds
+     *
      * @return int|null  user_id dari approver asli yang sedang didelegasikan,
      *                   atau null jika $userId bukan delegate.
      */
     private function findOriginalForDelegate(int $userId, array $approverIds, int $companyId, string $module): ?int
     {
-        if (empty($approverIds)) return null;
+        if (empty($approverIds)) {
+            return null;
+        }
         $today = date('Y-m-d');
         $db = \Config\Database::connect();
         $row = $db->table('approval_delegations')
@@ -1014,20 +1146,21 @@ class ApprovalEngine
             ->where('date_from <=', $today)
             ->where('date_to >=', $today)
             ->groupStart()
-                ->where('module IS NULL')
-                ->orWhere('module', $module)
+            ->where('module IS NULL')
+            ->orWhere('module', $module)
             ->groupEnd()
             ->whereIn('user_id', $approverIds)
             ->orderBy('id', 'DESC')
             ->limit(1)
             ->get()->getRowArray();
+
         return $row ? (int) $row['user_id'] : null;
     }
 
     private function resolveCurrentApprovers(array $request): array
     {
         $companyId = (int) $request['company_id'];
-        $module    = (string) $request['module'];
+        $module = (string) $request['module'];
         $snapshot = $this->workflowSnapshot($request);
 
         if (empty($request['current_step_id'])) {
@@ -1035,32 +1168,42 @@ class ApprovalEngine
                 'intval',
                 (array) ($snapshot['fallback_approver_user_ids'] ?? [])
             ));
+
             return $this->expandWithDelegates(
                 $expected !== [] ? $expected : $this->fallbackHrApprovers($companyId),
-                $companyId, $module
+                $companyId,
+                $module
             );
         }
         foreach ((array) ($snapshot['steps'] ?? []) as $stepSnapshot) {
-            if ((int) ($stepSnapshot['id'] ?? 0) !== (int) $request['current_step_id']) continue;
+            if ((int) ($stepSnapshot['id'] ?? 0) !== (int) $request['current_step_id']) {
+                continue;
+            }
             $expected = array_values(array_map(
                 'intval',
                 (array) ($stepSnapshot['expected_approver_user_ids'] ?? [])
             ));
+
             return $this->expandWithDelegates($expected, $companyId, $module);
         }
         $db = \Config\Database::connect();
-        $step = $db->table('approval_chain_steps')->where('id', (int) $request['current_step_id'])->get()->getRowArray();
-        if (! $step) return [];
+        $step = $db->table('approval_chain_steps')->where('id', (int) $request['current_step_id'])
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if (!$step) {
+            return [];
+        }
         // resolveApproversForStep sudah expand internal, tapi fallback HR di
         // bawah belum — jadi kita selalu expand sekali lagi di sini supaya
         // konsisten.
         $approvers = $this->resolveApproversForStep($step, $request);
         if (empty($approvers)) {
-            $chain = $db->table('approval_chains')->where('id', (int) $request['chain_id'])->get()->getRowArray();
+            $chain = $db->table('approval_chains')->where('id', (int) $request['chain_id'])
+                ->where('company_id', $companyId)->get()->getRowArray();
             if (($chain['fallback_strategy'] ?? 'HR_FALLBACK') === 'HR_FALLBACK') {
                 $approvers = $this->fallbackHrApprovers($companyId);
             }
         }
+
         return $this->expandWithDelegates($approvers, $companyId, $module);
     }
 
@@ -1068,10 +1211,17 @@ class ApprovalEngine
     private function isSelfApproval(int $userId, int $employeeId, array $request = []): bool
     {
         $db = \Config\Database::connect();
-        $u = $db->table('users')->where('id', $userId)->get()->getRowArray();
-        if ($u && (int) ($u['employee_id'] ?? 0) === $employeeId) return true;
+        $companyId = (int) ($request['company_id'] ?? Services::tenant()->getCompanyId());
+        $u = $db->table('users')->where('id', $userId)
+            ->where('company_id', $companyId)->get()->getRowArray();
+        if ($u && (int) ($u['employee_id'] ?? 0) === $employeeId) {
+            return true;
+        }
         $meta = $request['meta'] ?? [];
-        if (is_string($meta)) $meta = json_decode($meta, true) ?: [];
+        if (is_string($meta)) {
+            $meta = json_decode($meta, true) ?: [];
+        }
+
         return is_array($meta)
             && (int) ($meta['submitted_by'] ?? $meta['created_by'] ?? 0) === $userId;
     }
@@ -1079,22 +1229,28 @@ class ApprovalEngine
     private function fallbackHrApprovers(int $companyId): array
     {
         $db = \Config\Database::connect();
-        $roleIds = $this->roleIdsForSlugs(['hr_admin', 'hr_director', 'hr_business_partner'], [2]);
+        $roleIds = $this->roleIdsForSlugs(['hr_admin', 'hr_director', 'hr_business_partner'], [2], $companyId);
         $rows = $db->table('users')
             ->where('is_active', 1)
             ->where('company_id', $companyId)
             ->whereIn('role_id', $roleIds)
             ->get()->getResultArray();
+
         return array_map(fn ($r) => (int) $r['id'], $rows);
     }
 
     private function notifyApprovers(array $request, array $step, array $approvers): void
     {
-        if (empty($approvers)) return;
+        if (empty($approvers)) {
+            return;
+        }
         $db = \Config\Database::connect();
         $emp = $db->table('employees')->where('id', (int) $request['employee_id'])->get()->getRowArray();
         $title = "Persetujuan dibutuhkan: {$request['module']} step {$step['step_order']}";
-        $msg   = ($emp['full_name'] ?? 'Seseorang') . " menunggu persetujuan Anda ({$step['name']})";
+        $msg = ($emp['full_name'] ?? 'Seseorang') . " menunggu persetujuan Anda ({$step['name']})";
+        $linkUrl = strtoupper((string) ($request['module'] ?? '')) === 'PAYROLL'
+            ? '/payroll/periods'
+            : '/approvals/inbox?request_id=' . (int) $request['id'];
         $notifier = Services::notification();
         foreach ($approvers as $uid) {
             $notifier->send(
@@ -1104,10 +1260,9 @@ class ApprovalEngine
                 $title,
                 $msg,
                 ['request_id' => (int) $request['id'], 'module' => $request['module']],
-                '/approvals/inbox?request_id=' . (int) $request['id'],
+                $linkUrl,
                 true
             );
         }
     }
-
 }

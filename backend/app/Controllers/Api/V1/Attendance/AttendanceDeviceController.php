@@ -12,19 +12,22 @@ class AttendanceDeviceController extends ApiController
     {
         $db = \Config\Database::connect();
         $query = $db->table($this->table)->orderBy('created_at', 'DESC');
-        
-        $companyId = $this->request->getGet('company_id');
-        if ($companyId) {
-            $query->where('company_id', $companyId);
-        }
+        $this->tenant()->applyScope($query);
 
         $devices = $query->get()->getResultArray();
+
         return $this->ok($devices);
     }
 
     public function create()
     {
         $data = $this->getJsonInput();
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
+        }
+        unset($data['id'], $data['company_id'], $data['status'], $data['last_sync_at']);
+        $data['company_id'] = $companyId;
         $data['created_at'] = date('Y-m-d H:i:s');
         $data['updated_at'] = date('Y-m-d H:i:s');
         $data['status'] = 'OFFLINE';
@@ -39,25 +42,43 @@ class AttendanceDeviceController extends ApiController
     public function show($id)
     {
         $db = \Config\Database::connect();
-        $device = $db->table($this->table)->where('id', $id)->get()->getRowArray();
-        if (! $device) return $this->failNotFound('Device not found');
+        $builder = $db->table($this->table)->where('id', $id);
+        $this->tenant()->applyScope($builder);
+        $device = $builder->get()->getRowArray();
+        if (!$device) {
+            return $this->failNotFound('Device not found');
+        }
+
         return $this->ok($device);
     }
 
     public function update($id)
     {
         $data = $this->getJsonInput();
+        unset($data['id'], $data['company_id'], $data['created_at'], $data['last_sync_at']);
         $data['updated_at'] = date('Y-m-d H:i:s');
 
         $db = \Config\Database::connect();
-        $db->table($this->table)->where('id', $id)->update($data);
+        $builder = $db->table($this->table)->where('id', $id);
+        $this->tenant()->applyScope($builder);
+        $builder->update($data);
+        if ($db->affectedRows() !== 1) {
+            return $this->failNotFound('Device not found');
+        }
+
         return $this->ok(null, 'Device updated successfully');
     }
 
     public function delete($id)
     {
         $db = \Config\Database::connect();
-        $db->table($this->table)->where('id', $id)->delete();
+        $builder = $db->table($this->table)->where('id', $id);
+        $this->tenant()->applyScope($builder);
+        $builder->delete();
+        if ($db->affectedRows() !== 1) {
+            return $this->failNotFound('Device not found');
+        }
+
         return $this->ok(null, 'Device deleted successfully');
     }
 }

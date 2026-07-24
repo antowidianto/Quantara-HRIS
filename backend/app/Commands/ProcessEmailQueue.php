@@ -14,7 +14,7 @@ class ProcessEmailQueue extends BaseCommand
 
     public function run(array $params)
     {
-        $batch = (int) ($params['batch'] ?? CLI::getOption('batch') ?? 20);
+        $batch = (int) ($params['batch'] ?? CLI::getOption('batch') ?? 1000);
         $sent = Services::notification()->processEmailQueue($batch);
         CLI::write("Sent {$sent} email(s)", 'green');
     }

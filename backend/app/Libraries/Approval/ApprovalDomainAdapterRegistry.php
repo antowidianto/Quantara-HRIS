@@ -2,26 +2,27 @@
 
 namespace App\Libraries\Approval;
 
-use App\Libraries\Approval\Adapters\LeaveApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\OvertimeApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\AttendanceChangeApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\ReimbursementApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\LoanApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\BusinessTripApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\BonusApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\PayrollAdjustmentApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\CompensationReviewApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\TrainingRegistrationApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\TimesheetApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\CandidateOfferApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\GeneratedContractApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\AssetTransactionApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\HireConversionApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\PerformanceGoalApprovalDomainAdapter;
-use App\Libraries\Approval\Adapters\IdpActivationApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\AttendanceChangeApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\BonusApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\BusinessTripApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\CandidateOfferApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\CompensationReviewApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\EmployeeSensitiveChangeApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\GeneratedContractApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\HireConversionApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\IdpActivationApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\LeaveApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\LoanApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\MasterRateChangeApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\OvertimeApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\PayrollAdjustmentApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\PayrollPeriodApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\PerformanceGoalApprovalDomainAdapter;
 use App\Libraries\Approval\Adapters\PrivilegedActionApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\ReimbursementApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\TimesheetApprovalDomainAdapter;
+use App\Libraries\Approval\Adapters\TrainingRegistrationApprovalDomainAdapter;
 
 final class ApprovalDomainAdapterRegistry
 {
@@ -39,6 +40,7 @@ final class ApprovalDomainAdapterRegistry
             new LoanApprovalDomainAdapter(),
             new BusinessTripApprovalDomainAdapter(),
             new BonusApprovalDomainAdapter(),
+            new PayrollPeriodApprovalDomainAdapter(),
             new PayrollAdjustmentApprovalDomainAdapter(),
             new CompensationReviewApprovalDomainAdapter(),
             new TrainingRegistrationApprovalDomainAdapter(),
@@ -61,7 +63,7 @@ final class ApprovalDomainAdapterRegistry
     public function forModule(string $module): ApprovalDomainAdapterInterface
     {
         $module = strtoupper(trim($module));
-        if (! isset($this->adapters[$module])) {
+        if (!isset($this->adapters[$module])) {
             throw new \RuntimeException(
                 "Modul {$module} belum memiliki domain adapter; final approval diblokir"
             );

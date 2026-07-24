@@ -17,7 +17,7 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
         foreach ($verbs as $verb) {
             $count += count($routes->getRoutes($verb, false));
         }
-        self::assertSame(953, $count, 'Intentional route changes must update the audited snapshot count.');
+        self::assertSame(957, $count, 'Intentional route changes must update the audited snapshot count.');
 
         $getPaths = array_keys($routes->getRoutes('GET', false));
         $myTeam = array_search('api/v1/employees/my-team', $getPaths, true);

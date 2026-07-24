@@ -20,6 +20,38 @@ class PayrollPeriodController extends ApiController
 
         $total = $builder->countAllResults(false);
         $rows = $builder->orderBy('start_date', 'DESC')->limit($perPage, ($page - 1) * $perPage)->get()->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['approval_action'] = [
+                'request_id' => null,
+                'current_step' => null,
+                'can_approve' => false,
+            ];
+            if ($row['status'] !== 'CALCULATED' || empty($row['submitted_at'])) {
+                continue;
+            }
+            $request = $db->table('approval_requests')->where('company_id', (int) $row['company_id'])
+                ->where('module', 'PAYROLL')->where('entity_table', 'payroll_periods')
+                ->where('entity_id', (int) $row['id'])->where('status', 'PENDING')
+                ->orderBy('id', 'DESC')->get()->getRowArray();
+            if (!$request) {
+                continue;
+            }
+            $approvers = Services::approval()->currentApprovers((int) $request['id'], (int) $row['company_id']);
+            $step = !empty($request['current_step_id'])
+                ? $db->table('approval_chain_steps')->select('name, step_order')
+                    ->where('id', (int) $request['current_step_id'])
+                    ->where('company_id', (int) $row['company_id'])->get()->getRowArray()
+                : null;
+            $row['approval_action'] = [
+                'request_id' => (int) $request['id'],
+                'current_step' => (int) ($request['current_step_order'] ?? 0),
+                'current_step_name' => $step['name'] ?? null,
+                'can_approve' => in_array($this->userId(), $approvers, true),
+            ];
+        }
+        unset($row);
+
         return $this->paginated($rows, $total, $page, $perPage);
     }
 
@@ -27,8 +59,226 @@ class PayrollPeriodController extends ApiController
     {
         $db = \Config\Database::connect();
         $row = $this->findPeriodForTenant($db, (int) $id);
-        if (! $row) return $this->fail('Not found', 404);
+        if (!$row) {
+            return $this->fail('Not found', 404);
+        }
+
+        $row['approval_action'] = [
+            'request_id' => null,
+            'current_step' => null,
+            'current_step_name' => null,
+            'can_approve' => false,
+        ];
+        $makerId = (int) ($row['prepared_by'] ?? $row['created_by'] ?? 0);
+        $row['can_submit'] = $row['status'] === 'CALCULATED'
+            && empty($row['submitted_at'])
+            && $makerId > 0
+            && $makerId === $this->userId();
+        if ($row['status'] === 'CALCULATED' && !empty($row['submitted_at'])) {
+            $request = $db->table('approval_requests')
+                ->where('company_id', (int) $row['company_id'])
+                ->where('module', 'PAYROLL')
+                ->where('entity_table', 'payroll_periods')
+                ->where('entity_id', (int) $row['id'])
+                ->where('status', 'PENDING')
+                ->orderBy('id', 'DESC')
+                ->get()->getRowArray();
+            if ($request) {
+                $approvers = Services::approval()->currentApprovers(
+                    (int) $request['id'],
+                    (int) $row['company_id'],
+                );
+                $step = !empty($request['current_step_id'])
+                    ? $db->table('approval_chain_steps')->select('name, step_order')
+                        ->where('id', (int) $request['current_step_id'])
+                        ->where('company_id', (int) $row['company_id'])->get()->getRowArray()
+                    : null;
+                $row['approval_action'] = [
+                    'request_id' => (int) $request['id'],
+                    'current_step' => (int) ($request['current_step_order'] ?? 0),
+                    'current_step_name' => $step['name'] ?? null,
+                    'can_approve' => in_array($this->userId(), $approvers, true),
+                ];
+            }
+        }
+
         return $this->ok($row);
+    }
+
+    public function approvalDetail($id = null)
+    {
+        $db = \Config\Database::connect();
+        $period = $this->findPeriodForTenant($db, (int) $id);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
+
+        $companyId = (int) $period['company_id'];
+        $periodId = (int) $period['id'];
+        $preparedBy = (int) ($period['submitted_by'] ?? $period['prepared_by'] ?? 0);
+
+        $preparer = null;
+        if ($preparedBy > 0) {
+            $preparer = $db->table('users u')
+                ->select('u.id, u.name, u.email, r.name AS role_name')
+                ->join('roles r', 'r.id = u.role_id', 'left')
+                ->where('u.company_id', $companyId)
+                ->where('u.id', $preparedBy)
+                ->get()->getRowArray();
+        }
+
+        $request = $db->table('approval_requests')->where('company_id', $companyId)
+            ->where('module', 'PAYROLL')->where('entity_table', 'payroll_periods')
+            ->where('entity_id', $periodId)->orderBy('id', 'DESC')->get()->getRowArray();
+        $chain = $request && !empty($request['chain_id'])
+            ? $db->table('approval_chains')->where('id', (int) $request['chain_id'])
+                ->where('company_id', $companyId)->get()->getRowArray()
+            : $db->table('approval_chains')->where('company_id', $companyId)
+                ->where('module', 'PAYROLL')->where('is_default', 1)->where('is_active', 1)
+                ->where('deleted_at IS NULL')->get()->getRowArray();
+
+        $snapshot = $request ? json_decode((string) ($request['workflow_snapshot'] ?? ''), true) : null;
+        $steps = is_array($snapshot) && isset($snapshot['steps'])
+            ? $snapshot['steps']
+            : ($chain ? $db->table('approval_chain_steps')->where('company_id', $companyId)
+                ->where('chain_id', (int) $chain['id'])->orderBy('step_order', 'ASC')->get()->getResultArray() : []);
+
+        $decisions = [];
+        if ($request) {
+            $decisionRows = $db->table('approval_decisions d')
+                ->select('d.*, u.name AS approver_name')
+                ->join('users u', 'u.id = d.approver_user_id', 'left')
+                ->where('d.approval_request_id', (int) $request['id'])
+                ->orderBy('d.id', 'ASC')->get()->getResultArray();
+            foreach ($decisionRows as $decision) {
+                $decisions[(int) $decision['step_order']] = $decision;
+            }
+        }
+
+        $notificationByUser = [];
+        if ($request && $db->tableExists('notifications')) {
+            $notifications = $db->table('notifications')
+                ->select('user_id, sent_email, created_at')
+                ->where('company_id', $companyId)
+                ->where('type', 'approval.request')
+                ->groupStart()
+                ->where('link_url', '/payroll/periods')
+                ->orWhere('link_url', '/approvals/inbox?request_id=' . (int) $request['id'])
+                ->groupEnd()
+                ->orderBy('id', 'DESC')
+                ->get()->getResultArray();
+            foreach ($notifications as $notification) {
+                $userId = (int) $notification['user_id'];
+                $notificationByUser[$userId] ??= $notification;
+            }
+        }
+
+        $checkers = [];
+        $missingSteps = 0;
+        foreach ($steps as $step) {
+            if (array_key_exists('condition_matched', $step) && !$step['condition_matched']) {
+                continue;
+            }
+            $stepOrder = (int) $step['step_order'];
+            $role = !empty($step['approver_role_id'])
+                ? $db->table('roles')->where('id', (int) $step['approver_role_id'])->get()->getRowArray()
+                : null;
+            $candidateIds = isset($step['expected_approver_user_ids'])
+                ? array_values(array_map('intval', (array) $step['expected_approver_user_ids']))
+                : [];
+            if ($candidateIds === [] && ($step['approver_type'] ?? '') === 'ROLE' && $role) {
+                $candidateIds = array_map(
+                    static fn (array $user): int => (int) $user['id'],
+                    $db->table('users')->select('id')->where('company_id', $companyId)
+                        ->where('role_id', (int) $role['id'])->where('is_active', 1)->get()->getResultArray(),
+                );
+            }
+            $decision = $decisions[$stepOrder] ?? null;
+            if ($candidateIds === []) {
+                $missingSteps++;
+                $checkers[] = [
+                    'id' => null,
+                    'name' => null,
+                    'email' => null,
+                    'role_name' => $role['name'] ?? ($step['approver_type'] ?? '-'),
+                    'step_order' => $stepOrder,
+                    'step_name' => $step['name'],
+                    'is_current_step' => $request && (int) ($request['current_step_order'] ?? 0) === $stepOrder,
+                    'decision' => $decision['decision'] ?? 'PENDING',
+                    'approved_at' => $decision['decided_at'] ?? null,
+                    'notified_in_app' => false,
+                    'email_queued' => false,
+                    'notified_at' => null,
+                ];
+                continue;
+            }
+            $users = $db->table('users u')->select('u.id, u.name, u.email, r.name AS role_name')
+                ->join('roles r', 'r.id = u.role_id', 'left')->where('u.company_id', $companyId)
+                ->whereIn('u.id', $candidateIds)->where('u.is_active', 1)->get()->getResultArray();
+            foreach ($users as $user) {
+                $userId = (int) $user['id'];
+                $notification = $notificationByUser[$userId] ?? null;
+                $checkers[] = array_merge($user, [
+                    'step_order' => $stepOrder,
+                    'step_name' => $step['name'],
+                    'is_current_step' => $request && (int) ($request['current_step_order'] ?? 0) === $stepOrder,
+                    'decision' => $decision && (int) ($decision['approver_user_id'] ?? 0) === $userId
+                        ? $decision['decision'] : 'PENDING',
+                    'approved_at' => $decision && (int) ($decision['approver_user_id'] ?? 0) === $userId
+                        ? $decision['decided_at'] : null,
+                    'notified_in_app' => $notification !== null,
+                    'email_queued' => (int) ($notification['sent_email'] ?? 0) === 1,
+                    'notified_at' => $notification['created_at'] ?? null,
+                ]);
+            }
+        }
+
+        $approvedCount = count(array_filter(
+            $decisions,
+            static fn (array $decision): bool => $decision['decision'] === 'APPROVED',
+        ));
+        $payrollRows = $db->table('payslips')->select([
+            'id', 'slip_number', 'employee_number', 'employee_name', 'basic_salary',
+            'gross_earning', 'total_deduction', 'pph21_amount', 'bpjs_kes_employee',
+            'bpjs_jht_employee', 'bpjs_jp_employee', 'take_home_pay',
+        ])->where('company_id', $companyId)->where('payroll_period_id', $periodId)
+            ->orderBy('employee_name', 'ASC')->get()->getResultArray();
+        $currentUserCanApprove = count(array_filter(
+            $checkers,
+            fn (array $checker): bool => (int) ($checker['id'] ?? 0) === $this->userId()
+                && !empty($checker['is_current_step']),
+        )) > 0;
+
+        return $this->ok([
+            'period' => [
+                'id' => $periodId,
+                'code' => $period['code'],
+                'name' => $period['name'],
+                'status' => $period['status'],
+                'submitted_at' => $period['submitted_at'] ?? null,
+            ],
+            'preparer' => $preparer,
+            'chain' => $chain ? [
+                'id' => (int) $chain['id'],
+                'code' => $chain['code'],
+                'name' => $chain['name'],
+            ] : null,
+            'approval_request_id' => $request ? (int) $request['id'] : null,
+            'approval_status' => $request['status'] ?? 'NOT_SUBMITTED',
+            'current_step' => $request ? (int) ($request['current_step_order'] ?? 0) : null,
+            'required_approvals' => count($steps),
+            'approved_count' => $approvedCount,
+            'checkers' => $checkers,
+            'insufficient_checkers' => $chain === null || $missingSteps > 0,
+            'can_approve' => $currentUserCanApprove,
+            'payroll_summary' => [
+                'employee_count' => count($payrollRows),
+                'total_gross' => (float) ($period['total_gross'] ?? 0),
+                'total_deduction' => (float) ($period['total_deduction'] ?? 0),
+                'total_net' => (float) ($period['total_net'] ?? 0),
+            ],
+            'payroll_rows' => $payrollRows,
+        ]);
     }
 
     public function create()
@@ -37,16 +287,20 @@ class PayrollPeriodController extends ApiController
         $valid = $this->validateOrFail($data, [
             'name' => 'required|max_length[100]',
             'period_year' => 'required|integer',
-            'start_date'  => 'required|valid_date',
-            'end_date'    => 'required|valid_date',
-            'pay_date'    => 'required|valid_date',
-            'type'        => 'permit_empty|in_list[MONTHLY,BI_WEEKLY,WEEKLY,THR,BONUS,OFF_CYCLE]',
+            'start_date' => 'required|valid_date',
+            'end_date' => 'required|valid_date',
+            'pay_date' => 'required|valid_date',
+            'type' => 'permit_empty|in_list[MONTHLY,BI_WEEKLY,WEEKLY,THR,BONUS,OFF_CYCLE]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         $db = \Config\Database::connect();
         $companyId = $this->requireCompanyId();
-        if ($companyId === null) return null;
+        if ($companyId === null) {
+            return null;
+        }
 
         $type = $data['type'] ?? 'MONTHLY';
 
@@ -54,7 +308,7 @@ class PayrollPeriodController extends ApiController
         // Format: {PREFIX}-{YEAR}-{MM}[-N] — N hanya muncul kalau ada konflik
         // (mis. dua BONUS di bulan sama). Kalau user kirim `code` eksplisit,
         // kita pakai apa adanya tanpa suffix otomatis.
-        if (! empty($data['code'])) {
+        if (!empty($data['code'])) {
             $code = (string) $data['code'];
         } else {
             $code = $this->generateUniquePeriodCode($db, $companyId, $type, (int) $data['period_year'], (int) ($data['period_month'] ?? 0));
@@ -75,21 +329,21 @@ class PayrollPeriodController extends ApiController
         }
 
         $insert = [
-            'company_id'   => $companyId,
-            'code'         => $code,
-            'name'         => $data['name'],
-            'type'         => $type,
-            'period_year'  => $data['period_year'],
+            'company_id' => $companyId,
+            'code' => $code,
+            'name' => $data['name'],
+            'type' => $type,
+            'period_year' => $data['period_year'],
             'period_month' => $data['period_month'] ?? null,
-            'start_date'   => $data['start_date'],
-            'end_date'     => $data['end_date'],
-            'pay_date'     => $data['pay_date'],
+            'start_date' => $data['start_date'],
+            'end_date' => $data['end_date'],
+            'pay_date' => $data['pay_date'],
             'cutoff_attendance_date' => $data['cutoff_attendance_date'] ?? $data['end_date'],
-            'is_december_correction' => ! empty($data['is_december_correction']) ? 1 : 0,
-            'status'       => 'DRAFT',
-            'created_by'   => $this->userId(),
-            'created_at'   => date('Y-m-d H:i:s'),
-            'updated_at'   => date('Y-m-d H:i:s'),
+            'is_december_correction' => !empty($data['is_december_correction']) ? 1 : 0,
+            'status' => 'DRAFT',
+            'created_by' => $this->userId(),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ];
 
         try {
@@ -105,6 +359,7 @@ class PayrollPeriodController extends ApiController
                 );
             }
             log_message('error', 'Period create failed: ' . $e->getMessage());
+
             return $this->fail('Gagal membuat periode: ' . $e->getMessage(), 500);
         }
 
@@ -117,6 +372,7 @@ class PayrollPeriodController extends ApiController
                 $insert,
                 "Membuat periode payroll: {$insert['name']} ({$insert['start_date']} s/d {$insert['end_date']})"
             );
+
         return $this->ok(['id' => $id, 'code' => $code], 'Period created', 201);
     }
 
@@ -144,14 +400,14 @@ class PayrollPeriodController extends ApiController
     ): string {
         $prefix = match ($type) {
             'BI_WEEKLY' => 'BW',
-            'WEEKLY'    => 'WK',
-            'THR'       => 'THR',
-            'BONUS'     => 'BNS',
+            'WEEKLY' => 'WK',
+            'THR' => 'THR',
+            'BONUS' => 'BNS',
             'OFF_CYCLE' => 'OC',
-            default     => 'P',
+            default => 'P',
         };
         $monthStr = str_pad((string) $month, 2, '0', STR_PAD_LEFT);
-        $base     = sprintf('%s-%d-%s', $prefix, $year, $monthStr);
+        $base = sprintf('%s-%d-%s', $prefix, $year, $monthStr);
 
         for ($i = 1; $i <= 99; $i++) {
             $candidate = $i === 1 ? $base : ($base . '-' . $i);
@@ -159,8 +415,11 @@ class PayrollPeriodController extends ApiController
                 ->where('company_id', $companyId)
                 ->where('code', $candidate)
                 ->countAllResults() === 0;
-            if ($exists) return $candidate;
+            if ($exists) {
+                return $candidate;
+            }
         }
+
         // Fallback: include timestamp untuk jamin unique.
         return $base . '-' . substr((string) time(), -5);
     }
@@ -170,13 +429,18 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $this->findPeriodForTenant($db, $id);
-        if (! $existing) return $this->fail('Not found', 404);
-        if ($existing['status'] !== 'DRAFT') return $this->fail('Cannot update non-draft period', 422);
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if ($existing['status'] !== 'DRAFT') {
+            return $this->fail('Cannot update non-draft period', 422);
+        }
 
         $data = $this->getJsonInput();
-        $update = array_intersect_key($data, array_flip(['name','start_date','end_date','pay_date','cutoff_attendance_date']));
+        $update = array_intersect_key($data, array_flip(['name', 'start_date', 'end_date', 'pay_date', 'cutoff_attendance_date']));
         $update['updated_at'] = date('Y-m-d H:i:s');
         $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $existing['company_id'])->update($update);
+
         return $this->ok(null, 'Updated');
     }
 
@@ -185,8 +449,10 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $existing = $this->findPeriodForTenant($db, $id);
-        if (! $existing) return $this->fail('Not found', 404);
-        if (! in_array($existing['status'], ['DRAFT', 'CALCULATED'], true)) {
+        if (!$existing) {
+            return $this->fail('Not found', 404);
+        }
+        if (!in_array($existing['status'], ['DRAFT', 'CALCULATED'], true)) {
             return $this->fail('Cannot delete finalized period', 422);
         }
         $db->table('payslip_details')->whereIn('payslip_id', function ($q) use ($id) {
@@ -202,6 +468,7 @@ class PayrollPeriodController extends ApiController
                 $existing,
                 "Menghapus periode payroll: {$existing['name']} ({$existing['code']})"
             );
+
         return $this->ok(null, 'Deleted');
     }
 
@@ -210,12 +477,13 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $initialPeriod = $this->findPeriodForTenant($db, $id);
-        if (! $initialPeriod) {
+        if (!$initialPeriod) {
             return $this->fail('Period not found', 404);
         }
         $monitor = new \App\Libraries\System\BusinessJobMonitor($db);
         $runId = $monitor->start('payroll.calculate', (int) $initialPeriod['company_id'], (string) $id);
         $audit = Services::audit()->forModule('PAYROLL')->start();
+
         try {
             $summary = Services::payroll()->calculatePeriod($id);
             $period = $this->findPeriodForTenant($db, $id);
@@ -225,7 +493,7 @@ class PayrollPeriodController extends ApiController
             // Audit description berbeda kalau ada pending approvals,
             // supaya audit trail jelas: hitung dilakukan tetap, tapi ada
             // transaksi yang diabaikan & menunggu approval.
-            $hasWarnings = ! empty($summary['warnings']);
+            $hasWarnings = !empty($summary['warnings']);
             $description = $hasWarnings
                 ? sprintf(
                     'Menghitung payroll periode #%d dengan %d warning pending approval (%s)',
@@ -253,6 +521,7 @@ class PayrollPeriodController extends ApiController
             $monitor->succeed($runId, (int) ($summary['employee_count'] ?? $summary['count'] ?? 0), [
                 'period_id' => $id, 'warning_count' => count($summary['warnings'] ?? []),
             ]);
+
             return $this->ok($summary, $message);
         } catch (\Throwable $e) {
             $monitor->fail($runId, 'PAYROLL_CALCULATE_FAILED', 1, ['period_id' => $id]);
@@ -264,6 +533,7 @@ class PayrollPeriodController extends ApiController
                 'CALCULATE_FAILED',
                 'Gagal menghitung payroll periode #' . $id . ': ' . $e->getMessage()
             );
+
             return $this->fail($e->getMessage(), 500);
         }
     }
@@ -282,30 +552,35 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $period = $this->findPeriodForTenant($db, $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
 
         try {
             $pending = Services::payroll()->pendingApprovalsForPeriod($id, $period);
         } catch (\Throwable $e) {
             log_message('error', 'pendingApprovalsForPeriod failed: ' . $e->getMessage());
+
             return $this->fail('Gagal memuat pending approvals: ' . $e->getMessage(), 500);
         }
 
         // Bentuk warning string yang sama dengan calculate() supaya UI
         // bisa render array sederhana tanpa duplikasi logic.
         $labels = [
-            'overtime'          => 'pengajuan lembur',
+            'overtime' => 'pengajuan lembur',
             'attendance_change' => 'koreksi absensi',
-            'reimbursement'     => 'pengajuan reimbursement',
-            'loan'              => 'pengajuan kasbon',
-            'bonus_run'         => 'bonus run',
+            'reimbursement' => 'pengajuan reimbursement',
+            'loan' => 'pengajuan kasbon',
+            'bonus_run' => 'bonus run',
         ];
         $warnings = [];
         foreach ($pending['counts'] as $type => $count) {
-            if ($count <= 0) continue;
+            if ($count <= 0) {
+                continue;
+            }
             $warnings[] = [
-                'type'    => $type,
-                'count'   => $count,
+                'type' => $type,
+                'count' => $count,
                 'message' => sprintf(
                     'Ada %d %s yang masih menunggu approval — perhitungan periode ini akan mengabaikan transaksi tersebut sampai di-approve & re-calculate.',
                     $count,
@@ -315,18 +590,18 @@ class PayrollPeriodController extends ApiController
         }
 
         return $this->ok([
-            'period'      => [
-                'id'         => (int) $period['id'],
-                'code'       => $period['code'],
-                'name'       => $period['name'],
+            'period' => [
+                'id' => (int) $period['id'],
+                'code' => $period['code'],
+                'name' => $period['name'],
                 'start_date' => $period['start_date'],
-                'end_date'   => $period['end_date'],
-                'status'     => $period['status'],
+                'end_date' => $period['end_date'],
+                'status' => $period['status'],
             ],
             'total_count' => $pending['total_count'],
-            'counts'      => $pending['counts'],
-            'items'       => $pending['items'],
-            'warnings'    => $warnings,
+            'counts' => $pending['counts'],
+            'items' => $pending['items'],
+            'warnings' => $warnings,
             'has_blocker' => false, // info-only; calculate tidak di-block
         ]);
     }
@@ -336,10 +611,11 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $period = $this->findPeriodForTenant($db, $id);
-        if (! $period) {
+        if (!$period) {
             return $this->fail('Period not found', 404);
         }
         $audit = Services::audit()->forModule('PAYROLL')->start();
+
         try {
             (new \App\Libraries\Payroll\PayrollControlService())->assertCanFinalize(
                 (int) $period['company_id'],
@@ -351,7 +627,7 @@ class PayrollPeriodController extends ApiController
                 action: 'payroll_period.finalize',
                 entity: 'payroll_period',
                 entityId: $id,
-                description: 'Finalisasi & pembayaran payroll periode #' . $id,
+                description: 'Finalisasi payroll periode #' . $id . ' dan siap untuk disbursement',
                 severity: 'CRITICAL'
             );
 
@@ -376,21 +652,21 @@ class PayrollPeriodController extends ApiController
                     (int) $period['company_id'],
                     [
                         'payroll_period_id' => $id,
-                        'name'              => $period['name'] ?? null,
-                        'period_year'       => isset($period['period_year']) ? (int) $period['period_year'] : null,
-                        'start_date'        => $period['start_date'] ?? null,
-                        'end_date'          => $period['end_date'] ?? null,
-                        'pay_date'          => $period['pay_date'] ?? null,
-                        'status'            => $period['status'] ?? 'PAID',
-                        'payslip_count'     => (int) ($sum['count'] ?? 0),
-                        'total_net_pay'     => (float) ($sum['total_net'] ?? 0),
-                        'finalized_by'      => $this->userId(),
-                        'finalized_at'      => date('c'),
+                        'name' => $period['name'] ?? null,
+                        'period_year' => isset($period['period_year']) ? (int) $period['period_year'] : null,
+                        'start_date' => $period['start_date'] ?? null,
+                        'end_date' => $period['end_date'] ?? null,
+                        'pay_date' => $period['pay_date'] ?? null,
+                        'status' => $period['status'] ?? 'PAID',
+                        'payslip_count' => (int) ($sum['count'] ?? 0),
+                        'total_net_pay' => (float) ($sum['total_net'] ?? 0),
+                        'finalized_by' => $this->userId(),
+                        'finalized_at' => date('c'),
                     ],
                 );
             }
 
-            return $this->ok(null, 'Period finalized & payroll paid');
+            return $this->ok(null, 'Period finalized and ready for disbursement');
         } catch (\Throwable $e) {
             $audit->logFailure(
                 'payroll_period.finalize',
@@ -399,23 +675,41 @@ class PayrollPeriodController extends ApiController
                 'FINALIZE_FAILED',
                 'Gagal finalisasi payroll periode #' . $id . ': ' . $e->getMessage()
             );
+
             return $this->fail($e->getMessage(), 500);
         }
     }
 
     public function submit($id = null)
     {
-        $period = $this->findPeriodForTenant(\Config\Database::connect(), (int) $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        $period = $this->findPeriodForCurrentTenant((int) $id);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
+        $makerId = (int) ($period['prepared_by'] ?? $period['created_by'] ?? 0);
+        if ($makerId > 0 && $makerId !== $this->userId()) {
+            return $this->fail(
+                'Hanya pembuat payroll yang dapat mengajukan ke approval chain',
+                403,
+                'PAYROLL_MAKER_ONLY',
+            );
+        }
+
         try {
-            $updated = (new \App\Libraries\Payroll\PayrollControlService())->submit(
-                (int) $period['company_id'], (int) $period['id'], $this->userId()
+            $result = (new \App\Libraries\Payroll\PayrollApprovalWorkflowService())->submit(
+                (int) $period['id'],
+                (int) $period['company_id'],
+                $this->userId()
             );
             Services::audit()->forModule('PAYROLL')->log(
-                'payroll_period.submit', 'payroll_period', (int) $period['id'],
-                description: 'Payroll submitted for independent approval', severity: 'NOTICE'
+                'payroll_period.submit',
+                'payroll_period',
+                (int) $period['id'],
+                description: 'Payroll submitted for independent approval',
+                severity: 'NOTICE'
             );
-            return $this->ok($updated, 'Payroll submitted for approval');
+
+            return $this->ok($result, 'Payroll submitted to approval chain');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'PAYROLL_SUBMIT_BLOCKED');
         }
@@ -423,9 +717,12 @@ class PayrollPeriodController extends ApiController
 
     public function reviewVariance($id = null)
     {
-        $period = $this->findPeriodForTenant(\Config\Database::connect(), (int) $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        $period = $this->findPeriodForCurrentTenant((int) $id);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
         $data = $this->getJsonInput();
+
         try {
             $updated = (new \App\Libraries\Payroll\PayrollVarianceService())->review(
                 (int) $period['company_id'],
@@ -441,6 +738,7 @@ class PayrollPeriodController extends ApiController
                 severity: 'NOTICE',
                 metadata: ['note' => $data['note'] ?? null],
             );
+
             return $this->ok($updated, 'Payroll variance reviewed');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422, 'PAYROLL_VARIANCE_REVIEW_BLOCKED');
@@ -449,24 +747,45 @@ class PayrollPeriodController extends ApiController
 
     public function approve($id = null)
     {
-        $period = $this->findPeriodForTenant(\Config\Database::connect(), (int) $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        $period = $this->findPeriodForCurrentTenant((int) $id);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
+
         try {
-            $updated = (new \App\Libraries\Payroll\PayrollControlService())->approve(
-                (int) $period['company_id'], (int) $period['id'], $this->userId()
+            $data = $this->getJsonInput();
+            if (($data['review_confirmed'] ?? false) !== true) {
+                return $this->fail(
+                    'Konfirmasi review detail payroll wajib dicentang',
+                    422,
+                    'PAYROLL_REVIEW_CONFIRMATION_REQUIRED',
+                );
+            }
+            if (!hash_equals((string) $period['code'], trim((string) ($data['confirmation_code'] ?? '')))) {
+                return $this->fail(
+                    'Kode periode konfirmasi tidak sesuai',
+                    422,
+                    'PAYROLL_CONFIRMATION_CODE_MISMATCH',
+                );
+            }
+            $result = (new \App\Libraries\Payroll\PayrollApprovalWorkflowService())->approve(
+                (int) $period['id'],
+                (int) $period['company_id'],
+                $this->userId(),
+                trim((string) ($data['note'] ?? '')),
             );
             Services::audit()->forModule('PAYROLL')->log(
-                'payroll_period.approve', 'payroll_period', (int) $period['id'],
-                description: 'Payroll independently approved with immutable snapshot', severity: 'CRITICAL'
+                'payroll_period.approve',
+                'payroll_period',
+                (int) $period['id'],
+                description: 'Payroll independently approved with immutable snapshot',
+                severity: 'CRITICAL'
             );
-            $message = $updated['status'] === 'APPROVED'
-                ? 'Payroll approved'
-                : sprintf(
-                    'Approval recorded (%d/%d)',
-                    $updated['approval_progress']['approved'] ?? 1,
-                    $updated['approval_progress']['required'] ?? 1,
-                );
-            return $this->ok($updated, $message);
+            $message = !empty($result['approval']['final'])
+                ? 'Payroll approval chain completed'
+                : 'Approval recorded; forwarded to the next payroll approver';
+
+            return $this->ok($result, $message);
         } catch (\DomainException $e) {
             return $this->fail($e->getMessage(), 403, 'SEGREGATION_OF_DUTIES');
         } catch (\Throwable $e) {
@@ -478,7 +797,9 @@ class PayrollPeriodController extends ApiController
     {
         $db = \Config\Database::connect();
         $period = $this->findPeriodForTenant($db, (int) $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
         $reason = trim((string) ($this->getJsonInput()['reason'] ?? ''));
 
         try {
@@ -514,6 +835,7 @@ class PayrollPeriodController extends ApiController
             );
             $this->notifyPayrollBreakGlass((int) $period['company_id'], (int) $period['id'], $reason);
             Services::payroll()->finalize((int) $period['id']);
+
             return $this->ok(null, 'Payroll finalized through break-glass workflow');
         } catch (\InvalidArgumentException $e) {
             return $this->fail($e->getMessage(), 422, 'BREAK_GLASS_REASON_REQUIRED');
@@ -536,11 +858,14 @@ class PayrollPeriodController extends ApiController
                 ->get()->getResultArray();
             foreach ($users as $user) {
                 Services::notification()->send(
-                    (int) $user['id'], $companyId, 'payroll.break_glass',
+                    (int) $user['id'],
+                    $companyId,
+                    'payroll.break_glass',
                     'Payroll break-glass digunakan',
                     "Periode #{$periodId} difinalisasi darurat. Alasan: {$reason}",
                     ['payroll_period_id' => $periodId, 'severity' => 'CRITICAL'],
-                    "/payroll/periods/{$periodId}", true
+                    "/payroll/periods/{$periodId}",
+                    true
                 );
             }
         } catch (\Throwable $e) {
@@ -556,6 +881,7 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $bank = strtoupper((string) ($this->request->getGet('bank') ?? 'BCA'));
+
         try {
             $file = Services::payrollExporter()->bankTransfer($id, $bank);
         } catch (\Throwable $e) {
@@ -564,7 +890,8 @@ class PayrollPeriodController extends ApiController
 
         Services::audit()->forModule('PAYROLL')->log(
             action: 'payroll.export.bank',
-            entity: 'payroll_period', entityId: $id,
+            entity: 'payroll_period',
+            entityId: $id,
             description: "Download bank transfer ({$bank}) periode #{$id}",
             severity: 'NOTICE'
         );
@@ -583,6 +910,7 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $final = (int) ($this->request->getGet('final') ?? 0) === 1;
+
         try {
             $file = Services::payrollExporter()->esptPph21($id, $final);
         } catch (\Throwable $e) {
@@ -591,7 +919,8 @@ class PayrollPeriodController extends ApiController
 
         Services::audit()->forModule('PAYROLL')->log(
             action: 'payroll.export.pph21',
-            entity: 'payroll_period', entityId: $id,
+            entity: 'payroll_period',
+            entityId: $id,
             description: 'Download e-SPT PPh21 periode #' . $id . ($final ? ' (FINAL)' : ''),
             severity: 'NOTICE'
         );
@@ -610,9 +939,10 @@ class PayrollPeriodController extends ApiController
     {
         $id = (int) $id;
         $type = strtoupper((string) ($this->request->getGet('type') ?? 'TK'));
-        if (! in_array($type, ['TK', 'KES'], true)) {
+        if (!in_array($type, ['TK', 'KES'], true)) {
             return $this->fail('type harus TK atau KES', 422);
         }
+
         try {
             $file = $type === 'TK'
                 ? Services::payrollExporter()->bpjsKetenagakerjaan($id)
@@ -623,7 +953,8 @@ class PayrollPeriodController extends ApiController
 
         Services::audit()->forModule('PAYROLL')->log(
             action: 'payroll.export.bpjs_' . strtolower($type),
-            entity: 'payroll_period', entityId: $id,
+            entity: 'payroll_period',
+            entityId: $id,
             description: "Download BPJS {$type} periode #{$id}",
             severity: 'NOTICE'
         );
@@ -644,7 +975,9 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $period = $this->findPeriodForTenant($db, $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
 
         $payslips = $db->table('payslips p')
             ->select('p.id, p.take_home_pay, p.gross_earning, p.pph21_amount,'
@@ -668,26 +1001,36 @@ class PayrollPeriodController extends ApiController
             $totalPph += (float) $p['pph21_amount'];
 
             $bank = strtoupper((string) ($p['bank_name'] ?? ''));
-            if ($bank !== '') $bankBuckets[$bank] = ($bankBuckets[$bank] ?? 0) + 1;
+            if ($bank !== '') {
+                $bankBuckets[$bank] = ($bankBuckets[$bank] ?? 0) + 1;
+            }
 
             $miss = ['id' => $p['id'], 'name' => $p['full_name'], 'no' => $p['employee_number']];
-            if (empty($p['bank_account_encrypted'])) $missingAccount[] = $miss;
-            if (empty($p['npwp_encrypted']))         $missingNpwp[] = $miss;
-            if (empty($p['bpjs_kesehatan_no']))      $missingBpjsKes[] = $miss;
-            if (empty($p['bpjs_tk_no']))             $missingBpjsTk[] = $miss;
+            if (empty($p['bank_account_encrypted'])) {
+                $missingAccount[] = $miss;
+            }
+            if (empty($p['npwp_encrypted'])) {
+                $missingNpwp[] = $miss;
+            }
+            if (empty($p['bpjs_kesehatan_no'])) {
+                $missingBpjsKes[] = $miss;
+            }
+            if (empty($p['bpjs_tk_no'])) {
+                $missingBpjsTk[] = $miss;
+            }
         }
 
         return $this->ok([
-            'period'          => $period,
-            'employees'       => count($payslips),
-            'total_net'       => $totalNet,
-            'total_pph21'     => $totalPph,
-            'bank_breakdown'  => $bankBuckets,
-            'missing'         => [
+            'period' => $period,
+            'employees' => count($payslips),
+            'total_net' => $totalNet,
+            'total_pph21' => $totalPph,
+            'bank_breakdown' => $bankBuckets,
+            'missing' => [
                 'bank_account' => $missingAccount,
-                'npwp'         => $missingNpwp,
-                'bpjs_kes'     => $missingBpjsKes,
-                'bpjs_tk'      => $missingBpjsTk,
+                'npwp' => $missingNpwp,
+                'bpjs_kes' => $missingBpjsKes,
+                'bpjs_tk' => $missingBpjsTk,
             ],
             'supported_banks' => \App\Libraries\Payroll\PayrollExporter::supportedBanks(),
         ]);
@@ -702,7 +1045,9 @@ class PayrollPeriodController extends ApiController
         $id = (int) $id;
         $db = \Config\Database::connect();
         $period = $this->findPeriodForTenant($db, $id);
-        if (! $period) return $this->fail('Period not found', 404);
+        if (!$period) {
+            return $this->fail('Period not found', 404);
+        }
         if ($period['status'] !== 'PAID') {
             return $this->fail('Periode harus dalam status PAID sebelum melapor e-Bupot', 422);
         }
@@ -737,7 +1082,8 @@ class PayrollPeriodController extends ApiController
 
             Services::audit()->forModule('PAYROLL')->log(
                 action: 'payroll.ebupot_sync',
-                entity: 'payroll_period', entityId: $id,
+                entity: 'payroll_period',
+                entityId: $id,
                 description: "Sync e-Bupot PPh21 ke PJAP (Batch: {$batchId})"
             );
 
@@ -745,13 +1091,19 @@ class PayrollPeriodController extends ApiController
         } catch (\Throwable $e) {
             $db->table('payroll_periods')->where('id', $id)->where('company_id', (int) $period['company_id'])->update([
                 'ebupot_status' => 'FAILED',
-                'ebupot_error'  => $e->getMessage(),
+                'ebupot_error' => $e->getMessage(),
             ]);
+
             return $this->fail('Gagal sinkronisasi e-Bupot: ' . $e->getMessage(), 500);
         }
     }
 
     /** Resolve a payroll period only inside the active/selected tenant. */
+    private function findPeriodForCurrentTenant(int $id): ?array
+    {
+        return $this->findPeriodForTenant(\Config\Database::connect(), $id);
+    }
+
     private function findPeriodForTenant(\CodeIgniter\Database\BaseConnection $db, int $id): ?array
     {
         $companyId = $this->companyId();

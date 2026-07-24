@@ -1,14 +1,17 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from 'vue-toastification'
 import { PlusIcon, TrashIcon, PencilIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
 
 const toast = useToast()
+const auth = useAuthStore()
+const canManage = computed(() => auth.can('attendance.manage_devices'))
 const devices = ref([])
 const loading = ref(true)
 const showForm = ref(false)
-const formData = ref({ id: null, name: '', serial_number: '', ip_address: '', company_id: 1 }) // default company 1 for demo
+const formData = ref({ id: null, name: '', serial_number: '', ip_address: '' })
 
 async function fetchDevices() {
   loading.value = true
@@ -25,16 +28,19 @@ async function fetchDevices() {
 onMounted(fetchDevices)
 
 function openCreate() {
-  formData.value = { id: null, name: '', serial_number: '', ip_address: '', company_id: 1 }
+  if (!canManage.value) return
+  formData.value = { id: null, name: '', serial_number: '', ip_address: '' }
   showForm.value = true
 }
 
 function openEdit(d) {
+  if (!canManage.value) return
   formData.value = { ...d }
   showForm.value = true
 }
 
 async function save() {
+  if (!canManage.value) return
   try {
     if (formData.value.id) {
       await api.put(`/physical-devices/${formData.value.id}`, formData.value)
@@ -51,6 +57,7 @@ async function save() {
 }
 
 async function remove(id) {
+  if (!canManage.value) return
   if (!confirm('Hapus mesin ini? Semua data histori sinkronisasi log di mesin tidak akan bisa dicocokkan lagi jika dihapus.')) return
   try {
     await api.delete(`/physical-devices/${id}`)
@@ -75,7 +82,7 @@ async function forceSync() {
         <h1 class="text-2xl font-bold">Mesin Absensi Fisik (ADMS)</h1>
         <p class="text-gray-500 text-sm">Kelola mesin fingerprint/wajah ZKTeco/Solution</p>
       </div>
-      <button class="btn-primary" @click="openCreate">
+      <button v-if="canManage" class="btn-primary" @click="openCreate">
         <PlusIcon class="w-5 h-5 mr-1" /> Tambah Mesin
       </button>
     </div>
@@ -107,13 +114,13 @@ async function forceSync() {
             <td class="text-sm text-gray-500">
               <div class="flex items-center gap-2">
                 {{ d.last_sync_at || 'Belum pernah' }}
-                <button class="text-primary-600 hover:text-primary-800" title="Manual Sync" @click="forceSync">
+                <button v-if="canManage" class="text-primary-600 hover:text-primary-800" title="Manual Sync" @click="forceSync">
                   <ArrowPathIcon class="w-4 h-4" />
                 </button>
               </div>
             </td>
             <td>
-              <div class="flex gap-2">
+              <div v-if="canManage" class="flex gap-2">
                 <button class="text-gray-400 hover:text-primary-600" @click="openEdit(d)"><PencilIcon class="w-4 h-4" /></button>
                 <button class="text-gray-400 hover:text-rose-600" @click="remove(d.id)"><TrashIcon class="w-4 h-4" /></button>
               </div>

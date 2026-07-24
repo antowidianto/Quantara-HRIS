@@ -18,6 +18,7 @@ const props = defineProps({
   node:     { type: Object, required: true },
   expanded: { type: Object, required: true }, // { [id]: bool }
   depth:    { type: Number, default: 0 },
+  canManage: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['toggle', 'edit', 'view-budget'])
@@ -56,6 +57,7 @@ const indentStyle = computed(() => ({ paddingLeft: `${props.depth * 1.5 + 0.5}re
           <span class="sr-only">{{ t('cost_center_node.view_budget') }}</span>
         </button>
         <button
+          v-if="canManage"
           class="text-gray-400 hover:text-primary-600"
           @click="emit('edit', node)"
         >
@@ -72,6 +74,7 @@ const indentStyle = computed(() => ({ paddingLeft: `${props.depth * 1.5 + 0.5}re
         :node="child"
         :expanded="expanded"
         :depth="depth + 1"
+        :can-manage="canManage"
         @toggle="(id) => emit('toggle', id)"
         @edit="(n) => emit('edit', n)"
         @view-budget="(id) => emit('view-budget', id)"

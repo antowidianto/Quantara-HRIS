@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Libraries\Approval\Adapters\PayrollPeriodApprovalDomainAdapter;
 use App\Libraries\Approval\ApprovalDomainAdapterInterface;
 use App\Libraries\Approval\ApprovalDomainAdapterRegistry;
 use PHPUnit\Framework\TestCase;
@@ -10,7 +11,7 @@ final class ApprovalDomainAdapterRegistryTest extends TestCase
 {
     public function testResolvesRegisteredAdapter(): void
     {
-        $adapter = new class implements ApprovalDomainAdapterInterface {
+        $adapter = new class () implements ApprovalDomainAdapterInterface {
             public function module(): string
             {
                 return 'TEST';
@@ -33,5 +34,12 @@ final class ApprovalDomainAdapterRegistryTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('belum memiliki domain adapter');
         $registry->forModule('OVERTIME');
+    }
+
+    public function testDefaultRegistryContainsPayrollPeriodAdapter(): void
+    {
+        $adapter = (new ApprovalDomainAdapterRegistry())->forModule('PAYROLL');
+
+        $this->assertInstanceOf(PayrollPeriodApprovalDomainAdapter::class, $adapter);
     }
 }

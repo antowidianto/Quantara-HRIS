@@ -23,6 +23,7 @@ final class PayrollRoutes
         $routes->post('payroll-periods/(:num)/finalize', 'Payroll\PayrollPeriodController::finalize/$1', ['filter' => ['permission:payroll.finalize', 'idempotency:required']]);
         $routes->post('payroll-periods/(:num)/disburse', 'Payroll\DisbursementController::disburse/$1', ['filter' => ['permission:payroll.finalize', 'idempotency:required']]);
         $routes->get('payroll-periods/(:num)/disburse-status', 'Payroll\DisbursementController::checkStatus/$1', ['filter' => 'permission:payroll.view']);
+        $routes->get('payroll-periods/(:num)/approval-detail', 'Payroll\PayrollPeriodController::approvalDetail/$1', ['filter' => 'permission:payroll.view']);
         $routes->get('payroll-periods/(:num)/pending-approvals', 'Payroll\PayrollPeriodController::pendingApprovals/$1', ['filter' => 'permission:payroll.view']);
         $routes->get('payroll-periods/(:num)/export-summary', 'Payroll\PayrollPeriodController::exportSummary/$1', ['filter' => 'permission:payroll.view']);
         $routes->get('payroll-periods/(:num)/bank-export', 'Payroll\PayrollPeriodController::bankExport/$1', ['filter' => ['permission:payroll.view', 'privilegedapproval:PII_EXPORT', 'throttle:export']]);

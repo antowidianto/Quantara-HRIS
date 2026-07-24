@@ -3,7 +3,6 @@
 namespace App\Controllers\Api\V1\Attendance;
 
 use App\Controllers\Api\V1\ApiController;
-use Config\Services;
 
 class MachineSyncController extends ApiController
 {
@@ -23,7 +22,8 @@ class MachineSyncController extends ApiController
         // For security, this endpoint should require a special machine token or API key.
         // We'll assume a basic check against an environment API key for this internal service-to-service call.
         $apiKey = $this->request->getHeaderLine('X-Api-Key');
-        if ($apiKey !== env('ADMS_API_KEY', 'default-adms-secret')) {
+        $configuredApiKey = trim((string) env('ADMS_API_KEY', ''));
+        if ($configuredApiKey === '' || $apiKey === '' || !hash_equals($configuredApiKey, $apiKey)) {
             return $this->fail('Unauthorized middleware', 401);
         }
 
@@ -36,18 +36,24 @@ class MachineSyncController extends ApiController
         }
 
         $db = \Config\Database::connect();
-        
+
         // Check if device is registered
         $device = $db->table('attendance_devices')->where('serial_number', $deviceSn)->get()->getRowArray();
-        if (! $device) {
+        if (!$device) {
             return $this->fail('Device not registered', 404);
         }
 
         if ($device['status'] === 'OFFLINE') {
-            $db->table('attendance_devices')->where('id', $device['id'])->update(['status' => 'ONLINE']);
+            $db->table('attendance_devices')
+                ->where('id', $device['id'])
+                ->where('company_id', $device['company_id'])
+                ->update(['status' => 'ONLINE']);
         }
-        
-        $db->table('attendance_devices')->where('id', $device['id'])->update(['last_sync_at' => date('Y-m-d H:i:s')]);
+
+        $db->table('attendance_devices')
+            ->where('id', $device['id'])
+            ->where('company_id', $device['company_id'])
+            ->update(['last_sync_at' => date('Y-m-d H:i:s')]);
 
         $successCount = 0;
         foreach ($logs as $log) {
@@ -60,13 +66,16 @@ class MachineSyncController extends ApiController
                 ->where('employee_number', $employeeNumber)
                 ->get()->getRowArray();
 
-            if (! $emp) continue;
+            if (!$emp) {
+                continue;
+            }
 
             $date = date('Y-m-d', strtotime($timestamp));
             $time = date('H:i:s', strtotime($timestamp));
 
             // Check existing attendance for this day
             $existing = $db->table('attendances')
+                ->where('company_id', $device['company_id'])
                 ->where('employee_id', $emp['id'])
                 ->where('work_date', $date)
                 ->get()->getRowArray();
@@ -75,14 +84,17 @@ class MachineSyncController extends ApiController
                 // Determine if this is a clock-in or clock-out update
                 // Simple logic: if time is later than current clock_out or clock_out is null, update clock_out
                 $updateData = [];
-                if (! $existing['clock_out'] || strtotime($time) > strtotime($existing['clock_out'])) {
+                if (!$existing['clock_out'] || strtotime($time) > strtotime($existing['clock_out'])) {
                     $updateData['clock_out'] = $time;
                     $updateData['clock_out_source'] = 'MACHINE';
                     $updateData['updated_at'] = date('Y-m-d H:i:s');
                 }
-                
-                if (! empty($updateData)) {
-                    $db->table('attendances')->where('id', $existing['id'])->update($updateData);
+
+                if (!empty($updateData)) {
+                    $db->table('attendances')
+                        ->where('id', $existing['id'])
+                        ->where('company_id', $device['company_id'])
+                        ->update($updateData);
                     $successCount++;
                 }
             } else {
@@ -103,7 +115,7 @@ class MachineSyncController extends ApiController
 
         return $this->ok([
             'processed' => count($logs),
-            'inserted_or_updated' => $successCount
+            'inserted_or_updated' => $successCount,
         ], 'Logs synced');
     }
 }

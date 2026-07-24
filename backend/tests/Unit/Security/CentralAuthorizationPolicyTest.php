@@ -45,11 +45,11 @@ final class CentralAuthorizationPolicyTest extends TestCase
         }
     }
 
-    public function testOwnAttendanceIsJwtSelfServiceWithoutFunctionalRolePermission(): void
+    public function testOwnAttendanceUsesEmployeeOwnershipWithoutFunctionalRolePermission(): void
     {
         $routes = RouteSource::all();
         self::assertMatchesRegularExpression(
-            "/get\('attendance\/my',\s*'Attendance\\\\AttendanceController::my'\);/s",
+            "/get\('attendance\/my',\s*'Attendance\\\\AttendanceController::my',\s*\['filter' => 'ownership:employee'\]\);/s",
             $routes,
         );
         self::assertStringNotContainsString(

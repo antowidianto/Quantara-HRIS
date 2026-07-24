@@ -14,12 +14,9 @@ final class SyncRbacMenuCatalog extends Migration
         if ($this->db->tableExists('menus')) {
             $service = new RbacMenuCatalogService($this->db);
             $service->sync();
-            $audit = $service->audit();
-            if ($audit['missing_codes'] !== [] || $audit['conflicting_codes'] !== []
-                || $audit['unknown_permissions'] !== [] || $audit['unmapped_codes'] !== []
-            ) {
-                throw new \RuntimeException('RBAC menu catalog synchronization is incomplete');
-            }
+            // Do not audit against the evolving runtime catalog here. Later
+            // migrations add self-service permissions; a final resync migration
+            // validates the complete catalog after those definitions exist.
         }
     }
 

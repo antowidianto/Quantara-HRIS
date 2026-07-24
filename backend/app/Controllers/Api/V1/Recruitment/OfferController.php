@@ -33,9 +33,13 @@ class OfferController extends ApiController
      */
     public function listForCandidate($candidateId = null)
     {
-        if (! $this->canView()) return $this->fail('Forbidden', 403);
+        if (!$this->canView()) {
+            return $this->fail('Forbidden', 403);
+        }
         $candidateId = (int) $candidateId;
-        if ($candidateId <= 0) return $this->fail('Invalid candidate id', 400);
+        if ($candidateId <= 0) {
+            return $this->fail('Invalid candidate id', 400);
+        }
 
         // Verify candidate ownership
         $db = \Config\Database::connect();
@@ -43,8 +47,10 @@ class OfferController extends ApiController
             ->where('id', $candidateId)
             ->where('deleted_at IS NULL')
             ->get()->getRowArray();
-        if (! $cand) return $this->fail('Candidate not found', 404);
-        if (! $this->tenant()->isSuperAdmin() && (int) $cand['company_id'] !== $this->tenant()->getCompanyId()) {
+        if (!$cand) {
+            return $this->fail('Candidate not found', 404);
+        }
+        if (!$this->tenant()->isSuperAdmin() && (int) $cand['company_id'] !== $this->tenant()->getCompanyId()) {
             return $this->fail('Forbidden', 403);
         }
 
@@ -73,7 +79,9 @@ class OfferController extends ApiController
      */
     public function index()
     {
-        if (! $this->canView()) return $this->fail('Forbidden', 403);
+        if (!$this->canView()) {
+            return $this->fail('Forbidden', 403);
+        }
         $db = \Config\Database::connect();
         $page = max(1, (int) ($this->request->getGet('page') ?? 1));
         $perPage = min(100, max(1, (int) ($this->request->getGet('per_page') ?? 30)));
@@ -96,6 +104,7 @@ class OfferController extends ApiController
         $rows = $b->orderBy('o.created_at', 'DESC')
             ->limit($perPage, ($page - 1) * $perPage)
             ->get()->getResultArray();
+
         return $this->paginated($rows, $total, $page, $perPage);
     }
 
@@ -104,15 +113,19 @@ class OfferController extends ApiController
      */
     public function show($id = null)
     {
-        if (! $this->canView()) return $this->fail('Forbidden', 403);
+        if (!$this->canView()) {
+            return $this->fail('Forbidden', 403);
+        }
+
         try {
             $offer = Services::offer()->loadOffer((int) $id);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 404);
         }
-        if (! $this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
+        if (!$this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
             return $this->fail('Forbidden', 403);
         }
+
         return $this->ok($offer);
     }
 
@@ -121,20 +134,21 @@ class OfferController extends ApiController
      */
     public function createForCandidate($candidateId = null)
     {
-        if (! $this->canManage()) return $this->fail('Forbidden — butuh recruitment.offer.manage', 403);
+        if (!$this->canManage()) {
+            return $this->fail('Forbidden — butuh recruitment.offer.manage', 403);
+        }
         $candidateId = (int) $candidateId;
-        $candidate = \Config\Database::connect()->table('candidates')->where('id', $candidateId)
-            ->where('deleted_at IS NULL')->get()->getRowArray();
-        if (! $candidate) return $this->fail('Candidate not found', 404);
-        if (! $this->tenant()->isSuperAdmin()
-            && (int) $candidate['company_id'] !== $this->tenant()->getCompanyId()) {
-            return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
         }
         $data = $this->getJsonInput();
         $data['candidate_id'] = $candidateId;
+        $data['company_id'] = $companyId;
 
         try {
             $offer = Services::offer()->create($data, $this->userId());
+
             return $this->ok($offer, "Offer DRAFT {$offer['offer_number']} dibuat", 201);
         } catch (\InvalidArgumentException $e) {
             return $this->fail($e->getMessage(), 422, 'INVALID_INPUT');
@@ -148,15 +162,19 @@ class OfferController extends ApiController
      */
     public function update($id = null)
     {
-        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        if (!$this->canManage()) {
+            return $this->fail('Forbidden', 403);
+        }
         $id = (int) $id;
+
         try {
             // Verify ownership
             $offer = Services::offer()->loadOffer($id);
-            if (! $this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
+            if (!$this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
                 return $this->fail('Forbidden', 403);
             }
             $updated = Services::offer()->update($id, $this->getJsonInput(), $this->userId());
+
             return $this->ok($updated, 'Offer updated');
         } catch (\InvalidArgumentException $e) {
             return $this->fail($e->getMessage(), 422);
@@ -170,24 +188,24 @@ class OfferController extends ApiController
      */
     public function delete($id = null)
     {
-        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        if (!$this->canManage()) {
+            return $this->fail('Forbidden', 403);
+        }
         $id = (int) $id;
+
         try {
             $offer = Services::offer()->loadOffer($id);
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 404);
         }
-        if (! $this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
+        if (!$this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
             return $this->fail('Forbidden', 403);
         }
         if ($offer['status'] !== 'DRAFT') {
-            return $this->fail("Hanya offer DRAFT yang bisa dihapus. Untuk SENT, pakai withdraw.", 422);
+            return $this->fail('Hanya offer DRAFT yang bisa dihapus. Untuk SENT, pakai withdraw.', 422);
         }
-        $now = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('candidate_offers')->where('id', $id)->update([
-            'deleted_at' => $now,
-            'updated_at' => $now,
-        ]);
+        Services::offer()->softDeleteDraft($id, (int) $offer['company_id']);
+
         try {
             Services::audit()->forModule('RECRUITMENT')->log(
                 action: 'offer.delete',
@@ -196,7 +214,9 @@ class OfferController extends ApiController
                 description: "Hapus offer DRAFT {$offer['offer_number']}",
                 severity: 'NOTICE',
             );
-        } catch (\Throwable $e) {}
+        } catch (\Throwable $e) {
+        }
+
         return $this->ok(null, 'Deleted');
     }
 
@@ -205,16 +225,20 @@ class OfferController extends ApiController
      */
     public function send($id = null)
     {
-        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        if (!$this->canManage()) {
+            return $this->fail('Forbidden', 403);
+        }
         $id = (int) $id;
+
         try {
             $offer = Services::offer()->loadOffer($id);
-            if (! $this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
+            if (!$this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
                 return $this->fail('Forbidden', 403);
             }
             $data = $this->getJsonInput();
             $note = isset($data['note']) ? trim((string) $data['note']) : null;
             $submitted = Services::offer()->send($id, $this->userId(), $note ?: null);
+
             return $this->ok($submitted, "Offer {$submitted['offer_number']} diajukan untuk approval");
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
@@ -228,18 +252,22 @@ class OfferController extends ApiController
      */
     public function respond($id = null)
     {
-        if (! $this->canRespond()) return $this->fail('Forbidden — butuh recruitment.offer.respond', 403);
+        if (!$this->canRespond()) {
+            return $this->fail('Forbidden — butuh recruitment.offer.respond', 403);
+        }
         $id = (int) $id;
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'decision' => 'required|in_list[ACCEPTED,REJECTED]',
-            'note'     => 'permit_empty|max_length[2000]',
+            'note' => 'permit_empty|max_length[2000]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         try {
             $offer = Services::offer()->loadOffer($id);
-            if (! $this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
+            if (!$this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
                 return $this->fail('Forbidden', 403);
             }
             $result = Services::offer()->recordResponse(
@@ -249,6 +277,7 @@ class OfferController extends ApiController
                 $valid['note'] ?? null,
                 $data['rejection_reason'] ?? null,
             );
+
             return $this->ok($result, "Offer response tercatat: {$valid['decision']}");
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
@@ -260,20 +289,25 @@ class OfferController extends ApiController
      */
     public function withdraw($id = null)
     {
-        if (! $this->canManage()) return $this->fail('Forbidden', 403);
+        if (!$this->canManage()) {
+            return $this->fail('Forbidden', 403);
+        }
         $id = (int) $id;
         $data = $this->getJsonInput();
         $valid = $this->validateOrFail($data, [
             'reason' => 'required|min_length[5]|max_length[1000]',
         ]);
-        if (! $valid) return null;
+        if (!$valid) {
+            return null;
+        }
 
         try {
             $offer = Services::offer()->loadOffer($id);
-            if (! $this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
+            if (!$this->tenant()->isSuperAdmin() && (int) $offer['company_id'] !== $this->tenant()->getCompanyId()) {
                 return $this->fail('Forbidden', 403);
             }
             $result = Services::offer()->withdraw($id, $this->userId(), $valid['reason']);
+
             return $this->ok($result, 'Offer withdrawn');
         } catch (\Throwable $e) {
             return $this->fail($e->getMessage(), 422);
@@ -285,6 +319,7 @@ class OfferController extends ApiController
     private function canView(): bool
     {
         $t = $this->tenant();
+
         return $t->isSuperAdmin()
             || $t->hasPermission('recruitment.offer.view')
             || $t->hasPermission('recruitment.offer.manage')
@@ -295,6 +330,7 @@ class OfferController extends ApiController
     private function canManage(): bool
     {
         $t = $this->tenant();
+
         return $t->isSuperAdmin()
             || $t->hasPermission('recruitment.offer.manage')
             || $t->hasPermission('recruitment.manage');
@@ -303,6 +339,7 @@ class OfferController extends ApiController
     private function canRespond(): bool
     {
         $t = $this->tenant();
+
         return $t->isSuperAdmin()
             || $t->hasPermission('recruitment.offer.respond')
             || $t->hasPermission('recruitment.offer.manage')

@@ -35,8 +35,11 @@ abstract class MasterCrudController extends ApiController
         if ($search !== '') {
             $builder->groupStart();
             foreach ($this->searchableColumns() as $i => $col) {
-                if ($i === 0) $builder->like($col, $search);
-                else $builder->orLike($col, $search);
+                if ($i === 0) {
+                    $builder->like($col, $search);
+                } else {
+                    $builder->orLike($col, $search);
+                }
             }
             $builder->groupEnd();
         }
@@ -52,12 +55,16 @@ abstract class MasterCrudController extends ApiController
 
     public function show($id = null)
     {
-        $db = \Config\Database::connect();
-        $row = $db->table($this->table)->where('id', (int) $id)->get()->getRowArray();
-        if (! $row) return $this->fail('Not found', 404);
-        if (isset($row['company_id']) && ! $this->tenant()->isSuperAdmin() && (int) $row['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
         }
+        $db = \Config\Database::connect();
+        $row = $db->table($this->table)->where('id', (int) $id)->where('company_id', $companyId)->get()->getRowArray();
+        if (!$row) {
+            return $this->fail('Not found', 404);
+        }
+
         return $this->ok($row);
     }
 
@@ -66,13 +73,19 @@ abstract class MasterCrudController extends ApiController
         $data = $this->getJsonInput();
         if ($this->createRules) {
             $valid = $this->validateOrFail($data, $this->createRules);
-            if (! $valid) return null;
+            if (!$valid) {
+                return null;
+            }
         }
         $insert = array_intersect_key($data, array_flip($this->fillable));
         $companyId = $this->requireCompanyId();
-        if ($companyId === null) return null;
+        if ($companyId === null) {
+            return null;
+        }
         $insert['company_id'] = $companyId;
-        if ($this->hasIsActive && ! isset($insert['is_active'])) $insert['is_active'] = 1;
+        if ($this->hasIsActive && !isset($insert['is_active'])) {
+            $insert['is_active'] = 1;
+        }
         $insert['created_at'] = date('Y-m-d H:i:s');
         $insert['updated_at'] = date('Y-m-d H:i:s');
 
@@ -87,26 +100,32 @@ abstract class MasterCrudController extends ApiController
                 $insert,
                 "Membuat data master {$this->auditEntity}: " . ($insert['name'] ?? $insert['code'] ?? '#' . $id)
             );
-        return $this->ok($db->table($this->table)->where('id', $id)->get()->getRowArray(), 'Created', 201);
+
+        return $this->ok($db->table($this->table)->where('id', $id)->where('company_id', $companyId)->get()->getRowArray(), 'Created', 201);
     }
 
     public function update($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
+        }
         $db = \Config\Database::connect();
-        $existing = $db->table($this->table)->where('id', $id)->get()->getRowArray();
-        if (! $existing) return $this->fail('Not found', 404);
-        if (isset($existing['company_id']) && ! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
+        $existing = $db->table($this->table)->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
+        if (!$existing) {
+            return $this->fail('Not found', 404);
         }
         $data = $this->getJsonInput();
         if ($this->updateRules) {
             $valid = $this->validateOrFail($data, $this->updateRules);
-            if (! $valid) return null;
+            if (!$valid) {
+                return null;
+            }
         }
         $update = array_intersect_key($data, array_flip($this->fillable));
         $update['updated_at'] = date('Y-m-d H:i:s');
-        $db->table($this->table)->where('id', $id)->update($update);
+        $db->table($this->table)->where('id', $id)->where('company_id', $companyId)->update($update);
         // Catat hanya field yang benar-benar di-submit untuk diff yang bersih
         $beforeFiltered = array_intersect_key($existing, $update);
         Services::audit()
@@ -118,25 +137,29 @@ abstract class MasterCrudController extends ApiController
                 $update,
                 "Mengubah data master {$this->auditEntity}: " . ($existing['name'] ?? $existing['code'] ?? '#' . $id)
             );
-        return $this->ok($db->table($this->table)->where('id', $id)->get()->getRowArray(), 'Updated');
+
+        return $this->ok($db->table($this->table)->where('id', $id)->where('company_id', $companyId)->get()->getRowArray(), 'Updated');
     }
 
     public function delete($id = null)
     {
         $id = (int) $id;
+        $companyId = $this->requireCompanyId();
+        if ($companyId === null) {
+            return null;
+        }
         $db = \Config\Database::connect();
-        $existing = $db->table($this->table)->where('id', $id)->get()->getRowArray();
-        if (! $existing) return $this->fail('Not found', 404);
-        if (isset($existing['company_id']) && ! $this->tenant()->isSuperAdmin() && (int) $existing['company_id'] !== $this->companyId()) {
-            return $this->fail('Forbidden', 403);
+        $existing = $db->table($this->table)->where('id', $id)->where('company_id', $companyId)->get()->getRowArray();
+        if (!$existing) {
+            return $this->fail('Not found', 404);
         }
         if ($this->hasDeletedAt) {
-            $db->table($this->table)->where('id', $id)->update([
+            $db->table($this->table)->where('id', $id)->where('company_id', $companyId)->update([
                 'deleted_at' => date('Y-m-d H:i:s'),
-                'is_active'  => 0,
+                'is_active' => 0,
             ]);
         } else {
-            $db->table($this->table)->where('id', $id)->delete();
+            $db->table($this->table)->where('id', $id)->where('company_id', $companyId)->delete();
         }
         Services::audit()
             ->forModule('MASTER')
@@ -146,6 +169,7 @@ abstract class MasterCrudController extends ApiController
                 $existing,
                 "Menghapus data master {$this->auditEntity}: " . ($existing['name'] ?? $existing['code'] ?? '#' . $id)
             );
+
         return $this->ok(null, 'Deleted');
     }
 

@@ -30,6 +30,7 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 const props = defineProps({
   departmentId:   { type: Number, required: true },
   allDepartments: { type: Array,  default: () => [] },
+  canManage:      { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'navigate', 'changed'])
@@ -298,7 +299,7 @@ function tierLabel(tier) {
             <ul class="divide-y divide-slate-100">
               <li v-for="e in filteredEmployees" :key="e.id"
                 class="px-4 py-2.5 grid grid-cols-12 gap-3 items-center hover:bg-slate-50 transition-colors"
-                :draggable="true"
+                :draggable="canManage"
                 @dragstart="onEmpDragStart($event, e)"
                 @dragend="onEmpDragEnd">
                 <!-- Karyawan -->
@@ -319,6 +320,7 @@ function tierLabel(tier) {
                 <!-- Aksi -->
                 <div class="col-span-3 flex items-center justify-end gap-1">
                   <button
+                    v-if="canManage"
                     type="button" class="px-2.5 py-1 text-xs rounded border border-slate-200 text-slate-700 hover:bg-primary-50 hover:border-primary-300 hover:text-primary-700 inline-flex items-center gap-1"
                     v-bind="{ title: t('org_structure.detail_move_title_attr') }"
                     @click="openMove(e)"
@@ -391,7 +393,7 @@ function tierLabel(tier) {
     </div>
 
     <!-- ── Sub-modal: Pilih dept tujuan ─────────────────────────── -->
-    <div v-if="moveEmp" class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+    <div v-if="moveEmp && canManage" class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
       @click.self="moveEmp = null">
       <div class="bg-white rounded-lg shadow-xl w-full max-w-md" role="dialog" aria-modal="true" v-bind="{ 'aria-label': t('org_structure.detail_move_modal') }">
         <div class="px-5 py-3 border-b flex items-center justify-between">
