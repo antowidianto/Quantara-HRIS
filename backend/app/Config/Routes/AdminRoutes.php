@@ -43,6 +43,7 @@ final class AdminRoutes
         $routes->post('admin/tenants/(:num)/suspend',          'Admin\AdminTenantController::suspend/$1', ['filter' => 'superadmin']);
         $routes->post('admin/tenants/(:num)/unsuspend',        'Admin\AdminTenantController::unsuspend/$1', ['filter' => 'superadmin']);
         $routes->get('admin/metrics/saas',                     'Admin\AdminTenantController::saasMetrics', ['filter' => 'superadmin']);
+        $routes->get('admin/operations/overview',              'Admin\SuperAdminOperationsController::overview', ['filter' => 'superadmin']);
 
         // ─── SaaS / S2.3 — Tenant Data Export (UU PDP / GDPR) ──────
         // Self-service tenant: HR admin request export semua data company.

@@ -309,6 +309,7 @@ const routes = [
       { path: 'admin/tenants/:id',     name: 'admin-tenant-detail', component: () => import('@/views/Admin/TenantDetail.vue'), props: true },
       { path: 'admin/saas-metrics',    name: 'admin-saas-metrics', component: () => import('@/views/Admin/SaasMetrics.vue') },
       { path: 'admin/customer-health', name: 'admin-customer-health', component: () => import('@/views/Admin/CustomerHealth.vue') },
+      { path: 'admin/operations', name: 'admin-operations', component: () => import('@/views/Admin/SuperAdminDashboard.vue'), meta: { superAdminOnly: true } },
 
       // Migration #076 — Menu Manager (sidebar dinamis)
       { path: 'admin/menus', name: 'menus', component: () => import('@/views/Admin/Menus.vue') },
@@ -386,7 +387,7 @@ const employeeOnlyRouteNames = new Set([
 ])
 
 const superAdminRouteNames = new Set([
-  'companies', 'admin-tenants', 'admin-tenant-detail', 'admin-saas-metrics', 'admin-customer-health',
+  'companies', 'admin-tenants', 'admin-tenant-detail', 'admin-saas-metrics', 'admin-customer-health', 'admin-operations',
 ])
 
 function applyRouteAccessDefaults(routeList) {

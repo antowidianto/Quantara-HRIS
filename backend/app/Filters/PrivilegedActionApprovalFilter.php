@@ -13,7 +13,15 @@ final class PrivilegedActionApprovalFilter implements FilterInterface
     public function before(RequestInterface $request,$arguments=null)
     {
         $group=strtoupper((string)($arguments[0]??'')); if(!in_array($group,['RBAC','PII_EXPORT','INTEGRATION'],true))return $this->fail('Privileged action group invalid',500);
-        $tenant=Services::tenant();$companyId=(int)$tenant->getCompanyId();
+        $tenant=Services::tenant();
+        // Super Admin adalah break-glass operator untuk debugging dan
+        // pemulihan akses. Mutasi RBAC-nya diterapkan langsung oleh
+        // controller (yang tetap melakukan validasi tenant dan audit log).
+        // PII export serta integration secret tetap memakai maker-checker.
+        if ($group === 'RBAC' && $tenant->isSuperAdmin()) {
+            return null;
+        }
+        $companyId=(int)$tenant->getCompanyId();
         if($companyId<=0){$body=method_exists($request,'getJSON')?$request->getJSON(true):[];$companyId=(int)($request->getHeaderLine('X-Company-Id')?:((is_array($body)?$body['company_id']??0:0)));}
         if($companyId<=0)return $this->fail('Company target wajib untuk privileged action',422);
         $method=strtoupper($request->getMethod());$path='/'.ltrim((string)$request->getUri()->getPath(),'/');$query=(string)$request->getUri()->getQuery();$body=(string)$request->getBody();

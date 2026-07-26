@@ -15,7 +15,7 @@ Audit ini menyisir batas akses pada backend dan frontend HRIS, meliputi:
 - approval payroll, notifikasi, upload, perangkat absensi, master data, recruitment, asset, serta import;
 - static security gates untuk route, permission, akses database controller, data sensitif, dan tenant scope.
 
-Pemeriksaan otomatis mencakup **366 file backend** dan **957 route API**. Pemeriksaan manual difokuskan pada jalur yang melakukan baca/tulis data tenant, menerima ID dari client, memakai nama tabel dinamis, atau menampilkan aksi mutasi di UI.
+Pemeriksaan otomatis mencakup **369 file backend** dan **958 route API**. Pemeriksaan manual difokuskan pada jalur yang melakukan baca/tulis data tenant, menerima ID dari client, memakai nama tabel dinamis, atau menampilkan aksi mutasi di UI.
 
 ## Temuan dan eksekusi perbaikan
 
@@ -40,6 +40,7 @@ Pemeriksaan otomatis mencakup **366 file backend** dan **957 route API**. Pemeri
 | AUTH-017 | High | Web session refresh | Refresh token yang ditolak masuk kembali ke interceptor 401 yang sama, membuat promise menunggu dirinya sendiri sementara polling notifikasi terus menghasilkan 401. | Endpoint auth dikecualikan dari retry recursion, access token di-refresh proaktif, refresh paralel memakai satu promise, sesi invalid fail-closed ke login, dan polling notifikasi dihentikan. | Fixed |
 | RBAC-018 | High | Live authorization state | API langsung memakai permission terbaru, tetapi menu, tombol, filter, dan data yang sudah dimuat masih memakai snapshot saat login sampai reload. | Snapshot otorisasi ringan disinkronkan tiap 15 detik serta saat tab kembali aktif/fokus; perubahan me-refresh menu, me-remount modul agar data lama dibuang, dan memindahkan user dari route yang sudah tidak diizinkan. | Fixed |
 | TEN-019 | Critical | Global role template | Mengedit system role global dari konteks satu tenant dapat mengubah permission seluruh tenant yang memakai role tersebut. | System role memakai clone-on-write: edit pertama membuat role lokal, memindahkan user dan referensi approval chain tenant tersebut, sementara template global dan tenant lain tetap utuh; permission `super_admin` dibuat immutable karena merupakan break-glass bypass. | Fixed |
+| RBAC-020 | Medium | Privileged approval | Debugging permission oleh Super Admin masih membuat request maker-checker sehingga pemulihan akses membutuhkan alur panjang. | Filter privileged action melewati approval hanya untuk group `RBAC` ketika aktor adalah Super Admin; controller tetap memvalidasi tenant dan mencatat audit kritis. User lain tetap melalui approval, sedangkan ekspor PII dan integration secret tidak ikut dibypass. | Fixed |
 
 ## Model pembatasan yang berlaku
 
@@ -61,17 +62,17 @@ Pemeriksaan otomatis mencakup **366 file backend** dan **957 route API**. Pemeri
 
 ## Catatan scanner dan baseline historis
 
-Tenant scanner saat ini melaporkan **0 temuan baru**. Terdapat **624 fingerprint baseline historis** yang dilewati oleh strict gate. Angka ini adalah sinyal heuristik lama, bukan 624 kebocoran terkonfirmasi: sebagian berasal dari tabel global, child table yang discope lewat parent, query yang sudah dibatasi sebelumnya dalam builder, atau pola yang telah ditinjau manual. Jalur eksternal berisiko tinggi dan seluruh query dinamis yang ditemukan pada audit ini sudah diperbaiki. Baseline tetap dipertahankan agar setiap tambahan pola baru membuat CI gagal, sambil refactor repository historis dapat dilakukan bertahap tanpa mematikan gate.
+Tenant scanner saat ini melaporkan **0 temuan baru**. Terdapat **626 fingerprint yang telah direview** dan dilewati oleh strict gate. Angka ini adalah sinyal heuristik, bukan 626 kebocoran terkonfirmasi: sebagian berasal dari tabel global, child table yang discope lewat parent, query yang sudah dibatasi sebelumnya dalam builder, atau pola yang telah ditinjau manual. Dua fingerprint baru adalah helper agregasi lintas-tenant read-only pada Super Admin Operations yang hanya dapat dicapai melalui endpoint `jwt + superadmin`. Baseline tetap dipertahankan agar setiap tambahan pola baru membuat CI gagal, sambil refactor repository historis dapat dilakukan bertahap tanpa mematikan gate.
 
 ## Hasil verifikasi
 
 | Pemeriksaan | Hasil |
 |---|---|
-| PHPUnit backend | 1.259 test, 3.833 assertion, lulus |
-| Frontend unit test | 14 file, 64 test, lulus; termasuk live RBAC sync, session refresh, `permissionAny`, super-admin, dan employee-only guard |
-| Route policy gate | 957 route, 0 route terlindungi tanpa policy |
+| PHPUnit backend | 1.264 test, 3.857 assertion, lulus |
+| Frontend unit test | 15 file, 66 test, lulus; termasuk Super Admin Operations, live RBAC sync, session refresh, `permissionAny`, super-admin, dan employee-only guard |
+| Route policy gate | 958 route, 0 route terlindungi tanpa policy |
 | Permission registry gate | Lulus; seluruh permission route terdaftar |
-| Tenant leak strict gate | 366 file, 0 temuan baru |
+| Tenant leak strict gate | 369 file, 0 temuan baru |
 | Controller DB access gate | 0 penambahan direct DB access di luar baseline |
 | Sensitive repository gate | Lulus |
 | Migration static/runtime SQLite | Lulus |

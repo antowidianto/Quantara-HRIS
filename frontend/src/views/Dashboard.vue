@@ -5,6 +5,7 @@ import api from '@/api/client'
 import { useI18n } from '@/locales'
 import { ClockIcon, CalendarDaysIcon, CurrencyDollarIcon, GiftIcon, CakeIcon } from '@heroicons/vue/24/outline'
 import AttendanceHeatmap from '@/components/AttendanceHeatmap.vue'
+import SuperAdminDashboard from '@/views/Admin/SuperAdminDashboard.vue'
 
 const auth = useAuthStore()
 const { t } = useI18n()
@@ -16,6 +17,10 @@ const upcomingEvents = ref([])     // birthday + anniversary 30 hari ke depan
 const loading = ref(true)
 
 onMounted(async () => {
+  if (auth.isSuperAdmin) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     const tasks = [
@@ -67,7 +72,8 @@ function fmtCurrency(v) {
 </script>
 
 <template>
-  <div>
+  <SuperAdminDashboard v-if="auth.isSuperAdmin" />
+  <div v-else>
     <h1 class="text-2xl font-bold text-gray-900">{{ t('dashboard.greeting', { name: auth.user?.name?.split(' ')[0] }) }}</h1>
     <p class="text-gray-500 mb-6">{{ t('dashboard.subtitle') }}</p>
 

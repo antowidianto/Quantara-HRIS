@@ -240,7 +240,8 @@ function changed(before, after) {
             Persetujuan Perubahan Role
           </h2>
           <p class="mt-0.5 text-xs text-gray-500">
-            Status perubahan role dan permission yang melalui proses maker-checker.
+            Super Admin menerapkan perubahan RBAC langsung. Daftar ini menyimpan riwayat request
+            maker-checker dari pengguna non-Super Admin.
           </p>
         </div>
         <button type="button" class="btn-secondary inline-flex items-center gap-2 text-xs"
@@ -258,7 +259,9 @@ function changed(before, after) {
         class="px-5 py-8 text-center text-sm text-gray-400">
         Belum ada permintaan persetujuan perubahan role.
       </div>
-      <div v-else class="divide-y divide-gray-100">
+      <div v-else
+        class="max-h-[420px] divide-y divide-gray-100 overflow-y-auto overscroll-contain"
+        aria-label="Riwayat persetujuan perubahan role">
         <article v-for="request in approvalRequests" :key="request.id"
           class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center">
           <div class="min-w-0">
