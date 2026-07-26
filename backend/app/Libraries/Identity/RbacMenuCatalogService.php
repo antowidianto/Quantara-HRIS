@@ -167,6 +167,7 @@ final class RbacMenuCatalogService
         foreach (array_merge(self::SELF_SERVICE_REQUIREMENTS, self::LEGACY_REQUIREMENTS) as $code => $permission) {
             $this->db->table('menus')->where('company_id IS NULL')->where('code', $code)->update([
                 'permission' => $permission,
+                'super_admin_only' => 0,
                 'updated_at' => $now,
             ]);
             $updated += $this->db->affectedRows();

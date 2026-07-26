@@ -43,6 +43,16 @@ final class AdminRoutes
         $routes->post('admin/tenants/(:num)/suspend',          'Admin\AdminTenantController::suspend/$1', ['filter' => 'superadmin']);
         $routes->post('admin/tenants/(:num)/unsuspend',        'Admin\AdminTenantController::unsuspend/$1', ['filter' => 'superadmin']);
         $routes->get('admin/metrics/saas',                     'Admin\AdminTenantController::saasMetrics', ['filter' => 'superadmin']);
+        $routes->get('admin/operations/overview',              'Admin\SuperAdminOperationsController::overview', ['filter' => 'superadmin']);
+        $routes->get('admin/dashboard-builder/catalog',         'Admin\DashboardBuilderController::catalog', ['filter' => 'superadmin']);
+        $routes->get('admin/dashboard-builder/templates',       'Admin\DashboardBuilderController::index', ['filter' => 'superadmin']);
+        $routes->get('admin/dashboard-builder/templates/(:num)','Admin\DashboardBuilderController::show/$1', ['filter' => 'superadmin']);
+        $routes->post('admin/dashboard-builder/templates',      'Admin\DashboardBuilderController::create', ['filter' => ['superadmin', 'idempotency:required']]);
+        $routes->put('admin/dashboard-builder/templates/(:num)','Admin\DashboardBuilderController::update/$1', ['filter' => ['superadmin', 'idempotency:required']]);
+        $routes->post('admin/dashboard-builder/templates/(:num)/publish', 'Admin\DashboardBuilderController::publish/$1', ['filter' => ['superadmin', 'idempotency:required']]);
+        $routes->delete('admin/dashboard-builder/templates/(:num)', 'Admin\DashboardBuilderController::delete/$1', ['filter' => ['superadmin', 'idempotency:required']]);
+        $routes->post('admin/dashboard-builder/preview',        'Admin\DashboardBuilderController::preview', ['filter' => 'superadmin']);
+        $routes->get('dashboard-config/me',                     'Admin\DashboardBuilderController::mine', ['filter' => 'ownership:account']);
 
         // ─── SaaS / S2.3 — Tenant Data Export (UU PDP / GDPR) ──────
         // Self-service tenant: HR admin request export semua data company.

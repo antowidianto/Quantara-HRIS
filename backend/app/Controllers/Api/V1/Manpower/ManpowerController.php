@@ -611,6 +611,43 @@ class ManpowerController extends ApiController
     }
 
     /**
+     * POST /manpower-requests/(:num)/revise
+     *
+     * Kembalikan MPP REJECTED/CANCELLED ke DRAFT supaya bisa diperbaiki
+     * dan diajukan ulang tanpa kehilangan planned assets, nomor referensi,
+     * dan konteks pengajuan sebelumnya.
+     *
+     * Body: { "note": "opsional — alasan/ringkasan perbaikan" }
+     */
+    public function revise($id = null)
+    {
+        if (! $this->canSubmit()) return $this->fail('Forbidden: butuh permission mpp.submit', 403);
+        $row = $this->loadOrFail((int) $id);
+        if (! $row) return $this->response;
+        if ((int) $row['requested_by_user_id'] !== $this->userId()
+            && ! $this->tenant()->isSuperAdmin()
+            && ! $this->canApprove()) {
+            return $this->fail('Hanya pengaju atau approver yang bisa merevisi MPP', 403);
+        }
+        $data = $this->getJsonInput();
+        $note = isset($data['note']) ? mb_substr(trim((string) $data['note']), 0, 500) : '';
+        try {
+            Services::manpower()->revise((int) $id, $this->userId(), $note ?: null);
+        } catch (\Throwable $e) {
+            return $this->fail($e->getMessage(), 422);
+        }
+        Services::audit()->forModule('RECRUITMENT')->log(
+            action: 'mpp.revise', entity: 'manpower_request', entityId: (int) $id,
+            before: ['status' => $row['status']],
+            after: ['status' => 'DRAFT'],
+            description: "Revisi MPP {$row['reference_number']} dari {$row['status']} kembali ke DRAFT"
+                . ($note !== '' ? ": {$note}" : ''),
+            severity: 'NOTICE'
+        );
+        return $this->ok(['status' => 'DRAFT'], 'MPP dikembalikan ke DRAFT untuk direvisi');
+    }
+
+    /**
      * Talent Acquisition: convert MPP APPROVED ke job_postings.
      * Bisa dipanggil berkali-kali sampai semua headcount teralokasi.
      */

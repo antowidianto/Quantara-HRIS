@@ -228,7 +228,7 @@ watch(() => auth.user?.id, (newId, oldId) => {
   <div class="min-h-screen flex bg-gray-50">
     <!-- Sidebar -->
     <aside :class="[
-      'fixed inset-y-0 left-0 z-30 w-64 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800 border-r border-slate-800/60 shadow-xl transform transition-transform lg:translate-x-0 lg:static lg:inset-0',
+      'fixed inset-y-0 left-0 z-30 w-64 overflow-hidden bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800 border-r border-slate-800/60 shadow-xl transform transition-transform lg:sticky lg:top-0 lg:h-screen lg:inset-auto lg:flex-none lg:translate-x-0',
       sidebarOpen ? 'translate-x-0' : '-translate-x-full'
     ]">
       <!-- Brand header — gelap senada dengan body sidebar untuk kesan korporat -->

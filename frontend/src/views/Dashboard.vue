@@ -1,10 +1,12 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api/client'
 import { useI18n } from '@/locales'
 import { ClockIcon, CalendarDaysIcon, CurrencyDollarIcon, GiftIcon, CakeIcon } from '@heroicons/vue/24/outline'
 import AttendanceHeatmap from '@/components/AttendanceHeatmap.vue'
+import SuperAdminDashboard from '@/views/Admin/SuperAdminDashboard.vue'
+import DynamicDashboard from '@/components/dashboard/DynamicDashboard.vue'
 
 const auth = useAuthStore()
 const { t } = useI18n()
@@ -14,10 +16,37 @@ const myLeaves = ref([])
 const myPayslips = ref([])
 const upcomingEvents = ref([])     // birthday + anniversary 30 hari ke depan
 const loading = ref(true)
+const resolvingDashboard = ref(true)
+const customDashboard = ref(null)
+let dashboardRefreshTimer = null
+
+async function refreshCustomDashboard() {
+  const response = await api.get('/dashboard-config/me')
+  customDashboard.value = response.data?.data || null
+  return customDashboard.value
+}
 
 onMounted(async () => {
+  if (auth.isSuperAdmin) {
+    loading.value = false
+    resolvingDashboard.value = false
+    return
+  }
   loading.value = true
   try {
+    try {
+      if (await refreshCustomDashboard()) {
+        dashboardRefreshTimer = window.setInterval(() => {
+          refreshCustomDashboard().catch(() => {})
+        }, 60000)
+        return
+      }
+    } catch (_) {
+      // Dashboard kustom bersifat enhancement. Konfigurasi belum tersedia
+      // atau gagal dirender harus tetap jatuh ke dashboard personal lama.
+    } finally {
+      resolvingDashboard.value = false
+    }
     const tasks = [
       api.get('/attendance/my').then(r => myAttendance.value = r.data.data || []),
       api.get('/leaves', { params: { mine: 1, per_page: 5 } }).then(r => myLeaves.value = r.data.data || []),
@@ -33,6 +62,10 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+})
+
+onBeforeUnmount(() => {
+  if (dashboardRefreshTimer) window.clearInterval(dashboardRefreshTimer)
 })
 
 function fmtEventDate(d) {
@@ -67,7 +100,15 @@ function fmtCurrency(v) {
 </script>
 
 <template>
-  <div>
+  <SuperAdminDashboard v-if="auth.isSuperAdmin" />
+  <div v-else-if="resolvingDashboard" class="space-y-5" aria-label="Memuat dashboard">
+    <div class="h-20 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div v-for="n in 4" :key="n" class="h-36 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />
+    </div>
+  </div>
+  <DynamicDashboard v-else-if="customDashboard" :dashboard="customDashboard" />
+  <div v-else>
     <h1 class="text-2xl font-bold text-gray-900">{{ t('dashboard.greeting', { name: auth.user?.name?.split(' ')[0] }) }}</h1>
     <p class="text-gray-500 mb-6">{{ t('dashboard.subtitle') }}</p>
 

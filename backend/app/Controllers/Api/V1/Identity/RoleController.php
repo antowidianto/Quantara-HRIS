@@ -346,6 +346,7 @@ class RoleController extends ApiController
             $currentPermissionIds = array_map(
                 'intval',
                 array_column(
+                    // @tenant-scope-reviewed role_id=1 is the immutable global break-glass role.
                     $db->table('role_permissions')->select('permission_id')
                         ->where('role_id', 1)->get()->getResultArray(),
                     'permission_id',

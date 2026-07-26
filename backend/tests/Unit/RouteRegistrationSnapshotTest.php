@@ -17,7 +17,9 @@ final class RouteRegistrationSnapshotTest extends CIUnitTestCase
         foreach ($verbs as $verb) {
             $count += count($routes->getRoutes($verb, false));
         }
-        self::assertSame(957, $count, 'Intentional route changes must update the audited snapshot count.');
+        // 968 = 967 + POST api/v1/manpower-requests/(:num)/revise
+        // (MPP REJECTED/CANCELLED dikembalikan ke DRAFT untuk diajukan ulang).
+        self::assertSame(968, $count, 'Intentional route changes must update the audited snapshot count.');
 
         $getPaths = array_keys($routes->getRoutes('GET', false));
         $myTeam = array_search('api/v1/employees/my-team', $getPaths, true);

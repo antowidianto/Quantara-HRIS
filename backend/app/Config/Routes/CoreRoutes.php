@@ -244,6 +244,8 @@ final class CoreRoutes
         $routes->post('manpower-requests/(:num)/approve',        'Manpower\ManpowerController::approve/$1', ['filter' => ['permission:mpp.approve', 'idempotency:required']]);
         $routes->post('manpower-requests/(:num)/reject',         'Manpower\ManpowerController::reject/$1', ['filter' => ['permission:mpp.approve', 'idempotency:required']]);
         $routes->post('manpower-requests/(:num)/cancel',         'Manpower\ManpowerController::cancel/$1', ['filter' => ['permission:mpp.submit', 'idempotency:required']]);
+        // REJECTED/CANCELLED -> DRAFT supaya bisa diperbaiki & diajukan ulang
+        $routes->post('manpower-requests/(:num)/revise',         'Manpower\ManpowerController::revise/$1', ['filter' => ['permission:mpp.submit', 'idempotency:required']]);
         $routes->post('manpower-requests/(:num)/create-posting', 'Manpower\ManpowerController::createPosting/$1', ['filter' => ['permission:mpp.fulfill', 'idempotency:required']]);
         $routes->post('manpower-requests/(:num)/close',          'Manpower\ManpowerController::close/$1', ['filter' => ['permission:mpp.fulfill', 'idempotency:required']]);
         // Sprint 5 â€” onboarding planning endpoints
