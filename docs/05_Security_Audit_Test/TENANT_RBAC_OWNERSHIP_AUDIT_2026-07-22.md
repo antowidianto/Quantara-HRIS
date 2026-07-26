@@ -15,7 +15,7 @@ Audit ini menyisir batas akses pada backend dan frontend HRIS, meliputi:
 - approval payroll, notifikasi, upload, perangkat absensi, master data, recruitment, asset, serta import;
 - static security gates untuk route, permission, akses database controller, data sensitif, dan tenant scope.
 
-Pemeriksaan otomatis mencakup **369 file backend** dan **958 route API**. Pemeriksaan manual difokuskan pada jalur yang melakukan baca/tulis data tenant, menerima ID dari client, memakai nama tabel dinamis, atau menampilkan aksi mutasi di UI.
+Pemeriksaan otomatis mencakup **369 file backend** dan **967 route API**. Pemeriksaan manual difokuskan pada jalur yang melakukan baca/tulis data tenant, menerima ID dari client, memakai nama tabel dinamis, atau menampilkan aksi mutasi di UI.
 
 ## Temuan dan eksekusi perbaikan
 
@@ -70,7 +70,7 @@ Tenant scanner saat ini melaporkan **0 temuan baru**. Terdapat **626 fingerprint
 |---|---|
 | PHPUnit backend | 1.264 test, 3.857 assertion, lulus |
 | Frontend unit test | 15 file, 66 test, lulus; termasuk Super Admin Operations, live RBAC sync, session refresh, `permissionAny`, super-admin, dan employee-only guard |
-| Route policy gate | 958 route, 0 route terlindungi tanpa policy |
+| Route policy gate | 967 route, 0 route terlindungi tanpa policy |
 | Permission registry gate | Lulus; seluruh permission route terdaftar |
 | Tenant leak strict gate | 369 file, 0 temuan baru |
 | Controller DB access gate | 0 penambahan direct DB access di luar baseline |

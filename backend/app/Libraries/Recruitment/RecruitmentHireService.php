@@ -386,23 +386,47 @@ final class RecruitmentHireService
         // Trigger ONBOARD_DEFAULT + auto-complete tasks yang datanya sudah
         // lengkap dari Career Portal application (SUBMIT_DOCS, NPWP_VERIFY,
         // BPJS_REGISTER, SETUP_HRIS dengan auto-create user account).
+        //
+        // URUTAN PENTING: akun HRIS harus dibuat SEBELUM applyTemplate().
+        // `resolveAssignee('EMPLOYEE')` membaca `employees.user_id`; kalau
+        // template di-generate duluan, semua task milik karyawan
+        // (SUBMIT_DOCS, BANK_ACCOUNT, EMPLOYEE_HANDBOOK) lahir tanpa
+        // assignee dan tanpa notifikasi.
         $autoResult = ['auto_completed' => 0, 'user_created' => null, 'user_email' => null, 'temp_password' => null];
         try {
             $anchor = $insert['join_date'];
             $onboarding = Services::onboarding();
+
+            // 1. Provision akun user lebih dulu (idempotent).
+            $provisioned = ['user_id' => null, 'temp_password' => null, 'user_email' => null];
+            try {
+                $provisioned = $onboarding->provisionUserAccount($employeeId);
+            } catch (\Throwable $e) {
+                log_message('warning', "provisionUserAccount failed for #{$employeeId}: " . $e->getMessage());
+            }
+
+            // 2. Baru generate task — sekarang user_id + supervisor/manager
+            //    sudah ter-set sehingga assignee resolve dengan benar.
             $onboarding->applyTemplate($employeeId, null, 'ONBOARD', $anchor);
-            // Pakai data candidate (bukan re-fetch) supaya tidak ada race
-            // dengan update converted_employee_id di bawah.
-            $autoResult = $onboarding->autoCompleteFromCandidate($employeeId, $cand);
+
+            // 3. Auto-complete task yang datanya sudah lengkap. Pakai data
+            //    candidate (bukan re-fetch) supaya tidak ada race dengan
+            //    update converted_employee_id di atas.
+            $autoResult = $onboarding->autoCompleteFromCandidate($employeeId, $cand, $provisioned);
+
+            // 4. Safety net: task yang masih tanpa assignee (mis. supervisor
+            //    belum punya akun user) di-backfill sekali lagi.
+            $onboarding->backfillAssignees($employeeId, 'ONBOARD');
         } catch (\Throwable $e) {
             log_message('warning', "Onboarding apply failed for employee #{$employeeId}: " . $e->getMessage());
         }
 
         // Auto-generate kontrak kerja dari template default perusahaan
-        // setelah employee berhasil di-hire.
+        // setelah employee berhasil di-hire. Offer dipakai sebagai sumber
+        // durasi kontrak supaya end_date sinkron dengan offering letter.
         if (! empty($insert['employment_status'])) {
             try {
-                $this->autoGenerateContract($employeeId, $cand, $insert, $autoResult);
+                $this->autoGenerateContract($employeeId, $cand, $insert, $autoResult, $acceptedOffer);
             } catch (\Throwable $e) {
                 log_message('warning', "Auto-generate contract failed for employee #{$employeeId}: " . $e->getMessage());
             }
@@ -447,6 +471,68 @@ final class RecruitmentHireService
             'assets_intent_only'   => (int) ($assetPrealloc['intent_only'] ?? 0),
             'assets_unfulfilled'   => (int) ($assetPrealloc['unfulfilled'] ?? 0),
         ];
+    }
+
+    /**
+     * Tentukan `end_date` kontrak untuk tipe employment berjangka.
+     *
+     * Sebelumnya durasi di-hardcode 1 tahun untuk semua tipe berjangka —
+     * itu berisiko kontrak di sistem tidak sinkron dengan offering letter
+     * yang sudah disepakati (PP 35/2021 mengizinkan PKWT sampai 5 tahun).
+     *
+     * Prioritas sumber durasi:
+     *   1. `employees.contract_end_date` dari hire form (override eksplisit HR)
+     *   2. `candidate_offers.contract_end_date` (bila kolom tersedia)
+     *   3. `candidate_offers.contract_duration_months` (bila kolom tersedia)
+     *   4. `candidate_offers.probation_months` — khusus tipe PROBATION
+     *   5. Fallback 12 bulan
+     *
+     * Item 2 & 3 memakai pengecekan `array_key_exists` sehingga aman di
+     * schema yang belum punya kolom tersebut.
+     *
+     * PKWTT (permanen) selalu null.
+     */
+    private function resolveContractEndDate(
+        string $employmentStatus,
+        string $startDate,
+        array $empInsert,
+        ?array $acceptedOffer
+    ): ?string {
+        $status = strtoupper($employmentStatus);
+        $fixedTerm = ['PKWT', 'PROBATION', 'MAGANG', 'CONTRACT', 'OUTSOURCING', 'PARTTIME'];
+        if (! in_array($status, $fixedTerm, true)) {
+            return null;
+        }
+        // 1. Override eksplisit dari hire form — paling tinggi prioritasnya.
+        if (! empty($empInsert['contract_end_date'])) {
+            return (string) $empInsert['contract_end_date'];
+        }
+
+        $endOfTerm = static fn (int $months): string =>
+            date('Y-m-d', strtotime($startDate . " +{$months} months -1 day"));
+
+        if ($acceptedOffer) {
+            // 2. Tanggal akhir eksplisit di offer.
+            if (! empty($acceptedOffer['contract_end_date'])) {
+                return date('Y-m-d', strtotime((string) $acceptedOffer['contract_end_date']));
+            }
+            // 3. Durasi dalam bulan di offer.
+            $months = (int) ($acceptedOffer['contract_duration_months'] ?? 0);
+            if ($months > 0) {
+                return $endOfTerm($months);
+            }
+            // 4. Untuk PROBATION, pakai probation_months yang disepakati
+            //    (dibatasi 3 bulan sesuai UU 13/2003 Pasal 60).
+            if ($status === 'PROBATION') {
+                $probation = (int) ($acceptedOffer['probation_months'] ?? 0);
+                if ($probation > 0) {
+                    return $endOfTerm(min($probation, 3));
+                }
+            }
+        }
+
+        // 5. Fallback konservatif — 12 bulan, masih dalam batas PP 35/2021.
+        return $endOfTerm(12);
     }
 
     public function nextEmployeeNumber(int $companyId): string
@@ -515,8 +601,13 @@ final class RecruitmentHireService
         }
     }
 
-    private function autoGenerateContract(int $employeeId, array $candidate, array $empInsert, array $autoResult): void
-    {
+    private function autoGenerateContract(
+        int $employeeId,
+        array $candidate,
+        array $empInsert,
+        array $autoResult,
+        ?array $acceptedOffer = null
+    ): void {
 
         $db = $this->db;
         $companyId = (int) $empInsert['company_id'];
@@ -547,10 +638,12 @@ final class RecruitmentHireService
         $now = date('Y-m-d H:i:s');
         $contractNumber = 'CT-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
         $startDate = $empInsert['join_date'] ?? date('Y-m-d');
-        $endDate = null;
-        if (in_array($empInsert['employment_status'] ?? '', ['PKWT', 'PROBATION', 'MAGANG'], true)) {
-            $endDate = date('Y-m-d', strtotime($startDate . ' +1 year'));
-        }
+        $endDate = $this->resolveContractEndDate(
+            (string) ($empInsert['employment_status'] ?? ''),
+            (string) $startDate,
+            $empInsert,
+            $acceptedOffer
+        );
 
         // Update employee record dengan contract dates
         $employeeUpdate = ['updated_at' => $now];

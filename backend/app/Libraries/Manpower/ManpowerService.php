@@ -250,6 +250,16 @@ class ManpowerService
                 'updated_at'          => $now,
             ]);
             $finalApproved = true;
+
+            // Handoff ke Talent Acquisition. Tanpa ini, MPP yang sudah
+            // approved hanya "diam" di list dan baru ketahuan telat lewat
+            // cron overdue. Best-effort — kegagalan notifikasi tidak boleh
+            // membatalkan approval yang sudah tersimpan.
+            try {
+                $this->notifyFulfillers($mpp);
+            } catch (\Throwable $e) {
+                log_message('warning', "MPP #{$mppId} fulfiller notification failed: " . $e->getMessage());
+            }
         }
 
         return [
@@ -334,8 +344,20 @@ class ManpowerService
         $db = Database::connect();
         $mpp = $db->table('manpower_requests')->where('id', $mppId)->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $mpp) throw new \InvalidArgumentException('MPP not found');
-        if (! in_array($mpp['status'], ['DRAFT', 'SUBMITTED'], true)) {
-            throw new \RuntimeException("Hanya MPP DRAFT/SUBMITTED yang bisa di-cancel, sekarang {$mpp['status']}");
+        // APPROVED ikut boleh di-cancel selama belum ada lowongan yang
+        // ditarik darinya. Tanpa ini, MPP yang sudah disetujui tapi
+        // diputuskan tidak jadi direkrut menjadi jalan buntu: tidak bisa
+        // cancel (bukan DRAFT/SUBMITTED) dan tidak bisa close (bukan
+        // HIRING/FILLED), sehingga selamanya muncul sebagai slot kosong
+        // dan terus dikejar cron overdue.
+        if (! in_array($mpp['status'], ['DRAFT', 'SUBMITTED', 'APPROVED'], true)) {
+            throw new \RuntimeException("Hanya MPP DRAFT/SUBMITTED/APPROVED yang bisa di-cancel, sekarang {$mpp['status']}");
+        }
+        if ($mpp['status'] === 'APPROVED' && $this->countLivePostings($mppId) > 0) {
+            throw new \RuntimeException(
+                'MPP ini sudah punya lowongan aktif. Tutup lowongan tersebut dulu, '
+                . 'lalu gunakan Close untuk menutup MPP.'
+            );
         }
         $now = date('Y-m-d H:i:s');
         $db->table('manpower_requests')->where('id', $mppId)->update([
@@ -349,6 +371,123 @@ class ManpowerService
             ->where('manpower_request_id', $mppId)
             ->where('decision', 'PENDING')
             ->update(['decision' => 'SKIPPED', 'updated_at' => $now]);
+    }
+
+    /**
+     * Kembalikan MPP REJECTED ke DRAFT supaya bisa diperbaiki dan diajukan
+     * ulang.
+     *
+     * Sebelumnya `submit()` mensyaratkan status DRAFT dan tidak ada jalan
+     * kembali dari REJECTED — MPP yang ditolak karena hal kecil (mis.
+     * justifikasi kurang) harus dibuat ulang dari nol, kehilangan planned
+     * assets, riwayat approval, dan kontinuitas nomor referensi.
+     *
+     * Riwayat approval lama TIDAK dihapus di sini; `submit()` yang akan
+     * membersihkan dan men-generate ulang step, sehingga jejak penolakan
+     * tetap terbaca sampai pengajuan ulang benar-benar dilakukan.
+     */
+    public function revise(int $mppId, int $userId, ?string $note = null): void
+    {
+        $db = Database::connect();
+        $mpp = $db->table('manpower_requests')->where('id', $mppId)->where('deleted_at IS NULL')->get()->getRowArray();
+        if (! $mpp) throw new \InvalidArgumentException('MPP not found');
+        if (! in_array($mpp['status'], ['REJECTED', 'CANCELLED'], true)) {
+            throw new \RuntimeException("Hanya MPP REJECTED/CANCELLED yang bisa direvisi, sekarang {$mpp['status']}");
+        }
+        $now = date('Y-m-d H:i:s');
+        $prefix = $mpp['status'] === 'REJECTED' ? '[REVISI setelah ditolak]' : '[REVISI setelah dibatalkan]';
+        $trail = trim((string) ($mpp['notes'] ?? '')) . "\n{$prefix} " . ($note ?: 'Dibuka kembali untuk perbaikan.');
+        $db->table('manpower_requests')->where('id', $mppId)->update([
+            'status'           => 'DRAFT',
+            'rejected_at'      => null,
+            'rejection_reason' => null,
+            'submitted_at'     => null,
+            'notes'            => trim($trail),
+            'updated_by'       => $userId,
+            'updated_at'       => $now,
+        ]);
+    }
+
+    /**
+     * Hitung lowongan tertaut yang masih "hidup" — yaitu yang headcount-nya
+     * masih memblokir sisa MPP.
+     *
+     * Posting CLOSED/CANCELLED yang tidak menghasilkan hire dianggap
+     * melepas kembali jatah headcount-nya.
+     */
+    private function countLivePostings(int $mppId): int
+    {
+        $db = Database::connect();
+        return $db->table('manpower_request_postings mrp')
+            ->join('job_postings jp', 'jp.id = mrp.job_posting_id')
+            ->where('mrp.manpower_request_id', $mppId)
+            ->where('jp.deleted_at IS NULL')
+            ->whereNotIn('jp.status', ['CANCELLED'])
+            ->countAllResults();
+    }
+
+    /**
+     * Kirim notifikasi handoff ke tim yang berwenang membuat lowongan
+     * (permission `mpp.fulfill`) plus requestor MPP.
+     */
+    private function notifyFulfillers(array $mpp): void
+    {
+        $db = Database::connect();
+        $companyId = (int) $mpp['company_id'];
+
+        $recipients = [];
+        // Requestor selalu diberi tahu bahwa pengajuannya sudah disetujui.
+        if (! empty($mpp['requested_by_user_id'])) {
+            $recipients[(int) $mpp['requested_by_user_id']] = true;
+        }
+
+        // Tim Talent Acquisition — user yang role-nya punya `mpp.fulfill`
+        // atau `recruitment.manage`.
+        try {
+            if ($db->tableExists('role_permissions') && $db->tableExists('permissions')) {
+                $rows = $db->table('users u')
+                    ->select('u.id')
+                    ->join('role_permissions rp', 'rp.role_id = u.role_id')
+                    ->join('permissions p', 'p.id = rp.permission_id')
+                    ->where('u.company_id', $companyId)
+                    ->where('u.is_active', 1)
+                    ->whereIn('p.key', ['mpp.fulfill', 'recruitment.manage'])
+                    ->groupBy('u.id')
+                    ->limit(20)
+                    ->get()->getResultArray();
+                foreach ($rows as $row) {
+                    $recipients[(int) $row['id']] = true;
+                }
+            }
+        } catch (\Throwable $e) {
+            log_message('warning', 'notifyFulfillers permission lookup failed: ' . $e->getMessage());
+        }
+
+        if ($recipients === []) return;
+
+        $ref   = (string) ($mpp['reference_number'] ?? '');
+        $title = (string) ($mpp['proposed_title'] ?? '');
+        $hc    = (int) ($mpp['headcount'] ?? 0);
+        $target = ! empty($mpp['target_start_date'])
+            ? ' Target mulai kerja: ' . $mpp['target_start_date'] . '.'
+            : '';
+        $notifier = Services::notification();
+        foreach (array_keys($recipients) as $userId) {
+            try {
+                $notifier->send(
+                    $userId,
+                    $companyId,
+                    'mpp.approved',
+                    "MPP {$ref} disetujui — siap dibuatkan lowongan",
+                    "{$title} ({$hc} headcount) sudah lolos seluruh tahap approval."
+                        . $target . ' Silakan buat lowongan dari MPP ini.',
+                    ['manpower_request_id' => (int) $mpp['id']],
+                    '/recruitment/mpp/' . (int) $mpp['id'],
+                );
+            } catch (\Throwable $e) {
+                log_message('warning', "notifyFulfillers send to #{$userId} failed: " . $e->getMessage());
+            }
+        }
     }
 
     /**
@@ -372,14 +511,28 @@ class ManpowerService
             throw new \RuntimeException("MPP harus APPROVED/HIRING untuk dibuatkan lowongan, sekarang {$mpp['status']}");
         }
 
-        // Hitung sisa headcount: total MPP - sum(headcount lowongan terkait)
+        // Hitung sisa headcount: total MPP - headcount yang masih "terpakai".
+        //
+        // Lowongan CLOSED/CANCELLED hanya menahan jatah sebanyak orang yang
+        // benar-benar ter-hire darinya. Tanpa aturan ini, lowongan 3 slot
+        // yang ditutup tanpa satu pun hire akan menghanguskan 3 slot MPP
+        // secara permanen — MPP tidak bisa lagi menerbitkan lowongan
+        // pengganti padahal headcount aslinya belum terisi.
         $existingPostings = $db->table('manpower_request_postings mrp')
-            ->select('jp.headcount')
+            ->select('jp.id, jp.headcount, jp.status')
             ->join('job_postings jp', 'jp.id = mrp.job_posting_id')
             ->where('mrp.manpower_request_id', $mppId)
             ->where('jp.deleted_at IS NULL')
             ->get()->getResultArray();
-        $usedHeadcount = array_sum(array_map(fn($r) => (int) $r['headcount'], $existingPostings));
+        $released = ['CLOSED', 'CANCELLED', 'EXPIRED'];
+        $usedHeadcount = 0;
+        foreach ($existingPostings as $posting) {
+            if (in_array((string) $posting['status'], $released, true)) {
+                $usedHeadcount += $this->hiredCountForPosting((int) $posting['id']);
+                continue;
+            }
+            $usedHeadcount += (int) $posting['headcount'];
+        }
         $remaining = max(0, (int) $mpp['headcount'] - $usedHeadcount);
         if ($remaining <= 0) {
             throw new \RuntimeException('Semua headcount MPP sudah dialokasikan ke lowongan');
@@ -486,11 +639,17 @@ class ManpowerService
         $now = date('Y-m-d H:i:s');
         $update = ['hired_count' => $hired, 'updated_at' => $now];
 
-        // Auto progress status
+        // Auto progress status — dua arah.
         $newStatus = $mpp['status'];
         if ($mpp['status'] === 'HIRING' && $hired >= (int) $mpp['headcount']) {
             $newStatus = 'FILLED';
             $update['status'] = 'FILLED';
+        } elseif ($mpp['status'] === 'FILLED' && $hired < (int) $mpp['headcount']) {
+            // Hire dibatalkan / kandidat dihapus → MPP kembali perlu diisi.
+            // Tanpa ini status FILLED tidak pernah mundur dan slot yang
+            // kosong lagi tidak terlihat oleh siapa pun.
+            $newStatus = 'HIRING';
+            $update['status'] = 'HIRING';
         }
 
         $db->table('manpower_requests')->where('id', $mppId)->update($update);
@@ -500,6 +659,20 @@ class ManpowerService
             'headcount'   => (int) $mpp['headcount'],
             'status'      => $newStatus,
         ];
+    }
+
+    /**
+     * Jumlah kandidat yang benar-benar ter-hire dari satu lowongan.
+     */
+    private function hiredCountForPosting(int $jobPostingId): int
+    {
+        $db = Database::connect();
+        return $db->table('candidates')
+            ->where('job_posting_id', $jobPostingId)
+            ->where('current_stage', 'HIRED')
+            ->where('converted_employee_id IS NOT NULL')
+            ->where('deleted_at IS NULL')
+            ->countAllResults();
     }
 
     /**
@@ -530,8 +703,10 @@ class ManpowerService
         $db = Database::connect();
         $mpp = $db->table('manpower_requests')->where('id', $mppId)->where('deleted_at IS NULL')->get()->getRowArray();
         if (! $mpp) throw new \InvalidArgumentException('MPP not found');
-        if (! in_array($mpp['status'], ['HIRING', 'FILLED'], true)) {
-            throw new \RuntimeException("Hanya MPP HIRING/FILLED yang bisa di-close, sekarang {$mpp['status']}");
+        // APPROVED ikut boleh di-close supaya MPP yang sudah disetujui tapi
+        // sudah tidak relevan bisa diselesaikan tanpa harus lewat HIRING.
+        if (! in_array($mpp['status'], ['APPROVED', 'HIRING', 'FILLED'], true)) {
+            throw new \RuntimeException("Hanya MPP APPROVED/HIRING/FILLED yang bisa di-close, sekarang {$mpp['status']}");
         }
         $now = date('Y-m-d H:i:s');
         $db->table('manpower_requests')->where('id', $mppId)->update([

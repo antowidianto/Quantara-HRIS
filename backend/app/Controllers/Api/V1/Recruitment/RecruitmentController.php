@@ -267,6 +267,18 @@ class RecruitmentController extends ApiController
             'status' => 'CLOSED',
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+
+        // Lowongan yang ditutup melepas kembali sisa headcount ke MPP
+        // induknya (hanya yang benar-benar ter-hire yang tetap dihitung),
+        // dan status MPP di-recompute — FILLED bisa mundur ke HIRING kalau
+        // ternyata headcount belum terpenuhi. Best-effort: kegagalan sync
+        // tidak boleh membatalkan penutupan lowongan yang sudah tersimpan.
+        try {
+            Services::manpower()->syncForJobPosting((int) $id);
+        } catch (\Throwable $e) {
+            log_message('warning', "MPP sync after closing job #{$id} failed: " . $e->getMessage());
+        }
+
         Services::audit()->forModule('RECRUITMENT')->log(
             action: 'job.close', entity: 'job_posting', entityId: (int) $id,
             description: "Tutup posting {$row['reference_number']}", severity: 'NOTICE'

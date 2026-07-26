@@ -157,8 +157,13 @@ class OnboardingService
      *     contract template + dapat tanda tangan fisik/e-sign).
      *
      * Return ringkasan: `{auto_completed: int, user_created: ?int}`
+     *
+     * @param array|null $provisioned Hasil `provisionUserAccount()` bila akun
+     *     HRIS sudah dibuat lebih dulu (urutan yang benar supaya task ber-
+     *     owner EMPLOYEE dapat assignee). Kalau null, method ini akan
+     *     membuat akun sendiri — perilaku legacy.
      */
-    public function autoCompleteFromCandidate(int $employeeId, array $candidate): array
+    public function autoCompleteFromCandidate(int $employeeId, array $candidate, ?array $provisioned = null): array
     {
         $db = \Config\Database::connect();
         $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
@@ -212,19 +217,24 @@ class OnboardingService
             );
         }
 
-        // 4. SETUP_HRIS — auto-create user akun HRIS.
+        // 4. SETUP_HRIS — akun HRIS. Kalau caller sudah men-provision akun
+        //    lebih dulu (urutan yang benar), pakai hasilnya. Kalau belum,
+        //    buat sekarang supaya pemanggil lama tetap berfungsi.
         $tempPassword = null;
-        if (! empty($candidate['email']) && ! empty($emp['email'])) {
+        if ($provisioned !== null) {
+            $userCreated  = $provisioned['user_id'] ?? null;
+            $tempPassword = $provisioned['temp_password'] ?? null;
+        } elseif (! empty($candidate['email']) && ! empty($emp['email'])) {
             [$userCreated, $tempPassword] = $this->autoCreateUserAccount($emp);
-            if ($userCreated) {
-                $this->markComplete($employeeId, 'SETUP_HRIS',
-                    "Auto-complete: akun HRIS otomatis dibuat untuk {$emp['email']} "
-                    . "dengan password sementara (must_change_password=1). "
-                    . "HR yang melakukan hire menerima credential lengkap di "
-                    . "modal sukses. Karyawan wajib ganti password saat login pertama.",
-                    $autoCompleted,
-                );
-            }
+        }
+        if ($userCreated) {
+            $this->markComplete($employeeId, 'SETUP_HRIS',
+                "Auto-complete: akun HRIS otomatis dibuat untuk {$emp['email']} "
+                . "dengan password sementara (must_change_password=1). "
+                . "HR yang melakukan hire menerima credential lengkap di "
+                . "modal sukses. Karyawan wajib ganti password saat login pertama.",
+                $autoCompleted,
+            );
         }
 
         return [
@@ -238,6 +248,92 @@ class OnboardingService
             // via admin user page.
             'temp_password'  => $tempPassword,
         ];
+    }
+
+    /**
+     * Provision akun HRIS untuk karyawan baru — dipisah dari
+     * `autoCompleteFromCandidate()` supaya bisa dijalankan SEBELUM
+     * `applyTemplate()`.
+     *
+     * Ini penting: `resolveAssignee('EMPLOYEE')` membaca `employees.user_id`.
+     * Kalau template di-generate sebelum akun dibuat, semua task milik
+     * karyawan (SUBMIT_DOCS, BANK_ACCOUNT, EMPLOYEE_HANDBOOK) lahir tanpa
+     * assignee dan tanpa notifikasi — karyawan baru tidak pernah tahu ada
+     * tugas untuknya.
+     *
+     * Idempotent: kalau `employees.user_id` sudah terisi, tidak membuat
+     * akun baru dan mengembalikan user_id yang ada.
+     *
+     * @return array{user_id: ?int, temp_password: ?string, user_email: ?string}
+     */
+    public function provisionUserAccount(int $employeeId): array
+    {
+        $empty = ['user_id' => null, 'temp_password' => null, 'user_email' => null];
+        $db = \Config\Database::connect();
+        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        if (! $emp) return $empty;
+
+        $email = strtolower(trim((string) ($emp['email'] ?? '')));
+        if (! empty($emp['user_id'])) {
+            return [
+                'user_id'       => (int) $emp['user_id'],
+                'temp_password' => null,
+                'user_email'    => $email ?: null,
+            ];
+        }
+        if ($email === '') return $empty;
+
+        [$userId, $tempPassword] = $this->autoCreateUserAccount($emp);
+        return [
+            'user_id'       => $userId,
+            'temp_password' => $tempPassword,
+            'user_email'    => $userId ? $email : null,
+        ];
+    }
+
+    /**
+     * Isi ulang `assignee_user_id` untuk task yang lahir tanpa assignee
+     * (mis. data lama yang dibuat sebelum akun karyawan ada, atau saat
+     * supervisor/manager belum di-set).
+     *
+     * Idempotent dan aman dipanggil berkali-kali — hanya menyentuh task
+     * PENDING yang assignee-nya masih NULL.
+     *
+     * @return int Jumlah task yang berhasil di-assign.
+     */
+    public function backfillAssignees(int $employeeId, ?string $type = null): int
+    {
+        $db = \Config\Database::connect();
+        $emp = $db->table('employees')->where('id', $employeeId)->get()->getRowArray();
+        if (! $emp) return 0;
+
+        $builder = $db->table('employee_tasks')
+            ->where('employee_id', $employeeId)
+            ->where('status', 'PENDING')
+            ->where('assignee_user_id IS NULL')
+            ->where('deleted_at IS NULL');
+        if ($type) $builder->where('type', $type);
+        $rows = $builder->get()->getResultArray();
+        if (! $rows) return 0;
+
+        $now = date('Y-m-d H:i:s');
+        $fixed = 0;
+        foreach ($rows as $row) {
+            $assignee = $this->resolveAssignee((string) ($row['owner_role'] ?? ''), $emp);
+            if (! $assignee) continue;
+            $db->table('employee_tasks')->where('id', (int) $row['id'])->update([
+                'assignee_user_id' => $assignee,
+                'updated_at'       => $now,
+            ]);
+            $row['assignee_user_id'] = $assignee;
+            $fixed++;
+            try {
+                $this->notifyAssignee($row);
+            } catch (\Throwable $e) {
+                log_message('warning', 'backfillAssignees notify failed: ' . $e->getMessage());
+            }
+        }
+        return $fixed;
     }
 
     /**
