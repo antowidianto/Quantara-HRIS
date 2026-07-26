@@ -380,7 +380,7 @@ notification native memiliki delivery rate jauh lebih tinggi.
 - Web Push notification yang lebih reliable
 - Optimize mobile UX untuk attendance, leave request, approval inbox
 
-**Fase 2 (Sprint 12–13) — React Native / Flutter App:**
+**Fase 2 (Sprint 12–13) — Flutter App:**
 - Clock-in/out dengan GPS native (lebih akurat dari browser)
 - Biometric authentication (Face ID / fingerprint)
 - Push notification via FCM/APNs

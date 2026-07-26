@@ -8,7 +8,7 @@ Dokumen ini menggambarkan struktur folder dan turunan lengkap dari proyek **Quan
 |----------|----------------------------------------------------|
 | Backend  | CodeIgniter 4 (PHP 8.1+)                            |
 | Frontend | Vue 3 + Vite + Tailwind CSS + Pinia                |
-| Mobile   | React Native (TypeScript) + Android/iOS native     |
+| Mobile   | Flutter (Dart) + Android/iOS native                |
 | Database | MySQL 8 / MariaDB 10.6+ (SQLite untuk dev)         |
 | Auth     | JWT (Access + Refresh) + 2FA TOTP + Backup Codes   |
 | Mail     | SMTP (PHPMailer + queue + exponential backoff)     |
@@ -24,7 +24,7 @@ Quantara-HRIS/
 ├── .github/                 # CI/CD pipeline & dependabot
 ├── backend/                 # CodeIgniter 4 REST API
 ├── frontend/                # Vue 3 + Vite SPA (PWA-ready)
-├── mobile/                  # React Native app (Android + iOS)
+├── mobile/                  # Flutter app (Android + iOS)
 ├── docs/                    # Dokumentasi fitur, ADR, OpenAPI
 ├── scripts/                 # Setup & switch-env scripts (cross-platform)
 ├── docker-compose.yml       # Dev stack (mysql + redis + mailhog + backend + frontend)
@@ -707,11 +707,44 @@ views/
 
 ---
 
-## 4. `mobile/` — React Native App
+## 4. `mobile/` — Flutter App
 
-Aplikasi mobile berbasis React Native (TypeScript) dengan native Android & iOS.
+Aplikasi mobile menggunakan Flutter dan Dart dengan native Android dan iOS.
+Cutover repository selesai pada Juli 2026; struktur aktifnya:
 
-### 4.1 Root Mobile
+```
+mobile/
+├── lib/
+│   ├── main.dart
+│   ├── app.dart
+│   ├── core/
+│   │   ├── network/         # Dio client, JWT refresh, tenant header
+│   │   ├── storage/         # secure storage, cache, offline outbox
+│   │   ├── errors/          # typed failure + API error mapping
+│   │   └── platform/        # biometric, camera, GPS, notification
+│   ├── features/            # presentation, application, data per domain
+│   ├── routing/             # go_router routes + guards
+│   ├── theme/               # Material 3 light/dark theme
+│   └── l10n/                # ARB Bahasa Indonesia + English
+├── test/                    # unit + widget tests
+├── integration_test/        # critical user journeys
+├── android/
+├── ios/
+├── assets/
+├── pubspec.yaml
+└── analysis_options.yaml
+```
+
+Pemisahan layer mengikuti pola UI/view model, repository, dan service.
+Dokumen migrasi dan aturan cutover ada di
+`docs/04_Mobile_App/MOBILE_FLUTTER_MIGRATION.md`.
+
+### 4.1 Snapshot historis sebelum cutover
+
+Bagian berikut hanya mendokumentasikan layout React Native yang sudah dihapus
+saat cutover Flutter. Path tersebut tidak lagi berada di working tree.
+
+#### Root Mobile legacy
 
 ```
 mobile/
@@ -743,7 +776,7 @@ mobile/
 └── src/                     # Source TypeScript
 ```
 
-### 4.2 `mobile/src/` — Source TypeScript
+#### `mobile/src/` — Source TypeScript legacy
 
 ```
 src/
@@ -801,7 +834,7 @@ src/
     └── index.ts
 ```
 
-### 4.3 `mobile/android/` — Native Android
+#### `mobile/android/` — Native Android legacy
 
 ```
 android/
@@ -830,7 +863,7 @@ android/
 
 > Catatan: folder `android/app/.cxx/` berisi ratusan file build artifact (CMake, ninja, codegen C++) yang di-generate otomatis saat build native. File-file ini tidak perlu diedit manual.
 
-### 4.4 `mobile/ios/` — Native iOS
+#### `mobile/ios/` — Native iOS legacy
 
 ```
 ios/
@@ -972,5 +1005,5 @@ Quantara-HRIS/
 - **Multi-tenant**: scoping otomatis lewat `TenantFilter` + `PrivacyScope` di seluruh endpoint.
 - **Migration additive-only**: lihat ADR `0004-additive-only-migrations.md`. Migration tidak pernah destruktif.
 - **API versioned**: semua endpoint di bawah `Api/V1/` untuk kemudahan evolusi.
-- **Cross-platform clients**: satu backend melayani SPA web (Vue 3) dan aplikasi mobile (React Native) lewat REST API yang sama.
+- **Cross-platform clients**: satu backend melayani SPA web (Vue 3) dan aplikasi mobile (Flutter) lewat REST API yang sama.
 - **Build artifact Android**: folder `mobile/android/app/.cxx/` di-generate otomatis dan dapat diabaikan saat membaca struktur kode sumber.

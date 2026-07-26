@@ -1,5 +1,8 @@
 # Sprint M5 — App Wiring & Settings Hardening
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Sprint mobile kelima. Fokus: tarik primitive hardening dari M4
 > (ErrorBoundary, IdleLock, version gate) ke dalam App.tsx & UI utama,
 > tambah Preferences screen (language switcher + idle threshold), dan

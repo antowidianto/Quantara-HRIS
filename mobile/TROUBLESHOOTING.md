@@ -1,232 +1,226 @@
-# Troubleshooting — HRIS Mobile
+# Troubleshooting Flutter Mobile
 
-Catatan masalah umum + solusi cepat. Update saat tim ketemu issue baru.
+Panduan ini berlaku untuk aplikasi Flutter aktif. Catatan React Native pada
+dokumen sprint lama hanya bersifat historis.
 
-## Setup
+## Diagnosis awal
 
-### `npx react-native init` failed (network/firewall)
-
-Solusi: pakai mirror npm
-```bash
-npm config set registry https://registry.npmmirror.com
-npm install
-```
-Setelah install selesai, balik ke registry.npmjs.org.
-
-### `pod install` errors di macOS
-
-```
-[!] Invalid `Podfile` file: 765: unexpected token at ...
-```
-
-Solusi: pastikan Ruby ≥ 3.1.0 (RN 0.76 minimum), CocoaPods ≥ 1.13:
-```bash
-sudo gem install cocoapods
-cd ios && pod repo update && pod install
-```
-
-### Gradle build gagal — `SDK location not found`
-
-Buat file `mobile/android/local.properties`:
-```
-sdk.dir=/Users/<USER>/Library/Android/sdk         # macOS
-sdk.dir=C:\\Users\\<USER>\\AppData\\Local\\Android\\Sdk  # Windows
-```
-
----
-
-## Runtime
-
-### `Network Error` saat clock-in di Android emulator
-
-Android emulator akses host machine bukan via `localhost` tapi `10.0.2.2`.
-Edit `.env`:
-```
-API_BASE_URL=http://10.0.2.2:8080/api/v1
-```
-
-iOS simulator pakai `localhost` (tidak masalah).
-
-### Clock-in stuck "Mengambil lokasi..."
-
-Kemungkinan:
-1. Permission GPS belum di-grant. Buka Settings → Apps → HRIS → Permissions
-2. Lokasi mock di emulator tidak set. Di Android Studio Emulator → ⋮ →
-   Location → set lat/lng manual
-3. iOS Simulator: Features → Location → Apple/Custom Location
-
-### Offline outbox tidak replay
-
-Cek:
-- `Outbox.count()` returnnya berapa? Kalau > 0, sweep belum jalan.
-- NetInfo state: `console.log(await NetInfo.fetch())` — pastikan
-  `isConnected: true && isInternetReachable: true`
-- Backend reachable? Coba hit `/api/v1/health` dari device
-
-Manual sweep: tap badge "outbox pending" di Attendance screen.
-
-### Token expired tapi user tidak logout
-
-Refresh-on-401 single-flight di `client.ts` seharusnya handle ini.
-Kalau tetap gagal:
-- Cek `expires_in` di response login — backend default 15 menit
-- Cek Keychain entry: di Settings → Privacy → Keychain (iOS) atau
-  reset via `SecureStorage.clearAuth()` dari console
-- Backend log audit: `auth.refresh.failed` event
-
-### Biometric prompt muncul tapi sensor tidak available
-
-```
-Biometric.capability() → { available: false }
-```
-
-Penyebab:
-- Device tidak punya sidik jari/Face ID enrolled di OS settings
-- Flag `Biometric.isEnabled()` masih `true` dari sebelumnya. Reset:
-  `Biometric.setEnabled(false)`
-- Android emulator: extended controls → Fingerprint → Touch sensor
-
-### Push notification tidak masuk
-
-1. Token sudah register? Hit `GET /api/v1/devices` dari Postman dengan
-   token user. Kalau kosong, `usePushSync` belum jalan.
-2. Firebase config benar? Cek `google-services.json` ada di
-   `android/app/`. iOS: `GoogleService-Info.plist` ada di Xcode project.
-3. Backend env `fcm.projectId` dan `fcm.serviceAccountPath` set? Tanpa
-   itu, PushNotifier mode log-only.
-4. Test kirim manual dari Firebase Console → Cloud Messaging → Send to
-   single token
-
----
-
-## Build & Release
-
-### Android signing error
-
-`mobile/android/app/build.gradle` — atur signingConfig:
-```gradle
-android {
-    signingConfigs {
-        release {
-            storeFile file('release.keystore')
-            storePassword System.getenv('KEYSTORE_PASSWORD')
-            keyAlias 'hris-mobile'
-            keyPassword System.getenv('KEY_PASSWORD')
-        }
-    }
-}
-```
-
-Generate keystore (sekali per project):
-```bash
-keytool -genkey -v -keystore release.keystore -alias hris-mobile -keyalg RSA -keysize 2048 -validity 10000
-```
-
-JANGAN commit keystore ke git. Simpan di password manager / secret vault.
-
-### iOS App Store rejection — usage description missing
-
-Pastikan semua key di `mobile/native-config/info-plist-additions.plist`
-sudah di-merge ke `Info.plist`. Apple wajib semua usage descriptions
-(NSCameraUsageDescription, NSLocationWhenInUseUsageDescription,
-NSPhotoLibraryUsageDescription, NSFaceIDUsageDescription).
-
-### Bundle size terlalu besar (> 30 MB)
-
-Strategi:
-1. Enable Hermes engine (sudah default RN 0.76+)
-2. Enable ProGuard/R8 di release build (Android)
-3. Split APK per ABI:
-   ```gradle
-   splits {
-       abi {
-           enable true
-           include "armeabi-v7a", "arm64-v8a"
-           universalApk false
-       }
-   }
-   ```
-4. Audit deps: `npx react-native-bundle-visualizer` untuk lihat top
-   contributors
-
----
-
-## Testing
-
-### Jest test gagal — "Cannot find module 'react-native'"
-
-Jest preset `react-native` butuh transformer khusus. Pastikan
-`mobile/package.json` jest config:
-```json
-"transformIgnorePatterns": [
-  "node_modules/(?!(react-native|@react-native|@react-navigation|@tanstack)/)"
-]
-```
-
-### MMKV test gagal — "MMKV is not a constructor"
-
-Jest setup di `mobile/jest.setup.js` punya stub MMKV class. Pastikan
-test file import MMKV dari `@store/mmkv` (bukan langsung dari
-`react-native-mmkv`).
-
-### TypeScript errors di IDE setelah `git pull`
+Jalankan dari `mobile/` dan sertakan hasilnya ketika membuat issue:
 
 ```bash
-cd mobile
-rm -rf node_modules
-npm install
-npx tsc --noEmit
+flutter doctor -v
+flutter --version
+flutter devices
+flutter pub get
+flutter analyze
+flutter test
 ```
 
-VSCode: Cmd/Ctrl+Shift+P → "TypeScript: Restart TS Server".
+Catat OS, device/emulator, flavor, commit SHA, perintah yang gagal, dan error
+pertama yang relevan. Hapus token, credential, PII, dan isi `.env` dari log.
 
----
+## `flutter` tidak ditemukan
 
-## Backend / Mobile Integration
+Pastikan folder `bin` dari Flutter SDK ada di `PATH`, buka terminal baru, lalu:
 
-### Idempotency-Key replay tidak balik response yang sama
-
-Cek backend log untuk filter `idempotency:before`. Kemungkinan:
-- TTL key expired (default 24 jam) → backend re-execute
-- Key hashing salah di client (tidak match SHA-256 backend)
-- Method/path beda dari original → backend reject 422 dengan
-  `IDEMPOTENCY_KEY_MISMATCH`
-
-### `/openapi.json` 404
-
-Pastikan `OpenApiController` ada di `Routes.php`:
-```php
-$routes->get('openapi.json', 'OpenApiController::spec');
+```bash
+flutter doctor -v
 ```
 
-di luar group `['filter' => 'jwt']` (route public).
+Gunakan versi SDK yang dikunci repo/CI. Jangan memperbaiki build dengan upgrade
+global tanpa memperbarui lock/version policy melalui PR.
 
-### Multi-tenant: super admin tidak bisa akses company tertentu
+## Dependency gagal diambil
 
-Set header `X-Company-Id` di request, atau panggil
-`switchCompany(companyId)` di auth store. Mobile app simpan ke
-`activeCompanyId` di `client.ts` lewat `setActiveCompanyId()`.
+```bash
+flutter pub get
+flutter pub outdated
+```
 
----
+Periksa koneksi, proxy perusahaan, certificate trust, dan versi SDK yang
+diminta `pubspec.yaml`. Jangan menghapus `pubspec.lock` pada aplikasi hanya
+untuk memaksa resolver memilih versi baru.
 
-## Performance
+Jika cache lokal benar-benar dicurigai rusak:
 
-### App lemot saat scroll list panjang
+```bash
+flutter pub cache repair
+```
 
-- Pakai `FlatList` (sudah default), bukan ScrollView untuk list >50 item
-- Set `initialNumToRender={20}` + `maxToRenderPerBatch={10}`
-- Memoize `renderItem` dengan `useCallback`
+## Device tidak terdeteksi
 
-Saat ini Tier 1 modules masih pakai `.map()` untuk simplicity di MVP.
-Migration ke FlatList di-defer ke polish sprint kalau dataset > 100 row.
+```bash
+flutter devices
+flutter emulators
+adb devices
+```
 
-### Battery drain karena GPS
+Android:
 
-Tidak ada background location di app ini (sengaja). Foreground GPS hanya
-saat user tap clock-in/out. Kalau battery drain tetap tinggi, cek device
-log untuk other RN modules yang mungkin polling background.
+- Aktifkan USB debugging dan terima RSA prompt.
+- Status `unauthorized` berarti otorisasi device belum diterima.
+- Pastikan satu instalasi `adb` yang aktif berasal dari Android SDK yang sama.
 
----
+iOS:
 
-Halaman ini sengaja short. Untuk deep dive arsitektur, lihat
-`mobile/README.md` dan 4 sprint docs di `docs/SPRINT_MOBILE_M*.md`.
+- Build memerlukan macOS dan Xcode.
+- Buka Xcode sekali untuk menerima license dan memasang component.
+- Percayai developer certificate pada device fisik.
+
+## App tidak bisa mengakses backend
+
+- Android Emulator memakai `http://10.0.2.2:8080`, bukan `localhost`.
+- iOS Simulator dapat memakai `http://127.0.0.1:8080` jika backend berjalan
+  pada Mac yang sama.
+- Device fisik memakai IP LAN host atau staging HTTPS.
+- Pastikan firewall membuka port backend dan kedua perangkat berada di jaringan
+  yang dapat saling menjangkau.
+
+Tes endpoint dari browser/curl pada device network sebelum mengubah Dio.
+Untuk production, cleartext HTTP tidak boleh diaktifkan sebagai workaround.
+
+## Perubahan source tidak muncul
+
+Saat `flutter run` aktif:
+
+- tekan `r` untuk hot reload;
+- tekan `R` untuk hot restart;
+- restart penuh diperlukan untuk perubahan native plugin, manifest,
+  entitlement, generated code tertentu, atau inisialisasi sebelum `runApp`.
+
+Jika generated code berubah, jalankan generator yang ditetapkan proyek lalu
+ulang `flutter analyze`. Gunakan `flutter clean` hanya setelah error build
+menunjukkan artifact stale; perintah ini menghapus artifact dan membuat build
+berikutnya lebih lambat.
+
+## Android build gagal
+
+Mulai dari:
+
+```bash
+flutter doctor -v
+flutter build apk --debug -v
+```
+
+Periksa error pertama sebelum cascade Gradle. Penyebab umum:
+
+- JDK/Android SDK tidak sesuai dengan Flutter SDK yang dikunci.
+- `applicationId`, namespace, atau manifest merge tidak konsisten.
+- `google-services.json` tidak cocok dengan application ID/flavor.
+- Keystore release atau environment variable signing tidak tersedia.
+- Plugin membutuhkan `minSdk`/permission/Gradle config tambahan.
+
+Jangan commit `local.properties`, keystore, atau password signing.
+
+## iOS build / CocoaPods gagal
+
+Jalankan di macOS:
+
+```bash
+flutter doctor -v
+flutter pub get
+cd ios
+pod install --repo-update
+cd ..
+flutter build ios --debug
+```
+
+Buka `ios/Runner.xcworkspace`, bukan `.xcodeproj`. Periksa bundle ID, team,
+provisioning, entitlements, deployment target, `GoogleService-Info.plist`, dan
+permission descriptions. `flutter build ipa` membutuhkan konfigurasi signing
+release yang valid.
+
+## `flutter analyze` gagal
+
+```bash
+dart format .
+flutter analyze
+```
+
+Perbaiki warning/error; jangan menurunkan lint global untuk satu file. Untuk
+generated code, gunakan exclusion yang sempit dan terdokumentasi.
+
+## Test flaky atau menggantung
+
+```bash
+flutter test --reporter expanded
+flutter test test/path/to/failing_test.dart
+```
+
+- Gunakan fake clock/network/storage; jangan bergantung ke API nyata.
+- Pastikan async animation/timer selesai (`pump`, `pumpAndSettle` dengan
+  batas yang masuk akal).
+- Reset provider container dan database temporary pada setiap test.
+- Integration test yang butuh backend harus memakai seed dan tenant khusus.
+
+## Login berulang / refresh loop
+
+Periksa bahwa:
+
+- hanya satu refresh request berjalan pada waktu yang sama;
+- request lain menunggu hasil refresh;
+- refresh gagal menghapus session dan mengarahkan ke login sekali;
+- endpoint refresh tidak melalui interceptor refresh yang sama;
+- clock device tidak terlalu melenceng;
+- `X-Company-Id` tidak bocor antar-session.
+
+Jangan mencetak token untuk debug. Log request ID, status code, endpoint, dan
+error code yang sudah disanitasi.
+
+## Offline outbox tidak terkirim
+
+Verifikasi record memiliki idempotency key, tenant, created time, retry count,
+dan payload valid. Connectivity hanya memicu percobaan; response request nyata
+menentukan online/offline. Item `401`, validation error, atau conflict tidak
+boleh retry tanpa batas.
+
+Untuk clock-in/out, jangan membuat idempotency key baru pada setiap retry karena
+akan menghasilkan duplikasi server-side.
+
+## FCM tidak diterima
+
+- Pastikan Firebase app cocok dengan bundle/application ID dan flavor.
+- Minta permission pada iOS dan Android yang memerlukannya.
+- Sinkronkan token setelah login dan saat token di-refresh.
+- Bedakan foreground, background, dan terminated handling.
+- Background handler harus top-level dan dipertahankan dari tree shaking.
+- Uji notification payload dan data payload secara terpisah.
+
+## Biometric, kamera, atau GPS gagal
+
+Periksa permission platform, usage description, capability device, dan state
+denied/permanently denied. Tampilkan fallback yang aman:
+
+- biometric gagal → password/2FA, bukan bypass auth;
+- lokasi gagal → jangan memalsukan koordinat;
+- kamera gagal → izinkan retry atau flow manual sesuai policy backend.
+
+## Build terlalu besar
+
+```bash
+flutter build appbundle --analyze-size
+flutter build apk --split-per-abi
+```
+
+Audit asset, font, native symbol, dan plugin yang tidak digunakan. Jangan
+menilai ukuran release dari APK debug.
+
+## Membuat laporan issue
+
+Gunakan format berikut:
+
+```text
+OS:
+Flutter version:
+Device/emulator:
+Flavor:
+Commit:
+Command:
+Expected:
+Actual:
+First relevant error:
+Reproduction steps:
+```
+
+Lampirkan log yang sudah disanitasi. Untuk panduan lebih lengkap lihat
+`docs/04_Mobile_App/TUTORIAL_MOBILE_06_TROUBLESHOOTING.md`.

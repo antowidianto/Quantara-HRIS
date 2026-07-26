@@ -1,5 +1,8 @@
 # Sprint M1 — Tier 2 Modules + Auth Polish
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Lanjutan dari `docs/SPRINT_MOBILE_M0_SCAFFOLD.md`. Sprint ini menambahkan
 > modul Tier 2 (Overtime, Reimbursement, Helpdesk, Notifications) plus
 > polish Tier 1 (Forgot password, Biometric helper, Jest test setup).

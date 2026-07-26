@@ -375,7 +375,7 @@ Roadmap ini dibagi menjadi **4 Phase** dengan total estimasi **8-14 bulan**:
 **Modul:** J. Self-Service
 **Effort:** Very High · **Impact:** High (competitive parity)
 
-- [ ] Pilih stack: React Native (lebih cepat dengan tim web existing) vs Flutter
+- [x] Pilih stack: Flutter (keputusan 26 Juli 2026)
 - [ ] Core features Phase 1 (3 bulan):
   - Login + biometric (Face ID / fingerprint)
   - Clock-in/out dengan GPS native + selfie validation
