@@ -1,5 +1,8 @@
 # Sprint M4 — Tier 3 Lite + Hardening + Polish
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Sprint mobile keempat. Fokus: tutup gap dari MOBILE_APP_PLAN Tier 3
 > (modul read-mostly), pasang gerbang produksi (idle auto-lock,
 > minimum-version check, error boundary), dan tarik i18n keluar dari

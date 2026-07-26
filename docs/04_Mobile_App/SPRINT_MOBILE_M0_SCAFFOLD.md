@@ -1,5 +1,8 @@
 # Sprint M0 — Mobile App Scaffold + Backend Prep
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Eksekusi recommend-ed module dari `docs/MOBILE_APP_PLAN.md`. Backend
 > prep work + React Native + TypeScript scaffold untuk Tier 1 MVP.
 > **Update:** 28 Mei 2026.

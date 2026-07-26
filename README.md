@@ -6,7 +6,7 @@ Tiga aplikasi terintegrasi:
 
 - **Backend** — CodeIgniter 4 REST API
 - **Frontend** — Vue 3 SPA (PWA-ready, offline queue)
-- **Mobile** — React Native 0.76 (Tier 1–3 modules)
+- **Mobile** — Flutter (Tier 1–3 modules)
 
 [![CI](https://github.com/antowidianto/Quantara-HRIS/actions/workflows/ci.yml/badge.svg)](https://github.com/antowidianto/Quantara-HRIS/actions/workflows/ci.yml)
 [![Mobile CI](https://github.com/antowidianto/Quantara-HRIS/actions/workflows/mobile-ci.yml/badge.svg)](https://github.com/antowidianto/Quantara-HRIS/actions/workflows/mobile-ci.yml)
@@ -15,7 +15,7 @@ Tiga aplikasi terintegrasi:
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js)
 ![Vite](https://img.shields.io/badge/Vite-5-646CFF?logo=vite)
 ![Tailwind](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss)
-![React Native](https://img.shields.io/badge/React%20Native-0.76-61DAFB?logo=react)
+![Flutter](https://img.shields.io/badge/Flutter-stable-02569B?logo=flutter)
 
 ---
 
@@ -25,7 +25,7 @@ Tiga aplikasi terintegrasi:
 |----------|----------------------------------------------------------------------|
 | Backend  | CodeIgniter 4.5, PHP 8.1+ (CI matrix: 8.1 / 8.2 / 8.3)                |
 | Frontend | Vue 3.5 + Vite 5 + Pinia 2 + Vue Router 4 + Tailwind 3 + Heroicons    |
-| Mobile   | React Native 0.76 + TypeScript 5 + Zustand + react-query 5            |
+| Mobile   | Flutter stable + Dart + Riverpod + Dio + go_router                  |
 | Database | MySQL 8 / MariaDB 10.6+ (SQLite untuk dev cepat)                      |
 | Auth     | JWT (access + refresh, single-flight refresh) + 2FA TOTP + 8 backup codes |
 | Mail     | SMTP (PHPMailer) + queue + exponential backoff                        |
@@ -34,7 +34,7 @@ Tiga aplikasi terintegrasi:
 | PDF      | dompdf 2                                                              |
 | Excel    | phpoffice/phpspreadsheet 2                                            |
 | Charts   | Chart.js 4 + vue-chartjs                                              |
-| Testing  | PHPUnit 10 + PHPStan 1.12 + Pint, Vitest 2 + ESLint + Playwright, Jest 29 (mobile) |
+| Testing  | PHPUnit 10 + PHPStan 1.12 + Pint, Vitest 2 + ESLint + Playwright, Flutter unit/widget tests |
 | CI       | GitHub Actions (backend matrix, frontend matrix, mobile pipeline)     |
 | Container | Docker Compose (dev + prod), multi-stage Dockerfile                  |
 | AI Assistant | Mock, Gemini, Groq, OpenAI, Anthropic, atau provider custom dengan API Chat Completions kompatibel OpenAI |
@@ -76,18 +76,18 @@ hris-project-1/
 │   ├── Dockerfile.dev             # Dev build
 │   └── nginx.conf                 # SPA fallback + gzip + cache headers
 │
-├── mobile/                        # React Native + TypeScript
-│   ├── src/
+├── mobile/                        # Flutter + Dart
+│   ├── lib/
 │   │   ├── features/              # 16 feature modules (auth, attendance, leave, ...)
-│   │   ├── api/                   # axios + interceptors (refresh, idempotency, X-Company-Id)
-│   │   ├── store/                 # Zustand (auth)
-│   │   ├── theme/                 # Light/dark via useColorScheme()
-│   │   ├── i18n/                  # ID/EN
-│   │   └── lib/                   # MMKV outbox, Keychain wrapper
+│   │   ├── core/network/          # Dio + interceptor (refresh, idempotency, X-Company-Id)
+│   │   ├── core/storage/          # Secure storage + offline database
+│   │   ├── routing/               # go_router
+│   │   ├── theme/                 # Material 3 light/dark theme
+│   │   └── l10n/                  # ID/EN
+│   ├── test/                      # Unit + widget tests
 │   ├── android/                   # Native Android project
 │   ├── ios/                       # Native iOS project
-│   ├── native-config/             # Manifest + Info.plist additions
-│   └── scripts/                   # init-native.sh
+│   └── pubspec.yaml               # Dependency + asset manifest
 │
 ├── adms-middleware/               # ZKTeco/ADMS push middleware
 │   └── index.js                   # Forwarder to backend API
@@ -104,7 +104,7 @@ hris-project-1/
 │   ├── DEPLOYMENT.md
 │   ├── DATA_PRIVACY.md            # UU PDP compliance
 │   ├── PWA.md                     # Service worker + offline queue
-│   ├── MOBILE_APP_PLAN.md
+│   ├── 04_Mobile_App/             # Flutter migration, plan, tutorial, sprint archive
 │   ├── decisions/0001-…           # Architecture Decision Records
 │   └── …                          # Sprint logs + per-modul detail
 │
@@ -179,7 +179,9 @@ Selain driver bawaan, backend mendukung provider pihak ketiga dengan endpoint **
 - Webhook outbox dengan HMAC signature + replay protection
 
 ### Mobile App
-React Native 0.76 dengan **16 feature module**:
+Aplikasi Flutter dengan **16 feature module**. Runtime dan source React Native
+telah dihapus dari aplikasi aktif; lihat
+`docs/04_Mobile_App/MOBILE_FLUTTER_MIGRATION.md` untuk catatan cutover.
 
 | Tier | Modul                                                                     |
 |------|---------------------------------------------------------------------------|
@@ -188,14 +190,14 @@ React Native 0.76 dengan **16 feature module**:
 | 3    | Notifications (in-app + push), Performance, Training, Tasks, Settings (theme, locale, DND, push prefs) |
 
 Highlights:
-- Outbox MMKV untuk clock-in/out + leave saat offline, replay otomatis di NetInfo online / AppState active
-- Keychain untuk JWT, MMKV untuk preferensi non-rahasia
+- Outbox persisten untuk clock-in/out saat offline, replay otomatis saat koneksi kembali
+- `flutter_secure_storage` untuk JWT; preferences lokal untuk outbox dan identitas device
 - Biometric login (Face ID / Touch ID / Fingerprint)
-- FCM push notification + deep link
-- Light/dark theme mengikuti `useColorScheme()`
-- i18n Bahasa Indonesia + English
+- FCM push notification + deep link melalui `firebase_messaging` dan `go_router`
+- Material 3 light/dark theme mengikuti pengaturan sistem
+- Antarmuka utama Bahasa Indonesia
 
-Lihat `mobile/README.md` dan `docs/MOBILE_APP_PLAN.md` untuk arsitektur detail.
+Lihat `mobile/README.md` dan `docs/04_Mobile_App/MOBILE_APP_PLAN.md` untuk arsitektur detail.
 
 ---
 
@@ -235,12 +237,11 @@ cp .env.example .env       # set VITE_API_BASE_URL=http://localhost:8080
 npm run dev
 ```
 
-**Terminal 3 — Mobile (opsional, butuh Android SDK / Xcode)**
+**Terminal 3 — Mobile (opsional)**
 ```bash
 cd mobile
-npm install
-cp .env.example .env       # set API_BASE_URL=http://10.0.2.2:8080 (Android emulator)
-npm run android            # atau: npm run ios
+flutter pub get
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
 ```
 
 Buka `http://localhost:5173`.
@@ -319,9 +320,9 @@ npm run build            # Production build (cek bundle size)
 
 # Mobile
 cd mobile
-npm run tsc              # TypeScript type-check
-npm run lint             # ESLint
-npm test                 # Jest
+dart format --output=none --set-exit-if-changed .
+flutter analyze
+flutter test
 ```
 
 Detail static analysis & coverage policy ada di `CONTRIBUTING.md`.
@@ -333,7 +334,7 @@ Detail static analysis & coverage policy ada di `CONTRIBUTING.md`.
 | Workflow                       | Trigger                                         | Jobs                                                                   |
 |--------------------------------|-------------------------------------------------|------------------------------------------------------------------------|
 | `.github/workflows/ci.yml`     | push / PR ke `main`, `master`, `develop`        | Backend matrix PHP 8.1/8.2/8.3 (PHPStan + PHPUnit) · Frontend matrix Node 18/20 (ESLint + Vitest + build) |
-| `.github/workflows/mobile-ci.yml` | push / PR yang menyentuh `mobile/**`          | TypeScript check + ESLint + Jest. Android Gradle dry-run di tag `mobile-*` |
+| `.github/workflows/mobile-ci.yml` | push / PR yang menyentuh `mobile/**`          | Format Dart + `flutter analyze` + `flutter test` + build APK Android |
 | `.github/dependabot.yml`       | Mingguan                                        | Auto-update composer + npm + GitHub Actions                            |
 
 ---
@@ -348,7 +349,8 @@ Detail static analysis & coverage policy ada di `CONTRIBUTING.md`.
 - **`docs/AUDIT.md`** — audit log architecture & hash chain
 - **`docs/DATA_PRIVACY.md`** — UU PDP compliance
 - **`docs/PWA.md`** — service worker + offline queue
-- **`docs/MOBILE_APP_PLAN.md`** — mobile roadmap & arsitektur
+- **`docs/04_Mobile_App/MOBILE_APP_PLAN.md`** — mobile roadmap & arsitektur Flutter
+- **`docs/04_Mobile_App/MOBILE_FLUTTER_MIGRATION.md`** — urutan migrasi, parity gate, dan cutover
 - **`docs/02_Business_Features/APPROVAL_GOVERNANCE_FMCG_INDONESIA.md`** — governance approval, tier risiko, matriks approver, transactional outbox, dan status adapter domain
 - **`docs/CRON_JOBS.md`** — daftar scheduled task
 - **`docs/BACKUP_DR.md`** — backup & disaster recovery

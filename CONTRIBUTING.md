@@ -91,9 +91,10 @@ Hindari commit "WIP", "fix typo", "update". Squash di PR sebelum merge.
 - [ ] `npm run build` → bundle berhasil dibuat (cek size kalau ada warning)
 
 **Mobile (kalau ada perubahan di `mobile/`):**
-- [ ] `npm run tsc` → no error
-- [ ] `npm run lint` → no errors
-- [ ] `npm test` → semua hijau
+- [ ] `dart format --output=none --set-exit-if-changed lib test` → bersih
+- [ ] `flutter analyze` → no issues
+- [ ] `flutter test` → semua hijau
+- [ ] `flutter build apk --debug` → build berhasil
 
 **Umum:**
 - [ ] Update dokumentasi terkait kalau perubahan mengubah behavior public (`docs/`, `README.md`, `CONTRIBUTING.md`)
@@ -141,7 +142,7 @@ PR Dependabot wajib di-review dalam 7 hari.
 
 - Backend service / controller change → minimal 1 backend dev review
 - Frontend view / store change → minimal 1 frontend dev review
-- Mobile change → minimal 1 mobile dev review (atau full-stack yang familiar React Native)
+- Mobile change → minimal 1 mobile dev review (atau full-stack yang familiar Flutter/Dart)
 - Migration DB → wajib review tambahan dari ops/DBA
 - Security-sensitive (auth, encryption, audit, idempotency) → wajib security/lead review
 
@@ -173,22 +174,22 @@ PR Dependabot wajib di-review dalam 7 hari.
 - Tailwind utility-first. Hindari custom CSS kecuali untuk animasi / edge case.
 - State management: Pinia store untuk auth + UI shared state. Composable untuk logic lokal.
 
-### Mobile (React Native + TypeScript)
+### Mobile (Flutter + Dart)
 
-- ESLint + Prettier (config dari `@react-native/eslint-config`).
-- TypeScript strict mode. Run: `npm run tsc` sebelum commit.
-- State: Zustand untuk auth, react-query untuk server state. Tidak pakai Redux.
-- Storage: Keychain untuk secret (JWT), MMKV untuk preferensi non-rahasia + outbox.
-- Networking: pakai `src/api/client.ts` (axios singleton) — **jangan** bikin axios instance baru di feature module.
+- Format dengan `dart format`; static analysis dengan `flutter analyze`.
+- State dan dependency injection: Riverpod. Jangan menambah state manager kedua.
+- Pisahkan UI, view model/controller, repository, dan service. Widget tidak memuat business logic.
+- Storage: `flutter_secure_storage` untuk secret (JWT); database lokal untuk preferensi, cache, dan outbox.
+- Networking: pakai singleton Dio di `lib/core/network/api_client.dart` — **jangan** membuat Dio instance baru di feature module.
 - Idempotency-Key wajib di POST mutation kritis (clock-in/out, leave create) — auto-injected oleh interceptor.
-- Multi-tenant header `X-Company-Id` untuk super admin — di-set di `useAuthStore`.
-- String Indonesia → `t('tab.attendance')` (pakai `@/i18n`).
+- Multi-tenant header `X-Company-Id` untuk super admin diambil dari session provider.
+- String tampilan wajib masuk ARB di `lib/l10n/`; jangan hardcode Bahasa Indonesia di widget.
 
 ### Test
 
 - **Backend:** `tests/Unit/` untuk pure function. Tambahkan `tests/Feature/` (in-progress, lihat audit E1/E2) untuk lintas-tabel.
 - **Frontend:** `__tests__/` co-located dengan composable / component, atau `tests/` di root.
-- **Mobile:** `__tests__/` co-located. Gunakan `@testing-library/react-native` untuk render component.
+- **Mobile:** `test/` mengikuti struktur `lib/`. Gunakan unit test untuk service/repository/view model dan widget test untuk UI.
 - Test description: `it('returns null when ...')` — bukan `it('test1', ...)`.
 - Jangan bikin test yang depend pada urutan eksekusi (gunakan `beforeEach` reset state).
 - Setiap bug fix harus disertai regression test yang reproduce bug sebelum perbaikan.
@@ -223,9 +224,10 @@ Untuk dev tanpa Docker, lihat `SETUP.md`. Untuk multi-environment workflow (loca
 
 ```bash
 cd mobile
-npm install
+flutter doctor
+flutter pub get
 cp .env.example .env       # set API_BASE_URL=http://10.0.2.2:8080 untuk Android emulator
-npm run android            # atau: npm run ios (perlu macOS + CocoaPods)
+flutter run                # build iOS memerlukan macOS + Xcode
 ```
 
 Lihat `mobile/README.md` untuk konfigurasi native (FCM, biometric, dll) dan `mobile/TROUBLESHOOTING.md` kalau build gagal.

@@ -3,7 +3,9 @@
 > Rekomendasi modul untuk aplikasi mobile (Android + iOS) berdasarkan
 > codebase HRIS existing.
 > **Audience:** product manager + tech lead saat scoping mobile project.
-> **Update:** 28 Mei 2026.
+> **Update:** 26 Juli 2026 — keputusan stack diubah ke Flutter.
+> Detail eksekusi: [MOBILE_FLUTTER_MIGRATION.md](MOBILE_FLUTTER_MIGRATION.md).
+> Keputusan arsitektur: `docs/decisions/0002-mobile-flutter-migration.md`.
 
 ---
 
@@ -239,16 +241,23 @@ Untuk karyawan baru:
 
 | Stack                         | Pro                                                  | Con                                              |
 |-------------------------------|------------------------------------------------------|--------------------------------------------------|
-| **React Native + TypeScript** | Single codebase iOS+Android, talent pool besar, hot reload | Bridge perf overhead untuk camera/GPS heavy ops |
-| **Flutter**                   | UI konsisten cross-platform, perf bagus, single codebase | Dart kurang familiar untuk tim yang sudah Vue 3 |
+| **React Native + TypeScript** | Talent pool JS/TS besar | Dua ekosistem JavaScript berbeda (Vue dan React), bridge/plugin migration risk |
+| **Flutter**                   | UI konsisten, native compilation, stateful hot reload, single codebase | Perlu upskilling Dart dan rebuild UI |
 | **Native iOS (Swift) + Native Android (Kotlin)** | Best perf + native UX                                | 2× effort, 2× maintenance                       |
 | **Capacitor + Vue 3 (reuse Vue dari web)** | Reuse codebase + composable web              | UX kurang native, navigation transitions terasa beda |
 
-**Rekomendasi:** **React Native + TypeScript** untuk MVP. Alasan:
-- Tim sudah punya familiarity JS/TS dari Vue 3 frontend
-- Camera + GPS native module mature (react-native-camera, react-native-geolocation)
-- Push notification (FCM/APNs) integration via react-native-firebase
-- Code sharing antara mobile + web minimal — fokus delivery, bukan code reuse fanatik
+**Keputusan:** **Flutter** menjadi stack aktif. Alasan:
+- Satu codebase Android+iOS dengan widget dan rendering yang konsisten.
+- Pemisahan UI, view model, repository, dan service cocok untuk domain HRIS
+  yang besar serta mudah diuji.
+- Dukungan resmi untuk stateful hot reload, build Android/iOS, navigation,
+  offline-first architecture, dan integrasi Firebase.
+- Arsip dan riwayat Git React Native dipakai sebagai referensi behavior saat
+  diperlukan, bukan dihidupkan kembali atau diterjemahkan per komponen.
+
+Stack aktif: Riverpod (state + DI), `go_router` (navigation), Dio (HTTP),
+`flutter_secure_storage` (secret), storage lokal (cache/outbox), dan
+`firebase_messaging` (push).
 
 ### 6.2 API Strategy
 
@@ -290,7 +299,7 @@ Critical untuk modul attendance (sering kerja di lapangan no signal):
 
 | Sprint | Deliverable                                   | Duration |
 |--------|-----------------------------------------------|----------|
-| M0     | Setup RN project + CI + skeleton screens     | 2 minggu |
+| M0     | Setup Flutter project + CI + skeleton screens | 2 minggu |
 | M1     | Auth + Profile (Tier 1.1, 1.6)               | 3 minggu |
 | M2     | Attendance + offline sync (Tier 1.2)         | 4 minggu |
 | M3     | Leave + Payslip (Tier 1.3, 1.5)              | 3 minggu |
@@ -368,3 +377,4 @@ NOT in mobile (stays in web):
   ✗ Admin / role management
   ✗ Reporting dashboard
   ✗ Org structure designer
+```

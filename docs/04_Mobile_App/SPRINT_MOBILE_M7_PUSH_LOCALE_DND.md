@@ -1,5 +1,8 @@
 # Sprint M7 — Push Localization + DND Quiet Hours
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Sprint mobile ketujuh. Fokus pada dua item dari M6 backlog yang
 > menuntut perubahan backend: localized push body sesuai user locale
 > dan DND (Do Not Disturb) quiet hours per user.

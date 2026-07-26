@@ -1,51 +1,45 @@
-# OSX
-.DS_Store
-
-# Node
-node_modules/
-npm-debug.log
-yarn-error.log
-
-# Env
-.env
-.env.local
-.env.*.local
-
-# Xcode / iOS
-ios/Pods/
-ios/build/
-ios/.xcode.env.local
-*.xcworkspace
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.perspectivev3
-
-# Android
-android/build/
-android/app/build/
-android/.gradle/
-android/captures/
-android/local.properties
-android/app/release.keystore
-android/app/my-release-key.keystore
-*.iml
-
-# Bundle
-*.jsbundle
-.metro-health-check*
-
-# Expo (kalau migrasi suatu hari)
-.expo/
-
-# Tests
-coverage/
-
-# Editor
-.vscode/
-.idea/
+# Miscellaneous
+*.class
+*.log
+*.pyc
 *.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
 
-# RN
-*.hprof
-metro-cache/
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release

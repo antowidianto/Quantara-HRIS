@@ -1,5 +1,8 @@
 # Sprint M2 — Final Mobile Surface
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Penutup serial mobile sprint. Sprint ini menyelesaikan modul Tier 2
 > terakhir + auth/security UX dalam + native init helper, test stub,
 > dan dokumentasi handover lengkap.

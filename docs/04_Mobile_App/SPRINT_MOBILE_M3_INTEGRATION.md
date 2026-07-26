@@ -1,5 +1,8 @@
 # Sprint M3 — Integration Layer + DevOps
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Penutup integration layer untuk handover ke developer mobile.
 > Sprint ini melengkapi M2 dengan push notification orchestration,
 > badge counter di tabs, biometric quickUnlock di Boot flow, GitHub

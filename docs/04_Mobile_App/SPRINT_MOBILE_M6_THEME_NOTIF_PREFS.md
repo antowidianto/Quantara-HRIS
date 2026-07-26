@@ -1,5 +1,8 @@
 # Sprint M6 — Theme Override + Notification Preferences
 
+> **Arsip React Native:** catatan ini mendokumentasikan implementasi legacy.
+> Feature baru dan migrasi mengikuti `MOBILE_FLUTTER_MIGRATION.md`.
+
 > Sprint mobile keenam. Fokus: dua item paling-visible dari M5 backlog —
 > theme override (light/dark/system) dan notification preferences UI
 > per-channel.

@@ -1,30 +1,18 @@
-# Mobile CI — HRIS React Native
-#
-# Triggered di setiap push/PR yang menyentuh `mobile/`. Jalankan:
-#   1. Install dependency
-#   2. TypeScript check (`tsc --noEmit`)
-#   3. Lint (eslint)
-#   4. Unit test (jest)
-#
-# Build native (Android APK, iOS IPA) butuh runner berkapasitas besar
-# (Android SDK, Xcode) dan biasanya di-trigger lewat tag release.
-# Untuk MVP, hanya verify kode di-PR. Native build di-defer ke
-# CI separate (Bitrise / Codemagic / GitHub Actions self-hosted).
-
 name: Mobile CI
 
 on:
   push:
     paths:
-      - 'mobile/**'
-      - '.github/workflows/mobile-ci.yml'
+      - "mobile/**"
+      - ".github/workflows/mobile-ci.yml"
   pull_request:
     paths:
-      - 'mobile/**'
+      - "mobile/**"
+      - ".github/workflows/mobile-ci.yml"
 
 jobs:
   verify:
-    name: TS + Lint + Tests
+    name: Format, analyze, and test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,48 +20,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: subosito/flutter-action@v2
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: mobile/package-lock.json
+          flutter-version: "3.44.7"
+          channel: stable
+          cache: true
 
-      - name: Install deps
-        run: npm ci
+      - name: Resolve dependencies
+        run: flutter pub get
 
-      - name: TypeScript check
-        run: npm run tsc
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
 
-      - name: Lint
-        run: npm run lint
-        continue-on-error: true   # eslint config belum selesai; warn dulu
+      - name: Analyze
+        run: flutter analyze
 
-      - name: Unit tests
-        run: npm test -- --ci --reporters=default --reporters=summary
+      - name: Run tests
+        run: flutter test
 
-  android-build-check:
-    name: Android Gradle dry-run
+  android-build:
+    name: Build Android debug APK
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/mobile-')
+    defaults:
+      run:
+        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: mobile/package-lock.json
-
       - uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: "17"
 
-      - name: Install JS deps
-        run: npm ci
-        working-directory: mobile
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.7"
+          channel: stable
+          cache: true
 
-      - name: Gradle assembleDebug (dry)
-        run: ./gradlew assembleDebug --dry-run
-        working-directory: mobile/android
-        continue-on-error: true   # baru aktif setelah `init-native.sh` jalan
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --debug

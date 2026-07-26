@@ -550,20 +550,20 @@
 **Modul:** J. Self-Service · **Effort:** Very High · **Impact:** High
 
 #### Decision
-- [ ] Pilih stack: React Native (rekomendasi karena tim web existing)
+- [x] Pilih stack: Flutter (keputusan 26 Juli 2026)
 
 #### Mobile Setup
-- [ ] Init project di `mobile/` dengan TypeScript
-- [ ] Setup React Navigation, Redux Toolkit / Zustand
-- [ ] Setup Axios client dengan interceptor JWT
+- [ ] Init project Flutter di `mobile/` dengan Dart null safety
+- [ ] Setup `go_router` dan Riverpod
+- [ ] Setup Dio client dengan interceptor JWT
 - [ ] Setup Fastlane untuk iOS+Android build CI
 
 #### Core Features
-- [ ] Login + biometric (react-native-biometrics)
+- [ ] Login + biometric melalui plugin Flutter yang disetujui
 - [ ] Clock-in/out:
-  - [ ] GPS native (react-native-geolocation-service)
-  - [ ] Selfie validation (react-native-vision-camera)
-  - [ ] Offline queue dengan AsyncStorage
+  - [ ] GPS melalui platform service Flutter
+  - [ ] Selfie validation melalui camera service Flutter
+  - [ ] Offline queue dengan database lokal
 - [ ] Approval inbox dengan FCM push
 - [ ] Lihat saldo cuti + ajukan cuti
 - [ ] Lihat slip gaji terakhir + download PDF

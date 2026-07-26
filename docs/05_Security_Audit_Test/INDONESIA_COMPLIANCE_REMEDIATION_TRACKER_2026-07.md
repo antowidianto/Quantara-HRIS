@@ -338,7 +338,7 @@ tanpa policy eksplisit.
 
 - [ ] Seluruh `composer ci` lulus.
 - [ ] Frontend test, lint, i18n, build, dan Playwright lulus.
-- [ ] Mobile Jest, TypeScript, lint, dan build release lulus.
+- [ ] Mobile Flutter format, analyze, unit/widget/integration test, dan build release lulus.
 - [ ] Fresh MySQL dan upgrade snapshot produksi tersanitasi lulus.
 - [ ] Pentest independen dan remediation retest selesai.
 - [ ] Restore drill terisolasi memverifikasi count, hash, attachment, dan login.
