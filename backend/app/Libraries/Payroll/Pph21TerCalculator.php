@@ -296,7 +296,9 @@ class Pph21TerCalculator
         float $bpjsDeductionYearly = 0
     ): array {
         $yearly = $this->calculateYearlyProgressive($grossYearly, $ptkp, $year, $bpjsDeductionYearly);
-        $december = max(0, $yearly['tax'] - $alreadyPaidTer);
+        // Nilai negatif adalah kelebihan potong yang wajib dikembalikan kepada
+        // pekerja; jangan clamp ke nol (PMK 168/2023).
+        $december = $yearly['tax'] - $alreadyPaidTer;
 
         return [
             'december_tax'  => round($december),

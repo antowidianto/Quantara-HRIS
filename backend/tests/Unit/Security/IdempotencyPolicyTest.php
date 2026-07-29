@@ -63,12 +63,13 @@ final class IdempotencyPolicyTest extends TestCase
     {
         $projectRoot = dirname(ROOTPATH);
         $webPolicy = file_get_contents($projectRoot . '/frontend/src/api/idempotency.js');
-        $mobilePolicy = file_get_contents($projectRoot . '/mobile/src/api/idempotencyPolicy.ts');
+        $mobilePolicy = file_get_contents($projectRoot . '/mobile/lib/core/network/api_client.dart');
 
         self::assertNotFalse($webPolicy);
         self::assertNotFalse($mobilePolicy);
         self::assertStringContainsString("['POST', 'PUT', 'PATCH', 'DELETE']", $webPolicy);
-        self::assertStringContainsString("['POST', 'PUT', 'PATCH', 'DELETE']", $mobilePolicy);
+        self::assertStringContainsString("{'POST', 'PUT', 'PATCH', 'DELETE'}", $mobilePolicy);
+        self::assertStringContainsString("'Idempotency-Key'", $mobilePolicy);
         self::assertStringContainsString('return true', $webPolicy);
     }
 

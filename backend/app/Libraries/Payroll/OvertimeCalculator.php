@@ -34,8 +34,14 @@ class OvertimeCalculator
                 $tenthOnwards = max(0.0, $hours - 9.0);
                 $payable = ($first8 * 2.0) + ($ninth * 3.0) + ($tenthOnwards * 4.0);
             }
-            // Catatan: Jika 6 hari kerja, hitungannya sedikit berbeda (7 jam pertama 2x), 
-            // logic ini dapat diperluas jika diperlukan.
+            if (!$isFiveDayWorkweek) {
+                // Pola 6 hari kerja: 7 jam pertama 2x, jam ke-8 3x,
+                // jam ke-9 dan seterusnya 4x (PP 35/2021).
+                $first7 = min(7.0, $hours);
+                $eighth = min(1.0, max(0.0, $hours - 7.0));
+                $ninthOnwards = max(0.0, $hours - 8.0);
+                $payable = ($first7 * 2.0) + ($eighth * 3.0) + ($ninthOnwards * 4.0);
+            }
         }
 
         return $payable;

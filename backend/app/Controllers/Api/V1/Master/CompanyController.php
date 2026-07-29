@@ -83,7 +83,8 @@ class CompanyController extends ApiController
             'kes_employee_rate' => 0.01, 'kes_company_rate' => 0.04, 'kes_max_salary' => 12000000,
             'jht_employee_rate' => 0.02, 'jht_company_rate' => 0.037,
             'jp_employee_rate'  => 0.01, 'jp_company_rate'  => 0.02,  'jp_max_salary'  => 10547400,
-            'jkk_company_rate'  => 0.0024, 'jkm_company_rate' => 0.003,
+            'jkk_company_rate'  => 0.0010, 'jkm_company_rate' => 0.003,
+            'jkp_company_rate'  => 0.0036, 'jkp_max_salary' => 5000000,
             'created_at' => $now, 'updated_at' => $now,
         ]);
 

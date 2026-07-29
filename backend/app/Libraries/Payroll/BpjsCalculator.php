@@ -18,11 +18,12 @@ use App\Libraries\System\CacheService;
  *      Tidak ada plafon (full salary).
  *    - JP (Jaminan Pensiun): 3% total = 2% perusahaan + 1% karyawan.
  *      Plafon upah Rp 10.547.400 (PMK terbaru).
- *    - JKK (Jaminan Kecelakaan Kerja): 0.24% – 1.74% perusahaan only,
- *      tergantung tingkat risiko. Default 0.24%.
- *    - JKM (Jaminan Kematian): 0.3% perusahaan only.
- *    - JKP (Jaminan Kehilangan Pekerjaan, PP 37/2021): 0.46% perusahaan
- *      only, plafon upah Rp 5 juta. Wajib untuk PKWT/PKWTT (Sprint 4).
+ *    - JKK (Jaminan Kecelakaan Kerja): 0,10%–1,60% perusahaan, setelah
+ *      rekomposisi 0,14% untuk pendanaan JKP (PP 6/2025).
+ *    - JKM (Jaminan Kematian): 0,3% perusahaan only.
+ *    - JKP (Jaminan Kehilangan Pekerjaan, PP 6/2025): 0,36% dengan plafon
+ *      upah Rp5 juta; 0,22% bersumber dari Pemerintah Pusat dan 0,14%
+ *      dari rekomposisi JKK. Bukan employer cost tambahan di atas JKK.
  *
  * Caller pattern:
  *
@@ -37,10 +38,11 @@ use App\Libraries\System\CacheService;
 class BpjsCalculator
 {
     /**
-     * Default rates kalau company belum punya entry di tabel `bpjs_rates`.
-     * JKP rate 0.46% (PP 37/2021) dengan plafon Rp 5 juta — wajib aktif
-     * untuk PKWT/PKWTT walau sebenarnya 0.22% subsidi APBN. Yang dibebankan
-     * employer secara nominal tetap 0.46% saat dipotong dari payroll.
+     * Default rate efektif sejak 7 Februari 2025 (PP 6/2025).
+     *
+     * `jkp_company_rate` dipertahankan sebagai nama kolom legacy, tetapi
+     * nilainya adalah total program JKP 0,36%, bukan biaya tambahan perusahaan.
+     * Breakdown sumber dana dikembalikan secara eksplisit oleh compute().
      *
      * @return array<string, float>
      */
@@ -55,10 +57,12 @@ class BpjsCalculator
             'jp_employee_rate'  => 0.01,
             'jp_company_rate'   => 0.02,
             'jp_max_salary'     => 10547400.0,
-            'jkk_company_rate'  => 0.0024,
-            'jkm_company_rate'  => 0.003,
-            'jkp_company_rate'  => 0.0046,
-            'jkp_max_salary'    => 5000000.0,
+            'jkk_company_rate'        => 0.0010,
+            'jkm_company_rate'        => 0.003,
+            'jkp_company_rate'        => 0.0036,
+            'jkp_government_rate'     => 0.0022,
+            'jkp_jkk_reallocation_rate' => 0.0014,
+            'jkp_max_salary'          => 5000000.0,
         ];
     }
 
@@ -108,10 +112,8 @@ class BpjsCalculator
         $jkmBase = $base;
         $jkpBase = min($base, (float) $rates['jkp_max_salary']);
 
-        // JKP wajib hanya untuk PKWT/PKWTT (PP 37/2021 Pasal 3).
-        // Karyawan harian/magang/outsourcing tidak wajib (subsidi atau di
-        // luar skema). Kalau employmentStatus null → tetap hitung supaya
-        // backward-compatible; payroll service bisa filter di atas.
+        // Eligibility tetap ditentukan dari status hubungan kerja. Null
+        // dipertahankan sebagai include untuk kompatibilitas caller lama.
         $jkpEligible = EmploymentStatus::isJkpEligible($employmentStatus);
 
         $kesEmployee = round($kesBase * (float) $rates['kes_employee_rate']);
@@ -122,9 +124,19 @@ class BpjsCalculator
         $jpCompany   = round($jpBase  * (float) $rates['jp_company_rate']);
         $jkkCompany  = round($jkkBase * (float) $rates['jkk_company_rate']);
         $jkmCompany  = round($jkmBase * (float) $rates['jkm_company_rate']);
-        $jkpCompany  = $jkpEligible
+        $jkpTotal = $jkpEligible
             ? round($jkpBase * (float) $rates['jkp_company_rate'])
             : 0.0;
+        $jkpGovernment = $jkpEligible
+            ? round($jkpBase * (float) $rates['jkp_government_rate'])
+            : 0.0;
+        $jkpJkkReallocation = $jkpEligible
+            ? round($jkpBase * (float) $rates['jkp_jkk_reallocation_rate'])
+            : 0.0;
+
+        // PP 6/2025 tidak membuat kontribusi JKP menjadi employer cost
+        // tambahan: bagian 0,14% sudah terkandung dalam tarif JKK baru.
+        $jkpCompanyAdditional = 0.0;
 
         return [
             'kes_employee'   => $kesEmployee,
@@ -134,12 +146,15 @@ class BpjsCalculator
             'jp_employee'    => $jpEmployee,
             'jp_company'     => $jpCompany,
             'jkk_company'    => $jkkCompany,
-            'jkm_company'    => $jkmCompany,
-            'jkp_company'    => $jkpCompany,
+            'jkm_company'          => $jkmCompany,
+            'jkp_total'            => $jkpTotal,
+            'jkp_government'       => $jkpGovernment,
+            'jkp_jkk_reallocation' => $jkpJkkReallocation,
+            'jkp_company'          => $jkpCompanyAdditional,
 
             'employee_total' => round($kesEmployee + $jhtEmployee + $jpEmployee),
             'company_total'  => round($kesCompany + $jhtCompany + $jpCompany
-                                 + $jkkCompany + $jkmCompany + $jkpCompany),
+                                 + $jkkCompany + $jkmCompany),
         ];
     }
 

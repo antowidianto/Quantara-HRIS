@@ -24,7 +24,7 @@ final class LeavePolicyService
         return match (strtoupper($category)) {
             'MATERNITY' => $gender === 'F'
                 ? ['ok' => true, 'reason' => '', 'default_days' => 90]
-                : ['ok' => false, 'reason' => 'Cuti melahirkan hanya untuk karyawan perempuan (UU 13/2003 Pasal 82).', 'default_days' => null],
+                : ['ok' => false, 'reason' => 'Cuti melahirkan hanya untuk pekerja perempuan (UU 4/2024).', 'default_days' => null],
             'PATERNITY' => $gender !== 'M'
                 ? ['ok' => false, 'reason' => 'Cuti pendamping melahirkan hanya untuk karyawan laki-laki.', 'default_days' => null]
                 : ($marital !== 'MARRIED'
@@ -40,6 +40,58 @@ final class LeavePolicyService
             'HAJJ' => ['ok' => true, 'reason' => '', 'default_days' => 40],
             'ANNUAL' => $this->annualEligibility($employee),
             default => ['ok' => true, 'reason' => '', 'default_days' => null],
+        };
+    }
+
+    /**
+     * Hak minimum terkait kelahiran menurut UU 4/2024.
+     *
+     * Durasi melahirkan dinyatakan dalam bulan karena undang-undang memakai
+     * satuan bulan, bukan konversi tetap 30 hari. Tambahan bulan ke-4 sampai
+     * ke-6 mensyaratkan kondisi khusus dan surat dokter. Upah bulan 1–4
+     * dibayar penuh, bulan 5–6 paling sedikit 75%.
+     *
+     * @return array<string,mixed>
+     */
+    public function kiaEntitlement(
+        string $category,
+        bool $specialCondition = false,
+        int $approvedAdditionalPaternityDays = 0,
+    ): array {
+        return match (strtoupper($category)) {
+            'MATERNITY' => [
+                'duration_unit' => 'MONTH',
+                'base_duration' => 3,
+                'conditional_additional_duration' => $specialCondition ? 3 : 0,
+                'max_duration' => 6,
+                'requires_medical_certificate_for_additional' => true,
+                'pay_phases' => [
+                    ['month_from' => 1, 'month_to' => 4, 'minimum_pay_rate' => 1.0],
+                    ['month_from' => 5, 'month_to' => 6, 'minimum_pay_rate' => 0.75],
+                ],
+                'legal_basis' => 'UU_4_2024',
+            ],
+            'PATERNITY' => [
+                'duration_unit' => 'DAY',
+                'base_duration' => 2,
+                'conditional_additional_duration' => min(
+                    3,
+                    max(0, $approvedAdditionalPaternityDays),
+                ),
+                'max_duration' => 5,
+                'minimum_pay_rate' => 1.0,
+                'legal_basis' => 'UU_4_2024',
+            ],
+            'MISCARRIAGE' => [
+                'duration_unit' => 'MONTH',
+                'base_duration' => 1.5,
+                'duration_follows_medical_certificate' => true,
+                'minimum_pay_rate' => 1.0,
+                'legal_basis' => 'UU_4_2024',
+            ],
+            default => throw new \InvalidArgumentException(
+                "Kategori hak KIA tidak didukung: {$category}",
+            ),
         };
     }
 

@@ -36,6 +36,18 @@ class OvertimeCalculatorTest extends CIUnitTestCase
         $this->assertEquals(23.0, OvertimeCalculator::calculatePayableHours(10.0, true, true));
     }
 
+    public function testCalculatePayableHoursHoliday6DaysWorkweek(): void
+    {
+        $this->assertEquals(14.0, OvertimeCalculator::calculatePayableHours(7.0, true, false));
+        $this->assertEquals(17.0, OvertimeCalculator::calculatePayableHours(8.0, true, false));
+        $this->assertEquals(21.0, OvertimeCalculator::calculatePayableHours(9.0, true, false));
+
+        $calculator = new StatutoryOvertimeCalculator();
+        $hourly = 10_000_000 / 173;
+        $expected = round(21.0 * $hourly);
+        $this->assertSame($expected, $calculator->calculate(10_000_000, 9.0, 'HOLIDAY', 6));
+    }
+
     public function testPlanRealizationVarianceAndPayrollHandoff(): void
     {
         $calculator = new StatutoryOvertimeCalculator();
@@ -56,5 +68,6 @@ class OvertimeCalculatorTest extends CIUnitTestCase
         $payroll = file_get_contents(APPPATH . 'Libraries/Payroll/PayrollEmployeeCalculationService.php');
         $this->assertNotFalse($payroll);
         $this->assertStringContainsString("whereIn('status', ['APPROVED', 'REALIZED'])", $payroll);
+        $this->assertStringContainsString('$workDaysPerWeek', $payroll);
     }
 }

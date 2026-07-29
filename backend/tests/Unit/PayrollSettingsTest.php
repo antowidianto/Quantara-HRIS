@@ -53,6 +53,7 @@ class PayrollSettingsTest extends TestCase
         $this->assertSame(173, $all['overtime_hours_per_month']);
         $this->assertSame(8, $all['overtime_to_leave_hours_per_day']);
         $this->assertTrue($all['absent_deduction_enabled']);
+        $this->assertSame(5, $all['work_days_per_week']);
     }
 
     // ─── Constants ────────────────────────────────────────────────
@@ -63,5 +64,7 @@ class PayrollSettingsTest extends TestCase
         $this->assertSame(22, PayrollSettings::DEFAULT_WORKING_DAYS_PER_MONTH);
         $this->assertSame(173, PayrollSettings::DEFAULT_OVERTIME_HOURS_PER_MONTH);
         $this->assertSame(8, PayrollSettings::DEFAULT_OVERTIME_TO_LEAVE_HOURS_PER_DAY);
+        $this->assertSame(5, PayrollSettings::DEFAULT_WORK_DAYS_PER_WEEK);
+        $this->assertSame(5, $this->cfg->workDaysPerWeek(null));
     }
 }

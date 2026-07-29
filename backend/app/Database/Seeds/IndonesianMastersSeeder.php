@@ -6,8 +6,8 @@ use CodeIgniter\Database\Seeder;
 
 /**
  * Seeder data master khas Indonesia:
- *  - regional_minimum_wages (UMP 2026 per provinsi)
- *  - holidays (libur nasional 2026 per Kepmenaker)
+ *  - regional_minimum_wages (contoh non-authoritative; tidak untuk payroll)
+ *  - holidays (17 hari libur nasional 2026 berdasarkan SKB 3 Menteri)
  *
  * Aman untuk dijalankan berulang (idempotent): cek existing dulu sebelum insert.
  *
@@ -23,9 +23,11 @@ class IndonesianMastersSeeder extends Seeder
     }
 
     /**
-     * UMP 2026 per provinsi (estimasi naik ~6.5% dari UMP 2025).
-     * Angka ini DEFAULT awal — admin wajib memutakhirkan sesuai SK Gubernur
-     * resmi tahun berjalan via menu Settings > UMP/UMK.
+     * CONTOH UMP/UMK 2026 non-authoritative.
+     *
+     * Angka estimasi dilarang dipakai sebagai rate payroll efektif. Data ini
+     * hanya demo UI dan wajib diganti melalui import keputusan gubernur yang
+     * sudah diverifikasi dan disetujui.
      *
      * Tidak menyertakan UMK kabupaten/kota. Tambahkan manual jika perlu
      * referensi kota tertentu (mis. Jakarta UMP = UMK).
@@ -107,9 +109,9 @@ class IndonesianMastersSeeder extends Seeder
                 'level'          => $level,
                 'amount'         => $amount,
                 'effective_year' => $year,
-                'reference'      => $level === 'UMP'
-                    ? "SK Gubernur {$province} tahun {$year} (referensi awal — verifikasi)"
-                    : "SK Gubernur {$province} (UMK {$city}) tahun {$year}",
+                'reference'      => "NON_AUTHORITATIVE_DEMO_ONLY — estimasi {$level} {$province}"
+                    . ($city ? " {$city}" : '')
+                    . " {$year}; DILARANG dipakai payroll sebelum diganti SK Gubernur resmi",
                 'created_at'     => $now,
                 'updated_at'     => $now,
             ]);
@@ -119,28 +121,29 @@ class IndonesianMastersSeeder extends Seeder
     /**
      * Hari libur nasional Indonesia tahun 2026.
      * Mengikuti SKB 3 Menteri (Kemenag, Kemenaker, KemenPAN-RB).
-     * Cuti bersama tidak dimasukkan default — tambahkan manual sesuai
-     * kebijakan perusahaan.
+     * Cuti bersama tidak dimasukkan karena harus diklasifikasikan terpisah dan
+     * penerapannya mengikuti kebijakan perusahaan.
      */
     private function seedHolidays2026(): void
     {
         $holidays = [
-            ['2026-01-01', 'Tahun Baru Masehi 2026', true,  false],
+            ['2026-01-01', 'Tahun Baru 2026 Masehi', true, false],
+            ['2026-01-16', 'Isra Mikraj Nabi Muhammad SAW', true, true],
             ['2026-02-17', 'Tahun Baru Imlek 2577 Kongzili', true, true],
             ['2026-03-19', 'Hari Suci Nyepi (Tahun Baru Saka 1948)', true, true],
-            ['2026-03-20', 'Wafat Isa Al Masih', true, true],
             ['2026-03-21', 'Idulfitri 1447 Hijriah (Hari Pertama)', true, true],
             ['2026-03-22', 'Idulfitri 1447 Hijriah (Hari Kedua)', true, true],
-            ['2026-04-03', 'Wafat Yesus Kristus (Jumat Agung)', true, true],
+            ['2026-04-03', 'Wafat Yesus Kristus', true, true],
+            ['2026-04-05', 'Kebangkitan Yesus Kristus (Paskah)', true, true],
             ['2026-05-01', 'Hari Buruh Internasional', true, false],
-            ['2026-05-14', 'Kenaikan Isa Al Masih', true, true],
-            ['2026-05-29', 'Hari Raya Waisak 2570 BE', true, true],
-            ['2026-05-28', 'Iduladha 1447 Hijriah', true, true],
+            ['2026-05-14', 'Kenaikan Yesus Kristus', true, true],
+            ['2026-05-27', 'Iduladha 1447 Hijriah', true, true],
+            ['2026-05-31', 'Hari Raya Waisak 2570 BE', true, true],
             ['2026-06-01', 'Hari Lahir Pancasila', true, false],
-            ['2026-06-17', 'Tahun Baru Islam 1448 Hijriah', true, true],
-            ['2026-08-17', 'Hari Kemerdekaan Republik Indonesia', true, false],
-            ['2026-08-26', 'Maulid Nabi Muhammad SAW', true, true],
-            ['2026-12-25', 'Hari Raya Natal', true, true],
+            ['2026-06-16', '1 Muharam Tahun Baru Islam 1448 Hijriah', true, true],
+            ['2026-08-17', 'Proklamasi Kemerdekaan', true, false],
+            ['2026-08-25', 'Maulid Nabi Muhammad SAW', true, true],
+            ['2026-12-25', 'Kelahiran Yesus Kristus', true, true],
         ];
 
         $now = date('Y-m-d H:i:s');

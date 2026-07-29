@@ -350,7 +350,7 @@ class ImportRegistry
             'sample_row' => [
                 ['ANNUAL',   'Cuti Tahunan',           'ANNUAL',    '12', '',   '1', '0', '12', '1', 'NONE',   '1', '1', '6', '12', 'ANNIVERSARY', 'UU 13/2003 Pasal 79', '1'],
                 ['SICK',     'Cuti Sakit',             'SICK',      '12', '',   '1', '1', '0',  '1', 'NONE',   '0', '0', '0', '0',  'YEAR_END',    'Wajib surat dokter > 1 hari', '1'],
-                ['MATERNITY','Cuti Melahirkan',        'MATERNITY', '90', '90', '1', '1', '0',  '0', 'FEMALE', '0', '0', '0', '0',  'YEAR_END',    'UU 13/2003 Pasal 82', '1'],
+                ['MATERNITY','Cuti Melahirkan',        'MATERNITY', '90', '',   '1', '1', '0',  '1', 'FEMALE', '0', '0', '0', '0',  'YEAR_END',    'UU 4/2024: 3 bulan + tambahan kondisi khusus hingga 3 bulan; jangan hard-limit 90 hari', '1'],
             ],
             'notes_md'   => "Master jenis cuti. Carry-over basis menentukan kapan saldo di-reset (akhir tahun vs. anniversary join). Lihat docs/LEAVE_BALANCE.md.",
         ];

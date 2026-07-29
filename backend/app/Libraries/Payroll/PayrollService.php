@@ -172,6 +172,7 @@ class PayrollService
             $workingDaysPerMonth = $cfg->workingDaysPerMonth((int) $period['company_id']);
             $overtimeHoursPerMonth = $cfg->overtimeHoursPerMonth((int) $period['company_id']);
             $absentDeductionEnabled = $cfg->absentDeductionEnabled((int) $period['company_id']);
+            $workDaysPerWeek = $cfg->workDaysPerWeek((int) $period['company_id']);
 
             // Sprint 17+ — Lookup bonus yang sudah di-link ke period ini
             // (status APPROVED/PAID). Map: employee_id => {amount, breakdown}.
@@ -223,6 +224,7 @@ class PayrollService
                     $workingDaysPerMonth,
                     $overtimeHoursPerMonth,
                     $absentDeductionEnabled,
+                    $workDaysPerWeek,
                     $bonusByEmp[(int) $emp['id']] ?? null,
                     $pkwtByEmp[(int) $emp['id']] ?? null,
                     $adjustmentsByEmp[(int) $emp['id']] ?? [],

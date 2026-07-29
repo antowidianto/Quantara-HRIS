@@ -6,13 +6,13 @@ namespace App\Libraries\Payroll;
  * JkpPayslipIntegration — Sprint C+1 / C7.
  *
  * BPJS JKP (Jaminan Kehilangan Pekerjaan) wiring ke payslip + SiPP export.
- * Per PP 37/2021:
+ * Per PP 6/2025 (efektif 7 Februari 2025):
  *
- *   - Iuran total: 0.46% dari upah, di-bayar penuh oleh pemberi kerja
- *     (employee tidak ada potongan, tapi tetap di-record di payslip
- *     sebagai company contribution untuk audit & SiPP report).
- *   - Pemerintah tanggung 0.22% dari iuran ini → company netto bayar 0.24%.
- *   - Cap upah PP 35/2021: Rp 5.000.000/bulan (sama dengan JP).
+ *   - Iuran total: 0,36% dari upah (employee tidak dipotong).
+ *   - Pemerintah Pusat mendanai 0,22%.
+ *   - Sisanya 0,14% berasal dari rekomposisi iuran JKK, sehingga bukan
+ *     employer cost tambahan di atas tarif JKK yang telah direkomposisi.
+ *   - Plafon upah JKP Rp5.000.000 per bulan.
  *
  * `BpjsCalculator` sudah hitung breakdown ini, tapi `PayrollService`
  * belum mantap masukin ke payslip kolom + breakdown JSON. Library ini
@@ -29,17 +29,20 @@ class JkpPayslipIntegration
     public const WAGE_CAP = 5_000_000.0;
 
     /**
-     * Total kontribusi 0.46% dari upah (≤ cap).
+     * Total iuran program JKP 0,36% dari upah (≤ cap).
      */
-    public const RATE_TOTAL = 0.0046;
+    public const RATE_TOTAL = 0.0036;
 
     /**
-     * Subsidi pemerintah 0.22% — substract dari total untuk netto company.
+     * Pendanaan Pemerintah Pusat 0,22%.
      */
     public const RATE_GOV_SUBSIDY = 0.0022;
 
     /**
-     * Kontribusi netto company yang sebenarnya keluar.
+     * Pendanaan melalui rekomposisi JKK 0,14%.
+     *
+     * Nama konstanta legacy dipertahankan untuk kompatibilitas API. Nilai ini
+     * bukan biaya tambahan perusahaan; sudah merupakan bagian tarif JKK baru.
      */
     public const RATE_COMPANY_NET = self::RATE_TOTAL - self::RATE_GOV_SUBSIDY;
 
@@ -70,7 +73,8 @@ class JkpPayslipIntegration
         $wageBase   = min($monthlyWage, self::WAGE_CAP);
         $total      = round($wageBase * self::RATE_TOTAL, 2);
         $govSubsidy = round($wageBase * self::RATE_GOV_SUBSIDY, 2);
-        // Hitung companyNet dari total - subsidy supaya pembulatan konsisten
+        // Legacy key `company_net` berarti sumber rekomposisi JKK, bukan
+        // tambahan employer cost. Hitung dari selisih agar rounding konsisten.
         $companyNet = round($total - $govSubsidy, 2);
 
         return [
@@ -99,6 +103,8 @@ class JkpPayslipIntegration
     {
         $jkp = $this->compute($monthlyWage);
 
+        // Kolom legacy menyimpan nominal sumber rekomposisi JKK untuk audit.
+        // Caller tidak boleh menambahkannya lagi ke employer total.
         $payslip['bpjs_jkp_company'] = $jkp['company_net'];
 
         // Append ke breakdown JSON. Caller bertanggung jawab serialize
@@ -113,8 +119,11 @@ class JkpPayslipIntegration
             'wage_base'   => $jkp['wage_base'],
             'rate_total'  => self::RATE_TOTAL,
             'gov_subsidy' => $jkp['gov_subsidy'],
-            'company_net' => $jkp['company_net'],
-            'cap_applied' => $monthlyWage > self::WAGE_CAP,
+            'jkk_reallocation' => $jkp['company_net'],
+            'company_additional_cost' => 0.0,
+            'rule'         => 'PP_6_2025',
+            'effective_from' => '2025-02-07',
+            'cap_applied'  => $monthlyWage > self::WAGE_CAP,
         ];
         $payslip['breakdown'] = $existing;
 

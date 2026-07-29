@@ -31,6 +31,7 @@ namespace App\Libraries\Payroll;
  *   - payroll.overtime_hours_per_month
  *   - payroll.overtime_to_leave_hours_per_day
  *   - payroll.absent_deduction_enabled
+ *   - payroll.work_days_per_week
  *   - payroll.high_value_approval_threshold
  */
 class PayrollSettings
@@ -39,6 +40,7 @@ class PayrollSettings
     public const DEFAULT_WORKING_DAYS_PER_MONTH         = 22;
     public const DEFAULT_OVERTIME_HOURS_PER_MONTH       = 173;
     public const DEFAULT_OVERTIME_TO_LEAVE_HOURS_PER_DAY = 8;
+    public const DEFAULT_WORK_DAYS_PER_WEEK               = 5;
 
     /** @var array<int, array<string, mixed>> Cache per-company per-request. */
     private array $cache = [];
@@ -84,6 +86,23 @@ class PayrollSettings
         return (string) $val !== '0' && (string) $val !== 'false';
     }
 
+    /**
+     * Pola kerja efektif untuk tier lembur hari istirahat/libur.
+     * Hanya 5 atau 6 yang sah menurut skema PP 35/2021.
+     */
+    public function workDaysPerWeek(?int $companyId = null): int
+    {
+        $value = (int) $this->get(
+            $companyId,
+            'payroll.work_days_per_week',
+            self::DEFAULT_WORK_DAYS_PER_WEEK,
+        );
+
+        return in_array($value, [5, 6], true)
+            ? $value
+            : self::DEFAULT_WORK_DAYS_PER_WEEK;
+    }
+
     /** Payroll at or above this amount requires two independent approvers. */
     public function highValueApprovalThreshold(?int $companyId = null): float
     {
@@ -104,6 +123,7 @@ class PayrollSettings
             'overtime_hours_per_month'        => $this->overtimeHoursPerMonth($companyId),
             'overtime_to_leave_hours_per_day' => $this->overtimeToLeaveHoursPerDay($companyId),
             'absent_deduction_enabled'        => $this->absentDeductionEnabled($companyId),
+            'work_days_per_week'              => $this->workDaysPerWeek($companyId),
             'high_value_approval_threshold'   => $this->highValueApprovalThreshold($companyId),
         ];
     }

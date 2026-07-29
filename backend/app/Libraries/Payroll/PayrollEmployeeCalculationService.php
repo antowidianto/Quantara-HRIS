@@ -27,6 +27,7 @@ public function calculate(
         int $workingDaysPerMonth = 22,
         int $overtimeHoursPerMonth = 173,
         bool $absentDeductionEnabled = true,
+        int $workDaysPerWeek = 5,
         ?array $bonusInfo = null,
         ?array $pkwtInfo = null,
         array $adjustments = [],
@@ -186,7 +187,7 @@ public function calculate(
                 $monthlyBasicSalary + $fixedAllowance,
                 (float) $ot['hours'],
                 $ot['day_type'],
-                5,
+                $workDaysPerWeek,
                 $overtimeHoursPerMonth,
             );
             $totalOtAmount += $amount;
@@ -344,35 +345,69 @@ public function calculate(
         $naturaTotal  = $agg['natura_total'];
 
         // ─── BPJS ────────────────────────────────────────────────────
-        $bpjs = $bpjsCalc->calculate($companyId, $monthlyBasicSalary, $fixedAllowance);
+        $bpjs = $bpjsCalc->calculate(
+            $companyId,
+            $monthlyBasicSalary,
+            $fixedAllowance,
+            isset($emp['employment_status']) ? (string) $emp['employment_status'] : null,
+        );
         $deductions[] = ['code' => 'BPJS_KES_EMP', 'name' => 'BPJS Kesehatan', 'category' => 'BPJS_KES', 'amount' => $bpjs['kes_employee'], 'is_taxable' => 0];
         $deductions[] = ['code' => 'BPJS_JHT_EMP', 'name' => 'BPJS JHT', 'category' => 'BPJS_TK', 'amount' => $bpjs['jht_employee'], 'is_taxable' => 0];
         $deductions[] = ['code' => 'BPJS_JP_EMP', 'name' => 'BPJS JP', 'category' => 'BPJS_TK', 'amount' => $bpjs['jp_employee'], 'is_taxable' => 0];
 
         // ─── PPh21 ───────────────────────────────────────────────────
         $ptkp = $emp['ptkp_status'] ?: 'TK0';
-        $isDecember = (int) ($period['period_month'] ?? 0) === 12 || (int) ($period['is_december_correction'] ?? 0) === 1;
+        $resignDate = ! empty($emp['resign_date']) ? (string) $emp['resign_date'] : null;
+        $isLastEmploymentPeriod = $resignDate !== null
+            && $resignDate >= (string) $period['start_date']
+            && $resignDate <= (string) $period['end_date'];
+        $isDecember = (int) ($period['period_month'] ?? 0) === 12
+            || (int) ($period['is_december_correction'] ?? 0) === 1
+            || $isLastEmploymentPeriod;
 
         $pph = 0;
         $terRate = 0;
         $terCategory = $pphCalc->categoryFromPtkp($ptkp);
 
         if ($isDecember) {
-            // Sum already-paid TER for this employee in this fiscal year
-            $paidTer = (float) $db->table('payslips ps')
-                ->selectSum('ps.pph21_amount')
+            // Ledger YTD aktual: jangan annualisasi bulan berjalan × 12.
+            // Query hanya periode sebelum periode saat ini dalam tahun pajak
+            // dan tenant yang sama; current period ditambahkan dari hasil
+            // kalkulasi yang sedang dibangun.
+            $priorYtd = $db->table('payslips ps')
+                ->select(
+                    'COALESCE(SUM(ps.gross_earning), 0) AS gross_ytd, '
+                    . 'COALESCE(SUM(ps.pph21_amount), 0) AS tax_ytd, '
+                    . 'COALESCE(SUM(ps.bpjs_jht_employee), 0) AS jht_ytd, '
+                    . 'COALESCE(SUM(ps.bpjs_jp_employee), 0) AS jp_ytd',
+                    false,
+                )
                 ->join('payroll_periods pp', 'pp.id = ps.payroll_period_id')
                 ->where('ps.company_id', $companyId)
                 ->where('pp.company_id', $companyId)
                 ->where('ps.employee_id', $emp['id'])
                 ->where('pp.period_year', $period['period_year'])
-                ->where('pp.period_month <', 12)
+                ->where('pp.id !=', $period['id'])
+                ->where('pp.end_date <', $period['start_date'])
                 ->get()
-                ->getRowArray()['pph21_amount'] ?? 0;
+                ->getRowArray() ?? [];
 
-            $bpjsYearly = ($bpjs['jht_employee'] + $bpjs['jp_employee']) * 12;
-            $grossYearly = $grossTaxable * 12;
-            $dec = $pphCalc->calculateDecemberCorrection($grossYearly, $ptkp, $paidTer, (int) $period['period_year'], $bpjsYearly);
+            $paidTer = (float) ($priorYtd['tax_ytd'] ?? 0);
+            $grossYearly = (float) ($priorYtd['gross_ytd'] ?? 0) + $grossTaxable;
+            $bpjsYearly = (float) ($priorYtd['jht_ytd'] ?? 0)
+                + (float) ($priorYtd['jp_ytd'] ?? 0)
+                + $bpjs['jht_employee']
+                + $bpjs['jp_employee'];
+
+            $dec = $pphCalc->calculateDecemberCorrection(
+                $grossYearly,
+                $ptkp,
+                $paidTer,
+                (int) $period['period_year'],
+                $bpjsYearly,
+            );
+            // Negatif = refund; tetap dimasukkan sebagai deduction negatif
+            // sehingga menambah take-home pay dan terlihat pada payslip.
             $pph = $dec['december_tax'];
         } else {
             $ter = $pphCalc->calculateMonthlyTer($grossTaxable, $ptkp, (int) $period['period_year']);
@@ -380,8 +415,14 @@ public function calculate(
             $terRate = $ter['rate'];
         }
 
-        if ($pph > 0) {
-            $deductions[] = ['code' => 'PPH21', 'name' => 'PPh 21', 'category' => 'PPH21', 'amount' => $pph, 'is_taxable' => 0];
+        if ($pph !== 0.0 && $pph !== 0) {
+            $deductions[] = [
+                'code' => $pph < 0 ? 'PPH21_REFUND' : 'PPH21',
+                'name' => $pph < 0 ? 'Pengembalian Kelebihan PPh 21' : 'PPh 21',
+                'category' => 'PPH21',
+                'amount' => $pph,
+                'is_taxable' => 0,
+            ];
         }
 
         // ─── Loan installments ───────────────────────────────────────
@@ -458,7 +499,25 @@ public function calculate(
             'total_earning'      => $grossEarning,
             'total_deduction'    => $totalDeduction,
             'take_home_pay'      => $takeHome,
-            'breakdown'          => json_encode(['earnings' => $earnings, 'deductions' => $deductions], JSON_UNESCAPED_UNICODE),
+            'breakdown'          => json_encode([
+                'earnings' => $earnings,
+                'deductions' => $deductions,
+                'statutory' => [
+                    'bpjs' => [
+                        'rule' => 'PP_6_2025',
+                        'effective_from' => '2025-02-07',
+                        'jkp_wage_base' => min(
+                            $monthlyBasicSalary + $fixedAllowance,
+                            (float) BpjsCalculator::defaultRates()['jkp_max_salary'],
+                        ),
+                        'jkp_total' => $bpjs['jkp_total'],
+                        'jkp_government' => $bpjs['jkp_government'],
+                        'jkp_jkk_reallocation' => $bpjs['jkp_jkk_reallocation'],
+                        'jkp_company_additional_cost' => $bpjs['jkp_company'],
+                    ],
+                    'overtime_work_days_per_week' => $workDaysPerWeek,
+                ],
+            ], JSON_UNESCAPED_UNICODE),
             'created_at'         => date('Y-m-d H:i:s'),
             'updated_at'         => date('Y-m-d H:i:s'),
         ];

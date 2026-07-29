@@ -14,9 +14,9 @@ use PHPUnit\Framework\TestCase;
  *  - Kesehatan: 1% emp + 4% com, plafon 12 jt
  *  - JHT: 2% emp + 3.7% com, no cap
  *  - JP:  1% emp + 2% com, plafon 10.547.400
- *  - JKK: 0.24% com only (default risiko rendah)
- *  - JKM: 0.3% com only
- *  - JKP: 0.46% com only, plafon 5 jt (Sprint 4)
+ *  - JKK: 0,10% com only (default risiko sangat rendah, PP 6/2025)
+ *  - JKM: 0,3% com only
+ *  - JKP: total 0,36% (0,22% pemerintah + 0,14% rekomposisi JKK)
  *
  * Run: vendor/bin/phpunit --filter BpjsCalculatorTest
  */
@@ -43,10 +43,12 @@ class BpjsCalculatorTest extends TestCase
         $this->assertArrayHasKey('jkp_max_salary', $rates);    // Sprint 4
     }
 
-    public function testJkpRateIsZeroPoint46Percent(): void
+    public function testJkpRatesMatchPp6Of2025(): void
     {
         $rates = BpjsCalculator::defaultRates();
-        $this->assertSame(0.0046, (float) $rates['jkp_company_rate']);
+        $this->assertSame(0.0036, (float) $rates['jkp_company_rate']);
+        $this->assertSame(0.0022, (float) $rates['jkp_government_rate']);
+        $this->assertSame(0.0014, (float) $rates['jkp_jkk_reallocation_rate']);
         $this->assertSame(5000000.0, (float) $rates['jkp_max_salary']);
     }
 
@@ -69,12 +71,15 @@ class BpjsCalculatorTest extends TestCase
         $this->assertEqualsWithDelta(53968,  $r['jp_employee'], 1);
         $this->assertEqualsWithDelta(107935, $r['jp_company'], 1);
 
-        // JKK: 0.24%; JKM: 0.3%
-        $this->assertEqualsWithDelta(12952,  $r['jkk_company'], 1);
-        $this->assertEqualsWithDelta(16190,  $r['jkm_company'], 1);
+        // JKK default risiko sangat rendah: 0,10%; JKM: 0,3%
+        $this->assertEqualsWithDelta(5397,  $r['jkk_company'], 1);
+        $this->assertEqualsWithDelta(16190, $r['jkm_company'], 1);
 
-        // JKP: salary > plafon 5jt → cap di 5jt × 0.46% = 23.000
-        $this->assertEqualsWithDelta(23000,  $r['jkp_company'], 1);
+        // JKP: cap 5 juta × 0,36% = 18.000; bukan employer cost tambahan.
+        $this->assertEqualsWithDelta(18000, $r['jkp_total'], 1);
+        $this->assertEqualsWithDelta(11000, $r['jkp_government'], 1);
+        $this->assertEqualsWithDelta(7000, $r['jkp_jkk_reallocation'], 1);
+        $this->assertSame(0.0, $r['jkp_company']);
     }
 
     // ─── Plafon Kesehatan (12 jt) ───────────────────────────────────
@@ -125,23 +130,24 @@ class BpjsCalculatorTest extends TestCase
 
     public function testJkpBelowPlafond(): void
     {
-        // Salary 3 jt < plafon 5 jt → 3jt × 0.46% = 13.800
+        // Salary 3 jt < plafon 5 jt → 3jt × 0,36% = 10.800
         $r = $this->calc->compute(3_000_000);
-        $this->assertEqualsWithDelta(13_800, $r['jkp_company'], 1);
+        $this->assertEqualsWithDelta(10_800, $r['jkp_total'], 1);
+        $this->assertSame(0.0, $r['jkp_company']);
     }
 
     public function testJkpAtPlafond(): void
     {
-        // Salary 5 jt = plafon → 5jt × 0.46% = 23.000
+        // Salary 5 jt = plafon → 5jt × 0,36% = 18.000
         $r = $this->calc->compute(5_000_000);
-        $this->assertEqualsWithDelta(23_000, $r['jkp_company'], 1);
+        $this->assertEqualsWithDelta(18_000, $r['jkp_total'], 1);
     }
 
     public function testJkpCapsAtFiveMillion(): void
     {
-        // Salary 8 jt > plafon 5 jt → di-cap = 23.000
+        // Salary 8 jt > plafon 5 jt → di-cap = 18.000
         $r = $this->calc->compute(8_000_000);
-        $this->assertEqualsWithDelta(23_000, $r['jkp_company'], 1);
+        $this->assertEqualsWithDelta(18_000, $r['jkp_total'], 1);
     }
 
     /**
@@ -151,13 +157,13 @@ class BpjsCalculatorTest extends TestCase
     {
         // [employmentStatus, expectedJkpAmount]
         return [
-            'PKWTT eligible'         => ['PKWTT',       23_000.0],
-            'PKWT eligible'          => ['PKWT',        23_000.0],
-            'pkwtt lowercase'        => ['pkwtt',       23_000.0],
+            'PKWTT eligible'         => ['PKWTT',       18_000.0],
+            'PKWT eligible'          => ['PKWT',        18_000.0],
+            'pkwtt lowercase'        => ['pkwtt',       18_000.0],
             'MAGANG not eligible'    => ['MAGANG',      0.0],
             'OUTSOURCING not elig.'  => ['OUTSOURCING', 0.0],
             'HARIAN not eligible'    => ['HARIAN',      0.0],
-            'null = include'         => [null,          23_000.0],
+            'null = include'         => [null,          18_000.0],
         ];
     }
 
@@ -165,7 +171,7 @@ class BpjsCalculatorTest extends TestCase
     public function testJkpEligibilityByEmploymentStatus(?string $status, float $expected): void
     {
         $r = $this->calc->compute(5_000_000, [], $status);
-        $this->assertEqualsWithDelta($expected, $r['jkp_company'], 1,
+        $this->assertEqualsWithDelta($expected, $r['jkp_total'], 1,
             "JKP untuk status '{$status}' harus = {$expected}");
     }
 
@@ -173,9 +179,9 @@ class BpjsCalculatorTest extends TestCase
 
     public function testCustomRatesOverride(): void
     {
-        // Perusahaan dengan tingkat risiko tinggi: JKK 1.74%
-        $r = $this->calc->compute(10_000_000, ['jkk_company_rate' => 0.0174]);
-        $this->assertEqualsWithDelta(174_000, $r['jkk_company'], 1);
+        // Tingkat risiko sangat tinggi setelah rekomposisi: JKK 1,60%
+        $r = $this->calc->compute(10_000_000, ['jkk_company_rate' => 0.0160]);
+        $this->assertEqualsWithDelta(160_000, $r['jkk_company'], 1);
     }
 
     public function testPartialOverrideMergesWithDefaults(): void
@@ -195,13 +201,13 @@ class BpjsCalculatorTest extends TestCase
         $this->assertEqualsWithDelta($expectedTotal, $r['employee_total'], 1);
     }
 
-    public function testCompanyTotalIncludesJkp(): void
+    public function testCompanyTotalDoesNotDoubleCountJkp(): void
     {
-        // Sprint 4 — JKP harus included di company_total
         $r = $this->calc->compute(5_000_000, [], 'PKWTT');
         $expected = $r['kes_company'] + $r['jht_company'] + $r['jp_company']
-                  + $r['jkk_company'] + $r['jkm_company'] + $r['jkp_company'];
+                  + $r['jkk_company'] + $r['jkm_company'];
         $this->assertEqualsWithDelta($expected, $r['company_total'], 1);
+        $this->assertSame(0.0, $r['jkp_company']);
     }
 
     public function testCompanyTotalExcludesJkpForMagang(): void

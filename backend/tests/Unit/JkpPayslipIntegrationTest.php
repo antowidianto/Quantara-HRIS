@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
  * Verifikasi pure-function integrasi JKP ke payslip.
  *
  * Skenario:
- *   - Compute breakdown sesuai PP 37/2021 + PP 35/2021 (cap 5 juta)
+ *   - Compute breakdown sesuai PP 6/2025 (cap 5 juta)
  *   - Apply ke payslip row tidak mutate input
  *   - SiPP row format konsisten dengan input context
  */
@@ -31,12 +31,12 @@ final class JkpPayslipIntegrationTest extends TestCase
         $r = $this->jkp->compute(4_000_000);
 
         $this->assertSame(4_000_000.0, $r['wage_base']);
-        // 0.46% × 4 juta = 18.400
-        $this->assertSame(18_400.0, $r['total']);
-        // 0.22% × 4 juta = 8.800
+        // 0,36% × 4 juta = 14.400
+        $this->assertSame(14_400.0, $r['total']);
+        // 0,22% × 4 juta = 8.800
         $this->assertSame(8_800.0, $r['gov_subsidy']);
-        // company net = 18400 - 8800 = 9600
-        $this->assertSame(9_600.0, $r['company_net']);
+        // Sumber rekomposisi JKK 0,14% = 5.600
+        $this->assertSame(5_600.0, $r['company_net']);
         $this->assertSame(0.0, $r['employee']);
     }
 
@@ -45,9 +45,9 @@ final class JkpPayslipIntegrationTest extends TestCase
         // Upah tepat cap 5 juta
         $r = $this->jkp->compute(5_000_000);
         $this->assertSame(5_000_000.0, $r['wage_base']);
-        $this->assertSame(23_000.0, $r['total']);          // 0.46% × 5jt
-        $this->assertSame(11_000.0, $r['gov_subsidy']);    // 0.22% × 5jt
-        $this->assertSame(12_000.0, $r['company_net']);    // 0.24% × 5jt
+        $this->assertSame(18_000.0, $r['total']);          // 0,36% × 5jt
+        $this->assertSame(11_000.0, $r['gov_subsidy']);    // 0,22% × 5jt
+        $this->assertSame(7_000.0, $r['company_net']);     // rekomposisi JKK 0,14%
     }
 
     public function testComputeAboveCapClampsWageBase(): void
@@ -55,9 +55,9 @@ final class JkpPayslipIntegrationTest extends TestCase
         // Upah 12 juta — di atas cap 5 juta, harus pakai wage_base = 5 juta
         $r = $this->jkp->compute(12_000_000);
         $this->assertSame(5_000_000.0, $r['wage_base'], 'wage_base wajib di-clamp ke cap');
-        $this->assertSame(23_000.0, $r['total']);
+        $this->assertSame(18_000.0, $r['total']);
         $this->assertSame(11_000.0, $r['gov_subsidy']);
-        $this->assertSame(12_000.0, $r['company_net']);
+        $this->assertSame(7_000.0, $r['company_net']);
     }
 
     public function testComputeZeroWageReturnsZeroes(): void
@@ -136,9 +136,9 @@ final class JkpPayslipIntegrationTest extends TestCase
         $this->assertSame('0000-1234-5678', $row['bpjs_tk_no']);
         $this->assertSame('Budi Santoso', $row['name']);
         $this->assertSame(4_000_000.0, $row['wage_base']);
-        $this->assertSame(18_400.0, $row['total_iuran']);
+        $this->assertSame(14_400.0, $row['total_iuran']);
         $this->assertSame(8_800.0, $row['gov_subsidy']);
-        $this->assertSame(9_600.0, $row['company_paid']);
+        $this->assertSame(5_600.0, $row['company_paid']);
     }
 
     public function testBuildSippRowToleratesMissingFields(): void
@@ -154,12 +154,12 @@ final class JkpPayslipIntegrationTest extends TestCase
         $this->assertSame(0.0, $row['total_iuran']);
     }
 
-    public function testRateConstantsMatchPP37And35(): void
+    public function testRateConstantsMatchPp6Of2025(): void
     {
         // Sanity check konstanta sesuai regulasi
         $this->assertSame(5_000_000.0, JkpPayslipIntegration::WAGE_CAP);
-        $this->assertEqualsWithDelta(0.0046, JkpPayslipIntegration::RATE_TOTAL, 1e-10);
+        $this->assertEqualsWithDelta(0.0036, JkpPayslipIntegration::RATE_TOTAL, 1e-10);
         $this->assertEqualsWithDelta(0.0022, JkpPayslipIntegration::RATE_GOV_SUBSIDY, 1e-10);
-        $this->assertEqualsWithDelta(0.0024, JkpPayslipIntegration::RATE_COMPANY_NET, 1e-10);
+        $this->assertEqualsWithDelta(0.0014, JkpPayslipIntegration::RATE_COMPANY_NET, 1e-10);
     }
 }

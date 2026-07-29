@@ -758,8 +758,8 @@ class IndonesianStakeholderSeeder extends Seeder
         $leaveTypes = [
             ['code' => 'CT',  'name' => 'Cuti Tahunan',                       'category' => 'ANNUAL',     'default_days' => 12, 'min_tenure_months' => 12, 'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'ALL'],
             ['code' => 'CS',  'name' => 'Cuti Sakit',                         'category' => 'SICK',       'default_days' => 0,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 1, 'gender_restriction' => 'ALL'],
-            ['code' => 'CM',  'name' => 'Cuti Melahirkan (3 bulan)',          'category' => 'MATERNITY',  'default_days' => 90, 'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'F'],
-            ['code' => 'CPM', 'name' => 'Cuti Pendamping Melahirkan',         'category' => 'PATERNITY',  'default_days' => 2,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'M'],
+            ['code' => 'CM',  'name' => 'Cuti Melahirkan (UU KIA)',           'category' => 'MATERNITY',  'default_days' => 90, 'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 1, 'gender_restriction' => 'F'],
+            ['code' => 'CPM', 'name' => 'Cuti Pendamping Melahirkan',         'category' => 'PATERNITY',  'default_days' => 2,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 1, 'gender_restriction' => 'M'],
             ['code' => 'CB',  'name' => 'Cuti Besar (per 6 tahun)',           'category' => 'SPECIAL',    'default_days' => 30, 'min_tenure_months' => 72, 'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'ALL'],
             ['code' => 'CH',  'name' => 'Cuti Haid',                          'category' => 'MENSTRUAL',  'default_days' => 24, 'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'F'],
             ['code' => 'CN',  'name' => 'Cuti Menikah',                       'category' => 'MARRIAGE',   'default_days' => 3,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'ALL'],
@@ -829,8 +829,10 @@ class IndonesianStakeholderSeeder extends Seeder
             'jp_employee_rate'  => 0.01,
             'jp_company_rate'   => 0.02,
             'jp_max_salary'     => 10547400,
-            'jkk_company_rate'  => 0.0024,
+            'jkk_company_rate'  => 0.0010,
             'jkm_company_rate'  => 0.003,
+            'jkp_company_rate'  => 0.0036,
+            'jkp_max_salary'    => 5000000,
             'created_at'        => $this->now,
             'updated_at'        => $this->now,
         ]);

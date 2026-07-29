@@ -294,8 +294,10 @@ class InitialSeeder extends Seeder
             'jp_employee_rate'  => 0.01,
             'jp_company_rate'   => 0.02,
             'jp_max_salary'     => 10547400,
-            'jkk_company_rate'  => 0.0024,
+            'jkk_company_rate'  => 0.0010,
             'jkm_company_rate'  => 0.003,
+            'jkp_company_rate'  => 0.0036,
+            'jkp_max_salary'    => 5000000,
             'created_at'        => $now,
             'updated_at'        => $now,
         ]);
@@ -306,8 +308,8 @@ class InitialSeeder extends Seeder
         $leaveTypes = [
             ['code' => 'CT',  'name' => 'Cuti Tahunan',                       'category' => 'ANNUAL',     'default_days' => 12, 'min_tenure_months' => 12, 'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'ALL', 'description' => '12 hari per tahun setelah masa kerja 12 bulan (UU 13/2003 Pasal 79).'],
             ['code' => 'CS',  'name' => 'Cuti Sakit',                         'category' => 'SICK',       'default_days' => 0,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 1, 'gender_restriction' => 'ALL', 'description' => 'Memerlukan surat dokter. Pembayaran upah mengikuti UU 13/2003 Pasal 93.'],
-            ['code' => 'CM',  'name' => 'Cuti Melahirkan (3 bulan)',          'category' => 'MATERNITY',  'default_days' => 90, 'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'F',   'description' => '1,5 bulan sebelum dan 1,5 bulan sesudah melahirkan (UU 13/2003 Pasal 82). Khusus karyawan perempuan.'],
-            ['code' => 'CPM', 'name' => 'Cuti Pendamping Melahirkan',         'category' => 'PATERNITY',  'default_days' => 2,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'M',   'description' => '2 hari mendampingi istri melahirkan / keguguran (UU 13/2003 Pasal 93). Khusus karyawan laki-laki yang menikah.'],
+            ['code' => 'CM',  'name' => 'Cuti Melahirkan (UU KIA)',           'category' => 'MATERNITY',  'default_days' => 90, 'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 1, 'gender_restriction' => 'F',   'description' => 'UU 4/2024: 3 bulan pertama; tambahan hingga 3 bulan pada kondisi khusus dengan surat dokter. Upah penuh bulan 1-4 dan sedikitnya 75% bulan 5-6.'],
+            ['code' => 'CPM', 'name' => 'Cuti Pendamping Melahirkan',         'category' => 'PATERNITY',  'default_days' => 2,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 1, 'gender_restriction' => 'M',   'description' => 'UU 4/2024: 2 hari dan dapat diberikan tambahan sampai 3 hari berikutnya sesuai kesepakatan.'],
             ['code' => 'CB',  'name' => 'Cuti Besar (per 6 tahun)',           'category' => 'SPECIAL',    'default_days' => 30, 'min_tenure_months' => 72, 'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'ALL', 'description' => 'Cuti panjang setelah masa kerja 6 tahun.'],
             ['code' => 'CH',  'name' => 'Cuti Haid',                          'category' => 'MENSTRUAL',  'default_days' => 24, 'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'F',   'description' => 'Pekerja perempuan yang merasa sakit pada hari pertama dan kedua masa haid (UU 13/2003 Pasal 81).'],
             ['code' => 'CN',  'name' => 'Cuti Menikah',                       'category' => 'MARRIAGE',   'default_days' => 3,  'min_tenure_months' => 0,  'is_paid' => 1, 'requires_doc' => 0, 'gender_restriction' => 'ALL', 'description' => '3 hari saat pernikahan pekerja sendiri (UU 13/2003 Pasal 93).'],

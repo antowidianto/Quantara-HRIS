@@ -16,8 +16,9 @@ use Config\Services;
  *   4. Anonimisasi PII untuk ex-karyawan setelah masa retensi.
  *
  * Catatan retensi:
- *   - Data finansial (payslip, payroll, bukti potong PPh21) WAJIB disimpan
- *     5 tahun (UU KUP Pasal 28 ayat 11) walaupun karyawan minta hapus.
+ *   - Buku, catatan, dan dokumen yang menjadi dasar pembukuan perpajakan
+ *     wajib disimpan 10 tahun di Indonesia (UU KUP Pasal 28 ayat 11),
+ *     termasuk payroll dan bukti potong yang menjadi dokumen pendukung.
  *     Service hanya anonimkan PII (nama→Anonim_<id>, NIK/NPWP→null)
  *     tapi rekam finansial tetap audit-able.
  *   - Audit log tidak boleh dihapus — pakai retensi 1 tahun aktif + arsip.
@@ -338,7 +339,7 @@ class DataPrivacyService
      *
      * Implementasi sengaja konservatif & manual: tidak invoke saat approve
      * supaya HR bisa memilih tanggal cleanup (mis. setelah masa retensi
-     * pajak 5 tahun terlewati).
+     * pajak 10 tahun terlewati dan tidak ada legal hold).
      *
      * @return array<string,int> jumlah row yang dianonimkan per tabel
      */
