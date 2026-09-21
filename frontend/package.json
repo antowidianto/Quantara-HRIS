@@ -22,7 +22,7 @@
   "dependencies": {
     "@heroicons/vue": "^2.1.5",
     "@vueuse/core": "^11.1.0",
-    "axios": "^1.7.7",
+    "axios": "^1.20.0",
     "chart.js": "^4.4.4",
     "dayjs": "^1.11.21",
     "pinia": "^2.2.4",
@@ -33,11 +33,11 @@
     "vue-toastification": "^2.0.0-rc.5"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
-    "@playwright/test": "^1.61.1",
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "@vitejs/plugin-vue": "^5.1.4",
-    "@vue/test-utils": "^2.4.11",
-    "autoprefixer": "^10.5.4",
+    "@vue/test-utils": "^2.5.1",
+    "autoprefixer": "^10.6.1",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-vue": "^9.32.0",
@@ -45,7 +45,7 @@
     "jsdom": "^25.0.1",
     "lint-staged": "^15.2.10",
     "postcss": "^8.4.47",
-    "prettier": "^3.3.3",
+    "prettier": "^3.9.8",
     "tailwindcss": "^3.4.13",
     "vite": "^5.4.8",
     "vitest": "^2.1.9"
