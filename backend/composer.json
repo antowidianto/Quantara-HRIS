@@ -7,7 +7,7 @@
         "php": "^8.1",
         "codeigniter4/framework": "^4.5",
         "firebase/php-jwt": "^7.1",
-        "phpmailer/phpmailer": "^6.9",
+        "phpmailer/phpmailer": "^7.1",
         "ramsey/uuid": "^4.7",
         "robthree/twofactorauth": "^2.1",
         "phpoffice/phpspreadsheet": "^5.9",
