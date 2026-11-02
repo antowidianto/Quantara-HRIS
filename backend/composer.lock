@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "cb3732c2b6e242fa2ab359e69baeecdf",
+    "content-hash": "e4219c965ebe43e50c476ff507f094ba",
     "packages": [
         {
             "name": "brick/math",
@@ -1202,20 +1202,20 @@
         },
         {
             "name": "robthree/twofactorauth",
-            "version": "v2.1.0",
+            "version": "v3.0.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/RobThree/TwoFactorAuth.git",
-                "reference": "ab93dd41ced7818ecda83a37c2741ee38bb72fb7"
+                "reference": "85408c4e775dba7c0802f2d928efd921d530bc5b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/RobThree/TwoFactorAuth/zipball/ab93dd41ced7818ecda83a37c2741ee38bb72fb7",
-                "reference": "ab93dd41ced7818ecda83a37c2741ee38bb72fb7",
+                "url": "https://api.github.com/repos/RobThree/TwoFactorAuth/zipball/85408c4e775dba7c0802f2d928efd921d530bc5b",
+                "reference": "85408c4e775dba7c0802f2d928efd921d530bc5b",
                 "shasum": ""
             },
             "require": {
-                "php": ">=8.1.0"
+                "php": ">=8.2.0"
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.13",
@@ -1279,7 +1279,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2023-11-14T12:50:27+00:00"
+            "time": "2026-01-05T13:17:41+00:00"
         },
         {
             "name": "sabberworm/php-css-parser",
